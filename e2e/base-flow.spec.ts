@@ -15,7 +15,8 @@ test.afterEach(async () => {
   await dappCtx.close()
 })
 
-test('should open Kukai Web', async () => {
+test('opens the configured Kukai Ghostnet URL with this dApp pairing request', async () => {
+  // Stub the external page response; the SDK still generates the URL and pairing request.
   await dappCtx.route('https://ghostnet.kukai.app/**', (route) =>
     route.fulfill({
       contentType: 'text/html',
@@ -31,6 +32,9 @@ test('should open Kukai Web', async () => {
   await expect(dapp.locator('div.info-wrapper')).toBeVisible()
   await expect(dapp.locator('div.qr-wrapper')).toBeVisible()
 
+  const identity = await dapp.evaluate<{ name: string; publicKey: string }>(
+    '(async () => ({ name: client.name, publicKey: await client.beaconId }))()'
+  )
   const popup = dapp.waitForEvent('popup')
   await dapp.getByRole('button', { name: 'Use Browser', exact: true }).click()
   const walletPage = await popup
@@ -38,18 +42,19 @@ test('should open Kukai Web', async () => {
   await expect(walletPage).toHaveTitle('Kukai pairing target')
 
   const walletUrl = new URL(walletPage.url())
+  expect(walletUrl.pathname).toBe('/')
   expect(walletUrl.searchParams.get('type')).toBe('tzip10')
   const pairingCode = walletUrl.searchParams.get('data')
   expect(pairingCode).toBeTruthy()
-  const pairingRequest = await new Serializer().deserialize(pairingCode!)
+  const pairingRequest = await new Serializer().deserialize(pairingCode ?? '')
   expect(pairingRequest).toEqual(
     expect.objectContaining({
-      id: expect.any(String),
-      name: expect.any(String),
-      publicKey: expect.stringMatching(/^[0-9a-f]{64}$/i),
-      relayServer: expect.any(String),
+      id: expect.stringMatching(/\S/),
+      name: identity.name,
+      publicKey: identity.publicKey,
+      relayServer: expect.stringMatching(/\S/),
       type: 'p2p-pairing-request',
-      version: expect.any(String)
+      version: expect.stringMatching(/\S/)
     })
   )
 })
