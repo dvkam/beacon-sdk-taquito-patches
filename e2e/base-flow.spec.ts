@@ -1,5 +1,6 @@
 // e2e/flow.spec.ts
 import { test, expect, BrowserContext } from '@playwright/test'
+import { Serializer } from '@ecadlabs/beacon-core'
 
 let dappCtx: BrowserContext = {} as BrowserContext
 
@@ -15,38 +16,42 @@ test.afterEach(async () => {
 })
 
 test('should open Kukai Web', async () => {
+  await dappCtx.route('https://ghostnet.kukai.app/**', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><title>Kukai pairing target</title>'
+    })
+  )
+
   const dapp = await dappCtx.newPage()
   await dapp.goto('http://localhost:1234/dapp.html')
+  await dapp.getByRole('button', { name: 'Request Permission', exact: true }).click()
+  await expect(dapp.locator('div.alert-wrapper-show')).toBeVisible()
+  await dapp.getByRole('heading', { name: 'Kukai', exact: true }).click()
+  await expect(dapp.locator('div.info-wrapper')).toBeVisible()
+  await expect(dapp.locator('div.qr-wrapper')).toBeVisible()
 
-  // --- trigger the Beacon pairing alert ---
-  await dapp.click('#requestPermission')
-  ;(await dapp.waitForSelector('div.alert-wrapper-show', {
-    state: 'visible',
-    timeout: 30_000
-  })) as unknown as HTMLElement
+  const popup = dapp.waitForEvent('popup')
+  await dapp.getByRole('button', { name: 'Use Browser', exact: true }).click()
+  const walletPage = await popup
+  await expect(walletPage).toHaveURL(/^https:\/\/ghostnet\.kukai\.app\//)
+  await expect(walletPage).toHaveTitle('Kukai pairing target')
 
-  await dapp.click('h3:has-text("Kukai")')
-  ;(await dapp.waitForSelector('div.info-wrapper', {
-    state: 'visible',
-    timeout: 30_000
-  })) as unknown as HTMLElement
-  ;(await dapp.waitForSelector('div.qr-wrapper', {
-    state: 'visible',
-    timeout: 30_000
-  })) as unknown as HTMLElement
-
-  await dapp.click('button:has-text("Use Browser")')
-
-  const [walletPage] = await Promise.all([
-    dapp.waitForEvent('popup'), // wait for window.open()
-    dapp.click('button:has-text("Use Browser")')
-  ])
-
-  await walletPage.waitForLoadState('domcontentloaded')
-  ;(await walletPage.waitForSelector('div.agreement-body', {
-    state: 'visible',
-    timeout: 30_000
-  })) as unknown as HTMLElement
+  const walletUrl = new URL(walletPage.url())
+  expect(walletUrl.searchParams.get('type')).toBe('tzip10')
+  const pairingCode = walletUrl.searchParams.get('data')
+  expect(pairingCode).toBeTruthy()
+  const pairingRequest = await new Serializer().deserialize(pairingCode!)
+  expect(pairingRequest).toEqual(
+    expect.objectContaining({
+      id: expect.any(String),
+      name: expect.any(String),
+      publicKey: expect.stringMatching(/^[0-9a-f]{64}$/i),
+      relayServer: expect.any(String),
+      type: 'p2p-pairing-request',
+      version: expect.any(String)
+    })
+  )
 })
 
 test('should display AirGap QR code and copy pairing code to clipboard', async () => {
@@ -178,9 +183,10 @@ test('should show "No active account" error alert', async () => {
   // page can have other visible divs containing "No active account"
   // (e.g. legacy unhandled-rejection logger output) that vary by setup;
   // we only care that the SDK alert renders the message.
-  await expect(
-    dapp.locator('div.alert-wrapper-show div.info-description')
-  ).toContainText('No active account', { timeout: 30_000 })
+  await expect(dapp.locator('div.alert-wrapper-show div.info-description')).toContainText(
+    'No active account',
+    { timeout: 30_000 }
+  )
 
   await dapp.click('button:has-text("Close")')
 
