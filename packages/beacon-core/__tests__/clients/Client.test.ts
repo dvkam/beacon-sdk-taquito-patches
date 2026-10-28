@@ -53,6 +53,10 @@ class TestClient extends Client {
   public register(transport: TestTransport): Promise<void> {
     return this.addListener(transport)
   }
+
+  public clear(transport: TestTransport): Promise<void> {
+    return this.cleanup([transport])
+  }
 }
 
 describe('Client transport subscription', () => {
@@ -106,5 +110,82 @@ describe('Client transport subscription', () => {
     expect(removal).not.toHaveBeenCalled()
     expect(handler).toHaveBeenCalledTimes(1)
     expect(handler).toHaveBeenCalledWith(message, context)
+  })
+  it('delivers once after concurrent registrations and removes the subscription on cleanup', async () => {
+    const storage = new LocalStorage('client-concurrent-registration-test')
+    const transport = new TestTransport(storage)
+    const handler = jest.fn().mockResolvedValue(undefined)
+    const client = new TestClient({ name: 'test', storage }, handler)
+    jest.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
+
+    await Promise.all([client.register(transport), client.register(transport)])
+    await transport.deliver('serialized-message', context)
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    await client.clear(transport)
+    await transport.deliver('serialized-message', context)
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('finishes queued registration before cleanup without leaving a late subscription', async () => {
+    const storage = new LocalStorage('client-pending-registration-test')
+    const transport = new TestTransport(storage)
+    const handler = jest.fn().mockResolvedValue(undefined)
+    const client = new TestClient({ name: 'test', storage }, handler)
+    jest.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
+    let finishRegistration!: () => void
+    let registrationStarted!: () => void
+    const registrationGate = new Promise<void>((resolve) => {
+      finishRegistration = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      registrationStarted = resolve
+    })
+    const originalAddListener = transport.addListener.bind(transport)
+    const registration = jest
+      .spyOn(transport, 'addListener')
+      .mockImplementationOnce(async (listener) => {
+        registrationStarted()
+        await registrationGate
+        await originalAddListener(listener)
+      })
+
+    const first = client.register(transport)
+    const second = client.register(transport)
+    await started
+    const cleanup = client.clear(transport)
+    try {
+      expect(registration).toHaveBeenCalledTimes(1)
+      await expect(
+        Promise.race([cleanup.then(() => 'cleaned'), Promise.resolve('pending')])
+      ).resolves.toBe('pending')
+    } finally {
+      finishRegistration()
+      await Promise.allSettled([first, second, cleanup])
+    }
+
+    await transport.deliver('serialized-message', context)
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('allows queued registration to succeed after an earlier registration rejects', async () => {
+    const storage = new LocalStorage('client-queued-retry-test')
+    const transport = new TestTransport(storage)
+    const handler = jest.fn().mockResolvedValue(undefined)
+    const client = new TestClient({ name: 'test', storage }, handler)
+    const failure = new Error('registration failed')
+    jest.spyOn(transport, 'addListener').mockRejectedValueOnce(failure)
+    jest.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
+
+    const first = client.register(transport)
+    const next = client.register(transport)
+    await expect(first).rejects.toBe(failure)
+    await expect(next).resolves.toBeUndefined()
+    await transport.deliver('serialized-message', context)
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    await client.clear(transport)
+    await transport.deliver('serialized-message', context)
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 })

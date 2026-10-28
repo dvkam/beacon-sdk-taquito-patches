@@ -62,6 +62,8 @@ export abstract class Client extends BeaconClient {
     (message: any, connectionInfo: ConnectionContext) => Promise<void>
   > = new Map()
 
+  private readonly transportListenerRegistrations: Map<TransportType, Promise<void>> = new Map()
+
   protected _transport: ExposedPromise<Transport<any>> = new ExposedPromise()
   protected get transport(): Promise<Transport<any>> {
     return this._transport.promise
@@ -97,6 +99,8 @@ export abstract class Client extends BeaconClient {
     }
   }
   protected async cleanup(transports?: TransportCleanupTarget[]) {
+    await Promise.allSettled(this.transportListenerRegistrations.values())
+
     if (!this.transportListeners.size) {
       return
     }
@@ -255,21 +259,37 @@ export abstract class Client extends BeaconClient {
     // However, while running a multiple tabs setup, if one of the dApps disconnects
     // the others wont't recover until after a page refresh
 
-    if (this.transportListeners.has(transport.type)) {
-      await transport.removeListener(this.transportListeners.get(transport.type)!)
-    }
+    const previous = this.transportListenerRegistrations.get(transport.type) ?? Promise.resolve()
+    const registration = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const existingListener = this.transportListeners.get(transport.type)
+        if (existingListener) {
+          await transport.removeListener(existingListener)
+          this.transportListeners.delete(transport.type)
+        }
 
-    const subscription = async (message: any, connectionInfo: ConnectionContext) => {
-      if (typeof message === 'string') {
-        const deserializedMessage = (await new Serializer().deserialize(
-          message
-        )) as BeaconRequestMessage
-        await this.handleResponse(deserializedMessage, connectionInfo)
+        const subscription = async (message: unknown, connectionInfo: ConnectionContext) => {
+          if (typeof message === 'string') {
+            const deserializedMessage = (await new Serializer().deserialize(
+              message
+            )) as BeaconRequestMessage
+            await this.handleResponse(deserializedMessage, connectionInfo)
+          }
+        }
+
+        await transport.addListener(subscription)
+        this.transportListeners.set(transport.type, subscription)
+      })
+    this.transportListenerRegistrations.set(transport.type, registration)
+
+    try {
+      await registration
+    } finally {
+      if (this.transportListenerRegistrations.get(transport.type) === registration) {
+        this.transportListenerRegistrations.delete(transport.type)
       }
     }
-
-    await transport.addListener(subscription)
-    this.transportListeners.set(transport.type, subscription)
   }
 
   protected async sendDisconnectToPeer(peer: PeerInfo, transport?: Transport<any>): Promise<void> {
