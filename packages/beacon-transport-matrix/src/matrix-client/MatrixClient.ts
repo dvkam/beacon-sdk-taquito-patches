@@ -77,45 +77,31 @@ export class MatrixClient {
    * Return all the rooms we are currently part of
    */
   public get joinedRooms(): Promise<MatrixRoom[]> {
-    return new Promise(async (resolve) => {
-      await this.isConnected()
-
-      resolve(
-        Object.values(this.store.get('rooms')).filter(
-          (room) => room.status === MatrixRoomStatus.JOINED
-        )
+    return this.isConnected().then(() =>
+      Object.values(this.store.get('rooms')).filter(
+        (room) => room.status === MatrixRoomStatus.JOINED
       )
-    })
+    )
   }
 
   /**
    * Return all the rooms to which we have received invitations
    */
   public get invitedRooms(): Promise<MatrixRoom[]> {
-    return new Promise(async (resolve) => {
-      await this.isConnected()
-
-      resolve(
-        Object.values(this.store.get('rooms')).filter(
-          (room) => room.status === MatrixRoomStatus.INVITED
-        )
+    return this.isConnected().then(() =>
+      Object.values(this.store.get('rooms')).filter(
+        (room) => room.status === MatrixRoomStatus.INVITED
       )
-    })
+    )
   }
 
   /**
    * Return all the rooms that we left
    */
   public get leftRooms(): Promise<MatrixRoom[]> {
-    return new Promise(async (resolve) => {
-      await this.isConnected()
-
-      resolve(
-        Object.values(this.store.get('rooms')).filter(
-          (room) => room.status === MatrixRoomStatus.LEFT
-        )
-      )
-    })
+    return this.isConnected().then(() =>
+      Object.values(this.store.get('rooms')).filter((room) => room.status === MatrixRoomStatus.LEFT)
+    )
   }
 
   /**

@@ -36,6 +36,7 @@ jest.mock('@ecadlabs/beacon-utils', () => {
   return {
     ...actual,
     ExposedPromise,
+    sign: jest.fn(() => new Uint8Array(64)),
     generateGUID: jest.fn(),
     getHexHash: jest.fn(),
     recipientString: jest.fn(),
@@ -66,7 +67,9 @@ import {
   getKeypairFromSeed
 } from '@ecadlabs/beacon-utils'
 import { MatrixClient } from '../../src/matrix-client/MatrixClient'
-import { P2PPairingRequest, StorageKey } from '@ecadlabs/beacon-types'
+import { P2PPairingRequest, Regions, StorageKey } from '@ecadlabs/beacon-types'
+import { MatrixClientEventType } from '../../src/matrix-client/models/MatrixClientEvent'
+import { MatrixMessageType } from '../../src/matrix-client/models/MatrixMessage'
 import { P2PCommunicationClient } from '../../src/communication-client/P2PCommunicationClient'
 
 describe('P2PCommunicationClient', () => {
@@ -147,6 +150,109 @@ describe('P2PCommunicationClient', () => {
       .spyOn(client as any, 'getRelayServer')
       .mockResolvedValue({ server: 'relay.server', timestamp: 1234 })
     ;(client as any).client.resolve(fakeMatrixClient)
+  })
+
+  describe('start login retries', () => {
+    beforeEach(() => {
+      mockStorage.delete.mockResolvedValue(undefined)
+      ;(client as any).selectedRegion = Regions.EUROPE_WEST
+    })
+
+    it('keeps the original start pending until the retried login completes', async () => {
+      const retry = createDeferred<void>()
+      fakeMatrixClient.start
+        .mockRejectedValueOnce(new Error('first login failed'))
+        .mockReturnValueOnce(retry.promise)
+
+      const start = client.start().then(() => 'resolved')
+      await waitFor(() => fakeMatrixClient.start.mock.calls.length === 2)
+
+      await expect(Promise.race([start, Promise.resolve('pending')])).resolves.toBe('pending')
+      retry.resolve(undefined)
+      await expect(start).resolves.toBe('resolved')
+      expect(fakeMatrixClient.start).toHaveBeenCalledTimes(2)
+    })
+
+    it('propagates exhausted retry failure to the original start caller', async () => {
+      const retry = createDeferred<void>()
+      ;(client as any).loginCounter = (client as any).ENABLED_RELAY_SERVERS[
+        Regions.EUROPE_WEST
+      ].length
+      fakeMatrixClient.start
+        .mockRejectedValueOnce(new Error('first login failed'))
+        .mockReturnValueOnce(retry.promise)
+
+      const start = client.start()
+      const outcome = expect(start).rejects.toThrow('Could not connect to any beacon nodes')
+      await waitFor(() => fakeMatrixClient.start.mock.calls.length === 2)
+      retry.reject(new Error('retry failed'))
+
+      await outcome
+      expect(fakeMatrixClient.start).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('encrypted message listener lifetime', () => {
+    beforeEach(() => {
+      mockStorage.delete.mockResolvedValue(undefined)
+      fakeMatrixClient.stop.mockResolvedValue(undefined)
+      jest.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
+    })
+
+    it.each(['reset', 'stop'] as const)(
+      'subscribes a known peer on the new Matrix client after %s',
+      async (operation) => {
+        await client.listenForEncryptedMessage('sender-pub', jest.fn())
+        const oldListener = (client as any).activeListeners.get('sender-pub')
+        expect(fakeMatrixClient.subscribe).toHaveBeenCalledWith(
+          MatrixClientEventType.MESSAGE,
+          oldListener
+        )
+
+        await client[operation]()
+        const replacementMatrixClient = {
+          ...fakeMatrixClient,
+          subscribe: jest.fn(),
+          start: jest.fn().mockResolvedValue(undefined)
+        }
+        ;(MatrixClient.create as jest.Mock).mockReturnValue(replacementMatrixClient)
+        await client.start()
+        await client.listenForEncryptedMessage('sender-pub', jest.fn())
+
+        const newListener = (client as any).activeListeners.get('sender-pub')
+        expect(replacementMatrixClient.subscribe).toHaveBeenCalledWith(
+          MatrixClientEventType.MESSAGE,
+          newListener
+        )
+        expect(newListener).not.toBe(oldListener)
+      }
+    )
+
+    it('propagates callback rejection after successful message decryption', async () => {
+      jest.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      const failure = new Error('message handler failed')
+      const handler = jest.fn().mockRejectedValue(failure)
+      await client.listenForEncryptedMessage('sender-pub', handler)
+      const listener = (client as any).activeListeners.get('sender-pub')
+
+      await expect(
+        listener({
+          type: MatrixClientEventType.MESSAGE,
+          content: {
+            roomId: '!room:id',
+            message: {
+              type: MatrixMessageType.TEXT,
+              sender: '@sender:relay.server',
+              content: 'ab'.repeat(24),
+              timestamp: Date.now()
+            }
+          }
+        })
+      ).rejects.toBe(failure)
+      expect(handler).toHaveBeenCalledWith('decrypted-payload')
+    })
   })
 
   describe('getPairingRequestInfo', () => {
@@ -465,19 +571,27 @@ describe('P2PCommunicationClient', () => {
       mockStorage.delete.mockResolvedValue(undefined)
 
       let callCount = 0
-      let resolveSecond!: (value: { region: string; known_servers: string[]; timestamp: number }) => void
+      let resolveSecond!: (value: {
+        region: string
+        known_servers: string[]
+        timestamp: number
+      }) => void
       let rejectFirst!: (reason?: unknown) => void
 
-      const firstRefresh = new Promise<{ region: string; known_servers: string[]; timestamp: number }>(
-        (_, reject) => {
-          rejectFirst = reject
-        }
-      )
-      const secondRefresh = new Promise<{ region: string; known_servers: string[]; timestamp: number }>(
-        (resolve) => {
-          resolveSecond = resolve
-        }
-      )
+      const firstRefresh = new Promise<{
+        region: string
+        known_servers: string[]
+        timestamp: number
+      }>((_, reject) => {
+        rejectFirst = reject
+      })
+      const secondRefresh = new Promise<{
+        region: string
+        known_servers: string[]
+        timestamp: number
+      }>((resolve) => {
+        resolveSecond = resolve
+      })
 
       jest.spyOn(freshClient, 'getBeaconInfo').mockImplementation(async () => {
         callCount += 1

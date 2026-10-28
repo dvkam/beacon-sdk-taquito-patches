@@ -351,8 +351,10 @@ export class P2PCommunicationClient extends CommunicationClient {
       if (retry <= 10 && (error as any).errcode === 'M_FORBIDDEN') {
         // If we join the room too fast after receiving the invite, the server can accidentally reject our join. This seems to be a problem only when using a federated multi-node setup. Usually waiting for a couple milliseconds solves the issue, but to handle lag, we will keep retrying for 2 seconds.
         logger.log(`Retrying to join...`, error)
-        setTimeout(async () => {
-          await this.tryJoinRooms(roomId, retry + 1)
+        setTimeout(() => {
+          this.tryJoinRooms(roomId, retry + 1).catch((retryError) => {
+            logger.error('tryJoinRooms', retryError)
+          })
         }, 200)
       } else {
         logger.log(`Failed to join after ${retry} tries.`, error)
@@ -441,9 +443,8 @@ export class P2PCommunicationClient extends CommunicationClient {
       }
       if (this.loginCounter <= (this.ENABLED_RELAY_SERVERS[this.selectedRegion] ?? []).length) {
         this.loginCounter++
-        this.start()
 
-        return
+        return this.start()
       } else {
         logger.error(
           'start',
@@ -477,13 +478,14 @@ export class P2PCommunicationClient extends CommunicationClient {
     // Instead of resetting everything, maybe we should make sure a new instance is created?
     this.relayServer = undefined
     this.client = new ExposedPromise()
+    this.activeListeners.clear()
     this.initialEvent = undefined
     this.initialListener = undefined
   }
 
   public async listenForEncryptedMessage(
     senderPublicKey: string,
-    messageCallback: (message: string) => void
+    messageCallback: (message: string) => void | Promise<void>
   ): Promise<void> {
     if (this.activeListeners.has(senderPublicKey)) {
       return
@@ -511,28 +513,20 @@ export class P2PCommunicationClient extends CommunicationClient {
           /* */
         }
         if (payload && payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
+          let decryptedMessage: string
           try {
-            const decryptedMessage = await decryptCryptoboxPayload(payload, sharedKey.receive)
-
-            logger.log(
-              'listenForEncryptedMessage',
-              `received a message from ${senderPublicKey}`,
-              decryptedMessage
-            )
-
-            // logger.log(
-            //   'listenForEncryptedMessage',
-            //   'encrypted message received',
-            //   decryptedMessage,
-            //   await new Serializer().deserialize(decryptedMessage)
-            // )
-            // console.log('calculated sender ID', await getSenderId(senderPublicKey))
-            // TODO: Add check for correct decryption key / sender ID
-
-            messageCallback(decryptedMessage)
-          } catch (decryptionError) {
-            /* NO-OP. We try to decode every message, but some might not be addressed to us. */
+            decryptedMessage = await decryptCryptoboxPayload(payload, sharedKey.receive)
+          } catch {
+            // Some messages are encrypted for other recipients.
+            return
           }
+
+          logger.log(
+            'listenForEncryptedMessage',
+            `received a message from ${senderPublicKey}`,
+            decryptedMessage
+          )
+          await messageCallback(decryptedMessage)
         }
       }
     }

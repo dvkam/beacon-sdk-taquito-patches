@@ -290,7 +290,7 @@ export class WalletClient extends Client {
           const deserializedMessage = (await new Serializer().deserialize(
             message
           )) as BeaconRequestMessage
-          this.handleResponse(deserializedMessage, connectionInfo)
+          await this.handleResponse(deserializedMessage, connectionInfo)
         }
       })
       .catch((error) => logger.log('_connect', error))

@@ -9,10 +9,12 @@ import {
   NetworkType,
   TransportType
 } from '@ecadlabs/beacon-types'
-import { Transport, PeerManager } from '@ecadlabs/beacon-core'
+import { Transport, PeerManager, Logger } from '@ecadlabs/beacon-core'
 import { SignClientTypes } from '@walletconnect/types'
 import { ExposedPromise, KeyPair } from '@ecadlabs/beacon-utils'
 import { WalletConnectCommunicationClient } from './communication-client/WalletConnectCommunicationClient'
+
+const logger = new Logger('WalletConnectTransport')
 
 /**
  * @internalapi
@@ -161,7 +163,7 @@ export class WalletConnectTransport<
         }
 
         this.notifyListeners(message, connectionContext).catch((error) => {
-          throw error
+          logger.error('listen', error)
         })
       })
       .catch((error) => {

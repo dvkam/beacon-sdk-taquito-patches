@@ -1,4 +1,10 @@
-import { windowRef, Serializer, getSenderId, MessageBasedClient } from '@ecadlabs/beacon-core'
+import {
+  windowRef,
+  Serializer,
+  getSenderId,
+  MessageBasedClient,
+  Logger
+} from '@ecadlabs/beacon-core'
 
 import { openCryptobox, secretbox_NONCEBYTES, secretbox_MACBYTES } from '@ecadlabs/beacon-utils'
 import {
@@ -12,6 +18,8 @@ import {
   PostMessagePairingRequest
 } from '@ecadlabs/beacon-types'
 
+const logger = new Logger('PostMessageClient')
+
 /**
  * @internalapi
  *
@@ -20,16 +28,16 @@ import {
 export class PostMessageClient extends MessageBasedClient {
   protected readonly activeListeners: Map<
     string,
-    (message: EncryptedExtensionMessage, context: ConnectionContext) => void
+    (message: EncryptedExtensionMessage, context: ConnectionContext) => Promise<void>
   > = new Map()
 
   public async init(): Promise<void> {
-    this.subscribeToMessages().catch(console.error)
+    await this.subscribeToMessages()
   }
 
   public async listenForEncryptedMessage(
     senderPublicKey: string,
-    messageCallback: (message: string, context: ConnectionContext) => void
+    messageCallback: (message: string, context: ConnectionContext) => void | Promise<void>
   ): Promise<void> {
     if (this.activeListeners.has(senderPublicKey)) {
       return
@@ -39,17 +47,15 @@ export class PostMessageClient extends MessageBasedClient {
       message: EncryptedExtensionMessage,
       context: ConnectionContext
     ): Promise<void> => {
+      let decryptedMessage: string
       try {
-        const decryptedMessage = await this.decryptMessage(
-          senderPublicKey,
-          message.encryptedPayload
-        )
-        // console.log('calculated sender ID', await getSenderId(senderPublicKey))
-        // TODO: Add check for correct decryption key / sender ID
-        messageCallback(decryptedMessage, context)
-      } catch (decryptionError) {
-        /* NO-OP. We try to decode every message, but some might not be addressed to us. */
+        decryptedMessage = await this.decryptMessage(senderPublicKey, message.encryptedPayload)
+      } catch {
+        // Some messages are encrypted for other recipients.
+        return
       }
+
+      await messageCallback(decryptedMessage, context)
     }
 
     this.activeListeners.set(senderPublicKey, callbackFunction)
@@ -154,7 +160,7 @@ export class PostMessageClient extends MessageBasedClient {
             listener(data.message, {
               origin: Origin.EXTENSION,
               id: data.sender.id || ''
-            })
+            }).catch((error) => logger.error('subscribeToMessages', error))
           })
         }
       }

@@ -63,7 +63,10 @@ export abstract class Transport<
   /**
    * The listeners that will be notified when new messages are coming in
    */
-  private listeners: ((message: unknown, connectionInfo: ConnectionContext) => void)[] = []
+  private listeners: ((
+    message: unknown,
+    connectionInfo: ConnectionContext
+  ) => void | Promise<void>)[] = []
 
   /**
    * Return the status of the connection
@@ -134,7 +137,7 @@ export abstract class Transport<
    * @param listener The listener that will be registered
    */
   public async addListener(
-    listener: (message: unknown, connectionInfo: ConnectionContext) => void
+    listener: (message: unknown, connectionInfo: ConnectionContext) => void | Promise<void>
   ): Promise<void> {
     logger.debug('addListener')
 
@@ -200,11 +203,7 @@ export abstract class Transport<
       logger.log('notifyListeners', `Notifying ${this.listeners.length} listeners`, this)
     }
 
-    this.listeners.forEach((listener) => {
-      listener(message, connectionInfo)
-    })
-
-    return
+    await Promise.all(this.listeners.map(async (listener) => listener(message, connectionInfo)))
   }
 
   abstract listen(publicKey: string): Promise<void>

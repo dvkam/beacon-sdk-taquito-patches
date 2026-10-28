@@ -16,12 +16,9 @@ import {
 import { BeaconClient } from '../beacon-client/BeaconClient'
 import { AccountManager } from '../../managers/AccountManager'
 import { getSenderId } from '../../utils/get-sender-id'
-import { Logger } from '../../utils/Logger'
 import { Transport } from '../../transports/Transport'
 import { Serializer } from '../../Serializer'
 import { ClientOptions } from './ClientOptions'
-
-const logger = new Logger('Client')
 
 interface TransportCleanupTarget {
   readonly type: TransportType
@@ -42,7 +39,7 @@ export abstract class Client extends BeaconClient {
   protected handleResponse: (
     _event: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>,
     connectionInfo: ConnectionContext
-  ) => void
+  ) => void | Promise<void>
 
   /**
    * How many requests can be sent after another
@@ -267,13 +264,12 @@ export abstract class Client extends BeaconClient {
         const deserializedMessage = (await new Serializer().deserialize(
           message
         )) as BeaconRequestMessage
-        this.handleResponse(deserializedMessage, connectionInfo)
+        await this.handleResponse(deserializedMessage, connectionInfo)
       }
     }
 
+    await transport.addListener(subscription)
     this.transportListeners.set(transport.type, subscription)
-
-    transport.addListener(subscription).catch((error) => logger.error('addListener', error))
   }
 
   protected async sendDisconnectToPeer(peer: PeerInfo, transport?: Transport<any>): Promise<void> {

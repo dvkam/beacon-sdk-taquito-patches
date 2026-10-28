@@ -1,6 +1,6 @@
 // __tests__/client/WalletClient.test.ts
 
-import { Client, LocalStorage } from '@ecadlabs/beacon-core'
+import { Client, LocalStorage, Serializer } from '@ecadlabs/beacon-core'
 import { BeaconMessageType, StorageKey, TransportStatus } from '@ecadlabs/beacon-types'
 import { WalletClient } from '../../src/client/WalletClient'
 import { WalletP2PTransport } from '../../src/transports/WalletP2PTransport'
@@ -23,7 +23,7 @@ const jsonResponse = <T>(data: T): Response =>
     status: 200,
     statusText: 'OK',
     json: async () => data
-  } as unknown as Response)
+  }) as unknown as Response
 
 // Stub out all of beacon-utils, including generateGUID
 jest.mock('@ecadlabs/beacon-utils', () => ({
@@ -486,5 +486,25 @@ describe('WalletClient', () => {
 
       expect(disconnectListener).not.toHaveBeenCalled()
     })
+  })
+  it('propagates response handling failures through its transport subscription', async () => {
+    const transport = {
+      connectionStatus: TransportStatus.NOT_CONNECTED,
+      connect: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+    jest.spyOn(client as any, 'transport', 'get').mockResolvedValue(transport)
+    const failure = new Error('response handler failed')
+    ;(client as any).handleResponse = jest.fn().mockRejectedValue(failure)
+    const deserialize = jest
+      .spyOn(Serializer.prototype, 'deserialize')
+      .mockResolvedValue({ id: 'request' } as any)
+    try {
+      await client._connect()
+      const receive = transport.addListener.mock.calls[0][0]
+      await expect(receive('serialized', { origin: 'p2p', id: 'peer' })).rejects.toBe(failure)
+    } finally {
+      deserialize.mockRestore()
+    }
   })
 })
