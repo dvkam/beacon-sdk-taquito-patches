@@ -1,25 +1,35 @@
 type Callback = (message: unknown) => void
 
+interface WindowRef {
+  postMessage(message: unknown, target?: string): void
+  addEventListener(name: string, eventCallback: Callback): void
+  removeEventListener(name: string, eventCallback: Callback): void
+  location: { origin: string }
+  beaconCreatedClientInstance?: boolean
+}
+
 const cbs: Callback[] = [(_: unknown): void => undefined]
 
 /**
  * A mock for postmessage if run in node.js environment
  */
-let windowRef = {
-  postMessage: (message: string | Record<string, unknown>, _target?: string): void => {
+let windowRef: WindowRef = {
+  postMessage: (message: unknown): void => {
     console.log('GOT MOCK POST MESSAGE', message)
-    cbs.forEach((callbackElement: Callback) => {
-      callbackElement({ data: message })
+    cbs.slice().forEach((callbackElement: Callback) => {
+      if (cbs.includes(callbackElement)) {
+        callbackElement({ data: message })
+      }
     })
   },
   addEventListener: (_name: string, eventCallback: Callback): void => {
     cbs.push(eventCallback)
   },
   removeEventListener: (_name: string, eventCallback: Callback): void => {
-    cbs.splice(
-      cbs.indexOf((element) => element === eventCallback),
-      1
-    )
+    const index = cbs.indexOf(eventCallback)
+    if (index !== -1) {
+      cbs.splice(index, 1)
+    }
   },
   location: {
     origin: '*'
@@ -28,8 +38,7 @@ let windowRef = {
 
 try {
   if (typeof window !== 'undefined') {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    windowRef = window as any
+    windowRef = window
   }
 } catch (windowError) {
   console.log(`not defined: ${windowError}`)

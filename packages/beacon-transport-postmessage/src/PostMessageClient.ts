@@ -76,8 +76,7 @@ export class PostMessageClient extends MessageBasedClient {
       targetId
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    windowRef.postMessage(msg as any, windowRef.location.origin)
+    windowRef.postMessage(msg, windowRef.location.origin)
   }
 
   public async listenForChannelOpening(
@@ -131,8 +130,7 @@ export class PostMessageClient extends MessageBasedClient {
       payload: await new Serializer().serialize(await this.getPairingRequestInfo()),
       targetId: id
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    windowRef.postMessage(message as any, windowRef.location.origin)
+    windowRef.postMessage(message, windowRef.location.origin)
   }
 
   public async isChannelOpenMessage(message: any): Promise<boolean> {
