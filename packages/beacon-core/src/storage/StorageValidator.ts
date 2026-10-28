@@ -3,57 +3,22 @@ import { Storage, StorageKey } from '@ecadlabs/beacon-types'
 export class StorageValidator {
   constructor(private readonly storage: Storage) {}
 
-  private validateNumber(param: any) {
-    return typeof param === 'number' && !isNaN(param)
-  }
-
-  private validateText(param: any) {
-    return typeof param === 'string'
-  }
-
-  private validateBoolean(param: any) {
-    return typeof param === 'boolean'
-  }
-
-  private validateArray(param: any) {
-    return Array.isArray(param)
-  }
-  private objHasProperty(obj: any, path: string) {
-    if (!obj) {
-      return false
-    } // Return false if the object is null or undefined
-
-    const properties = path.split('.') // Split the path into individual properties
-
-    let current = obj
-    for (const property of properties) {
-      // If the property doesn't exist, return false
-      if (!current.hasOwnProperty(property)) {
-        return false
-      }
-      // Move to the next level in the path
-      current = current[property]
-    }
-
-    return true
-  }
-
-  private innerValidate(value: any, type: 'num' | 'str' | 'bol' | 'obj' | 'arr', prop?: string) {
+  private innerValidate(value: unknown, type: 'num' | 'str' | 'bol' | 'wallet' | 'arr') {
     if (!value) {
       return true
     }
 
     switch (type) {
       case 'num':
-        return this.validateNumber(value)
+        return typeof value === 'number' && !isNaN(value)
       case 'str':
-        return this.validateText(value)
+        return typeof value === 'string'
       case 'bol':
-        return this.validateBoolean(value)
-      case 'obj':
-        return this.objHasProperty(value, prop!)
+        return typeof value === 'boolean'
+      case 'wallet':
+        return Object.prototype.hasOwnProperty.call(value, 'key')
       case 'arr':
-        return this.validateArray(value)
+        return Array.isArray(value)
       default:
         return false
     }
@@ -111,9 +76,7 @@ export class StorageValidator {
     if (!this.innerValidate(await this.storage.get(StorageKey.ACTIVE_ACCOUNT), 'str')) {
       return false
     }
-    if (
-      !this.innerValidate(await this.storage.get(StorageKey.LAST_SELECTED_WALLET), 'obj', 'key')
-    ) {
+    if (!this.innerValidate(await this.storage.get(StorageKey.LAST_SELECTED_WALLET), 'wallet')) {
       return false
     }
 
