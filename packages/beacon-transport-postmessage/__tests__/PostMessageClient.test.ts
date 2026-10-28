@@ -106,6 +106,17 @@ describe('PostMessageClient', () => {
     })
   })
 
+  it('propagates an asynchronous message handler failure after decryption', async () => {
+    client.decryptMessage = jest.fn().mockResolvedValue('decrypted-text')
+    const handler = jest.fn().mockRejectedValue(new Error('handler failed'))
+    await client.listenForEncryptedMessage('sender-pub', handler)
+    const listener = (client as any).activeListeners.get('sender-pub')!
+
+    await expect(
+      listener({ encryptedPayload: 'payload' }, { origin: Origin.EXTENSION, id: 'ctx' })
+    ).rejects.toThrow('handler failed')
+  })
+
   describe('sendMessage()', () => {
     beforeEach(() => {
       client.encryptMessage = jest.fn().mockResolvedValue('enc-payload')

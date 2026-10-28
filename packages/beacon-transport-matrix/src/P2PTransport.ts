@@ -54,19 +54,32 @@ export class P2PTransport<
     logger.log('connect')
     this._isConnected = TransportStatus.CONNECTING
 
-    await this.client.start()
+    try {
+      await this.client.start()
 
-    const knownPeers = await this.getPeers()
+      const knownPeers = await this.getPeers()
 
-    if (knownPeers.length > 0) {
-      logger.log('connect', `connecting to ${knownPeers.length} peers`)
-      const connectionPromises = knownPeers.map(async (peer) => this.listen(peer.publicKey))
-      Promise.all(connectionPromises).catch((error) => logger.error('connect', error))
+      if (knownPeers.length > 0) {
+        logger.log('connect', `connecting to ${knownPeers.length} peers`)
+        const registrations = await Promise.allSettled(
+          knownPeers.map((peer) => this.listen(peer.publicKey))
+        )
+        for (const registration of registrations) {
+          if (registration.status === 'rejected') {
+            throw registration.reason
+          }
+        }
+      }
+
+      await this.startOpenChannelListener()
+      await super.connect()
+    } catch (error) {
+      await this.client.stop().catch((cleanupError) => {
+        logger.error('connect', 'failed to stop matrix client', cleanupError)
+      })
+      this._isConnected = TransportStatus.NOT_CONNECTED
+      throw error
     }
-
-    await this.startOpenChannelListener()
-
-    return super.connect()
   }
 
   public async disconnect(): Promise<void> {
@@ -92,7 +105,7 @@ export class P2PTransport<
         }
 
         this.notifyListeners(message, connectionContext).catch((error) => {
-          throw error
+          logger.error('listen', error)
         })
       })
       .catch((error) => {

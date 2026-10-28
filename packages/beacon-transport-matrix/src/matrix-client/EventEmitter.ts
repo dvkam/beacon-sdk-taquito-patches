@@ -1,6 +1,12 @@
+import { Logger } from '@ecadlabs/beacon-core'
+
+const logger = new Logger('MatrixEventEmitter')
+
 // https://gist.github.com/mudge/5830382?permalink_comment_id=2658721#gistcomment-2658721
 
-type Listener = (...args: any[]) => void
+// Events carry different argument lists; preserve the existing heterogeneous callback contract.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Listener = (...args: any[]) => void | Promise<void>
 interface IEvents {
   [event: string]: Listener[]
 }
@@ -46,13 +52,22 @@ export class EventEmitter {
       return
     }
 
-    ;[...this.events[event]].forEach((listener) => listener.apply(this, args))
+    for (const listener of [...this.events[event]]) {
+      try {
+        Promise.resolve(listener.apply(this, args)).catch((error) => {
+          logger.error('emit', event, error)
+        })
+      } catch (error) {
+        logger.error('emit', event, error)
+      }
+    }
   }
 
   public once(event: string, listener: Listener): () => void {
     const remove: () => void = this.on(event, (...args: any[]) => {
       remove()
-      listener.apply(this, args)
+
+      return listener.apply(this, args)
     })
 
     return remove

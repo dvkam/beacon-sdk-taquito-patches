@@ -78,6 +78,23 @@ describe('MatrixClient', () => {
     }
   })
 
+  it.each(['joinedRooms', 'invitedRooms', 'leftRooms'] as const)(
+    'rejects %s when connection setup fails',
+    async (property) => {
+      const client = new MatrixClient(
+        createStore() as any,
+        { onStateChanged: jest.fn() } as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any
+      )
+      jest.spyOn(client, 'isConnected').mockRejectedValue(new Error('connection failed'))
+
+      await expect(client[property]).rejects.toThrow('connection failed')
+    }
+  )
+
   it('generates unique txn ids for concurrent sends', async () => {
     const store = createStore()
     await store.update({ accessToken: 'access-token' })

@@ -137,18 +137,30 @@ export class PostMessageTransport<
 
     this._isConnected = TransportStatus.CONNECTING
 
-    const knownPeers = await this.getPeers()
+    try {
+      const knownPeers = await this.getPeers()
 
-    if (knownPeers.length > 0) {
-      logger.log('connect', `connecting to ${knownPeers.length} peers`)
-      const connectionPromises = knownPeers.map(async (peer) => this.listen(peer.publicKey))
+      if (knownPeers.length > 0) {
+        logger.log('connect', `connecting to ${knownPeers.length} peers`)
+        const registrations = await Promise.allSettled(
+          knownPeers.map((peer) => this.listen(peer.publicKey))
+        )
+        for (const registration of registrations) {
+          if (registration.status === 'rejected') {
+            throw registration.reason
+          }
+        }
+      }
 
-      Promise.all(connectionPromises).catch((error) => logger.error('connect', error))
+      await this.startOpenChannelListener()
+      await super.connect()
+    } catch (error) {
+      await this.client.unsubscribeFromEncryptedMessages().catch((cleanupError) => {
+        logger.error('connect', 'failed to clear extension listeners', cleanupError)
+      })
+      this._isConnected = TransportStatus.NOT_CONNECTED
+      throw error
     }
-
-    await this.startOpenChannelListener()
-
-    await super.connect()
   }
 
   public async startOpenChannelListener(): Promise<void> {
@@ -170,7 +182,7 @@ export class PostMessageTransport<
         }
 
         this.notifyListeners(message, connectionContext).catch((error) => {
-          throw error
+          logger.error('listen', error)
         })
       })
       .catch((error) => {

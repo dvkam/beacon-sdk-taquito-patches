@@ -4,6 +4,7 @@ import {
   Storage,
   StorageKey
 } from '@ecadlabs/beacon-types'
+import { Logger } from '@ecadlabs/beacon-core'
 import { KeyPair } from '@ecadlabs/beacon-utils'
 import { SessionTypes, SignClientTypes } from '@walletconnect/types'
 import { WalletConnectCommunicationClient } from '../src/communication-client/WalletConnectCommunicationClient'
@@ -15,10 +16,8 @@ jest.mock('@walletconnect/utils', () => ({
 }))
 
 describe('WalletConnectTransport', () => {
-  const sessionTopic =
-    '33c6427472db52620e24076bff678831edb40f80d0676b8a27f080edd3ffbabd'
-  const walletPublicKey =
-    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  const sessionTopic = '33c6427472db52620e24076bff678831edb40f80d0676b8a27f080edd3ffbabd'
+  const walletPublicKey = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   const wcOptions = {
     network: NetworkType.MAINNET,
     opts: {} as SignClientTypes.Options
@@ -57,14 +56,7 @@ describe('WalletConnectTransport', () => {
     return new WalletConnectTransport<
       ExtendedWalletConnectPairingResponse,
       StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP
-    >(
-      'DApp',
-      keyPair,
-      storage,
-      StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP,
-      wcOptions,
-      isLeader
-    )
+    >('DApp', keyPair, storage, StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, wcOptions, isLeader)
   }
 
   beforeEach(() => {
@@ -101,5 +93,39 @@ describe('WalletConnectTransport', () => {
     )
 
     expect(accountsToRemove).toEqual([storedAccount])
+  })
+  it('reports asynchronous message handler failures at the event boundary', async () => {
+    let receive!: (message: string) => void
+    const communicationClient = {
+      listenForEncryptedMessage: jest.fn(async (_key: string, callback: typeof receive) => {
+        receive = callback
+      })
+    } as unknown as WalletConnectCommunicationClient
+    getInstanceSpy = jest
+      .spyOn(WalletConnectCommunicationClient, 'getInstance')
+      .mockReturnValue(communicationClient)
+    const transport = new WalletConnectTransport(
+      'test',
+      keyPair,
+      storage,
+      StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP,
+      wcOptions,
+      isLeader
+    )
+    const failure = new Error('handler failed')
+    const reported = new Promise<void>((resolve) => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => resolve())
+    })
+    try {
+      await transport.addListener(async () => {
+        throw failure
+      })
+      await transport.listen(walletPublicKey)
+      receive('message')
+      await reported
+      expect(Logger.prototype.error).toHaveBeenCalledWith('listen', failure)
+    } finally {
+      jest.restoreAllMocks()
+    }
   })
 })
