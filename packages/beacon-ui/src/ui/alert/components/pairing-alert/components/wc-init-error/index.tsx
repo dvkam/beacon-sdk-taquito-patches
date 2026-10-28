@@ -30,7 +30,7 @@ const WCInitError: React.FC<WCInitErrorProps> = ({ title, handleUpdateState }) =
   }
 
   const errorMessage = localStorage ? localStorage.getItem(StorageKey.WC_INIT_ERROR) : undefined
-  const description: any = (
+  const description = (
     <>
       <h3 style={{ color: '#FF4136', margin: '0.6px' }}>A network error occurred.</h3>
       <h4 className="body-style">
