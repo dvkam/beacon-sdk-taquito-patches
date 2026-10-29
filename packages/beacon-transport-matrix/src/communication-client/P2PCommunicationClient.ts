@@ -85,16 +85,17 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   private initialEvent: MatrixClientEvent<MatrixClientEventType.MESSAGE> | undefined
   private initialListener:
-    | ((event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => void)
-    | undefined
+    ((event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => void) | undefined
 
   private selectedRegion?: Regions
   private readonly ENABLED_RELAY_SERVERS: NodeDistributions
   public relayServer:
-    | ExposedPromise<{ server: string; timestamp: number; localTimestamp: number }>
-    | undefined
+    ExposedPromise<{ server: string; timestamp: number; localTimestamp: number }> | undefined
 
-  private readonly activeListeners: Map<string, (event: MatrixClientEvent<any>) => void> = new Map()
+  private readonly activeListeners: Map<
+    string,
+    (event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => void
+  > = new Map()
 
   private readonly ignoredRooms: string[] = []
   private loginCounter: number = 0

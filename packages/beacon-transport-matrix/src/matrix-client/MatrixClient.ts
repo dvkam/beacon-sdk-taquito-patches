@@ -186,9 +186,9 @@ export class MatrixClient {
    * @param event
    * @param listener
    */
-  public unsubscribe(
-    event: MatrixClientEventType,
-    listener: (event: MatrixClientEvent<any>) => void
+  public unsubscribe<T extends MatrixClientEventType>(
+    event: T,
+    listener: (clientEvent: MatrixClientEvent<T>) => void
   ): void {
     if (listener) {
       this.eventEmitter.removeListener(event, listener)
