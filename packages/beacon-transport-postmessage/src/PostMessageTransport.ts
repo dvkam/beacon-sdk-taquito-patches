@@ -17,6 +17,17 @@ import { PostMessageClient } from './PostMessageClient'
 
 const logger = new Logger('PostMessageTransport')
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isExtension = (sender: unknown): sender is Extension =>
+  isRecord(sender) &&
+  typeof sender.id === 'string' &&
+  typeof sender.name === 'string' &&
+  (sender.shortName === undefined || typeof sender.shortName === 'string') &&
+  (sender.iconUrl === undefined || typeof sender.iconUrl === 'string') &&
+  (sender.color === undefined || typeof sender.color === 'string')
+
 let listeningForExtensions: boolean = false
 let extensionsPromise: Promise<Extension[]> | undefined
 let extensions: Extension[] | undefined
@@ -40,8 +51,7 @@ const addExtension = (extension: Extension): void => {
 export class PostMessageTransport<
   T extends PostMessagePairingRequest | ExtendedPostMessagePairingResponse,
   K extends
-    | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
-    | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
+    StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
 > extends Transport<T, K, PostMessageClient> {
   public readonly type: TransportType = TransportType.POST_MESSAGE
 
@@ -51,10 +61,13 @@ export class PostMessageTransport<
 
   public static async isAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fn = (event: any): void => {
-        const data = event.data as ExtensionMessage<string>
-        if (data && data.payload === 'pong') {
+      const fn = (event: unknown): void => {
+        if (!isRecord(event)) {
+          return
+        }
+
+        const data = event.data
+        if (isRecord(data) && data.payload === 'pong') {
           resolve(true)
           windowRef.removeEventListener('message', fn)
         }
@@ -98,22 +111,24 @@ export class PostMessageTransport<
       return
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fn = (event: any): void => {
-      if (event.source !== windowRef || event.origin !== windowRef.location.origin) {
+    const fn = (event: unknown): void => {
+      if (
+        !isRecord(event) ||
+        event.source !== windowRef ||
+        event.origin !== windowRef.location.origin
+      ) {
         // TODO: Add to error handler: console.debug('[Beacon]: Event received from untrusted origin')
         return
       }
 
-      const data = event.data as ExtensionMessage<
-        string,
-        { id: string; name: string; iconURL: string }
-      >
-      const sender = data.sender
-      if (data && data.payload === 'pong' && sender) {
-        logger.log('getAvailableExtensions', `extension "${sender.name}" is available`, sender)
-        addExtension(sender)
+      const data = event.data
+      if (!isRecord(data) || data.payload !== 'pong' || !isExtension(data.sender)) {
+        return
       }
+
+      const sender = data.sender
+      logger.log('getAvailableExtensions', `extension "${sender.name}" is available`, sender)
+      addExtension(sender)
     }
 
     windowRef.addEventListener('message', fn)
