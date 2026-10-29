@@ -20,6 +20,25 @@ import {
 
 const logger = new Logger('PostMessageClient')
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isTrustedWindowMessage = (event: unknown): event is { data: unknown } =>
+  isRecord(event) &&
+  event.source === windowRef &&
+  event.origin === windowRef.location.origin &&
+  'data' in event
+
+const hasPageTarget = (message: Record<string, unknown>): boolean =>
+  message.target === ExtensionMessageTarget.PAGE &&
+  (message.targetId === undefined || typeof message.targetId === 'string')
+
+const isPairingMessage = (message: unknown): message is ExtensionMessage<string> =>
+  isRecord(message) && hasPageTarget(message) && typeof message.payload === 'string'
+
+const isEncryptedMessage = (message: unknown): message is EncryptedExtensionMessage =>
+  isRecord(message) && hasPageTarget(message) && typeof message.encryptedPayload === 'string'
+
 /**
  * @internalapi
  *
@@ -83,21 +102,25 @@ export class PostMessageClient extends MessageBasedClient {
   public async listenForChannelOpening(
     messageCallback: (pairingResponse: ExtendedPostMessagePairingResponse) => void
   ): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fn = async (event: any): Promise<void> => {
-      if (event.source !== windowRef || event.origin !== windowRef.location.origin) {
-        // TODO: Add to error handler: console.debug('[Beacon]: Event received from untrusted origin')
+    const fn = async (event: unknown): Promise<void> => {
+      if (!isTrustedWindowMessage(event)) {
         return
       }
 
-      const data = event?.data?.message as ExtensionMessage<string>
-
+      const data = event.data
       if (
-        data &&
-        data.target === ExtensionMessageTarget.PAGE &&
-        (await this.isChannelOpenMessage(data))
+        !isRecord(data) ||
+        !isPairingMessage(data.message) ||
+        !isRecord(data.sender) ||
+        typeof data.sender.id !== 'string'
       ) {
-        const payload = Buffer.from(data.payload, 'hex')
+        return
+      }
+
+      const payloadHex = data.message.payload
+      const extensionId = data.sender.id
+      if (await this.isChannelOpenMessage(data.message)) {
+        const payload = Buffer.from(payloadHex, 'hex')
 
         if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
           try {
@@ -112,7 +135,7 @@ export class PostMessageClient extends MessageBasedClient {
                 pairingResponse.publicKey,
                 pairingResponse.version,
                 await getSenderId(pairingResponse.publicKey),
-                event?.data?.sender.id
+                extensionId
               )
             )
           } catch (decryptionError) {
@@ -135,35 +158,37 @@ export class PostMessageClient extends MessageBasedClient {
     windowRef.postMessage(message as any, windowRef.location.origin)
   }
 
-  public async isChannelOpenMessage(message: any): Promise<boolean> {
-    return typeof message === 'object' && message.hasOwnProperty('payload')
+  public async isChannelOpenMessage(message: unknown): Promise<boolean> {
+    return (
+      typeof message === 'object' &&
+      message !== null &&
+      Object.prototype.hasOwnProperty.call(message, 'payload')
+    )
   }
 
   private async subscribeToMessages(): Promise<void> {
-    windowRef.addEventListener('message', (message) => {
-      if (
-        (message as any).source !== windowRef ||
-        (message as any).origin !== windowRef.location.origin
-      ) {
-        // TODO: Add to error handler: console.debug('[Beacon]: Event received from untrusted origin')
+    windowRef.addEventListener('message', (event: unknown) => {
+      if (!isTrustedWindowMessage(event)) {
         return
       }
 
-      if (typeof message === 'object' && message) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data: {
-          message: EncryptedExtensionMessage
-          sender: chrome.runtime.MessageSender
-        } = (message as any).data
-        if (data.message && data.message.target === ExtensionMessageTarget.PAGE) {
-          this.activeListeners.forEach((listener) => {
-            listener(data.message, {
-              origin: Origin.EXTENSION,
-              id: data.sender.id || ''
-            }).catch((error) => logger.error('subscribeToMessages', error))
-          })
-        }
+      const data = event.data
+      if (!isRecord(data) || !isEncryptedMessage(data.message) || !isRecord(data.sender)) {
+        return
       }
+
+      const senderId = data.sender.id
+      if (senderId !== undefined && typeof senderId !== 'string') {
+        return
+      }
+
+      const message = data.message
+      this.activeListeners.forEach((listener) => {
+        listener(message, {
+          origin: Origin.EXTENSION,
+          id: senderId ?? ''
+        }).catch((error) => logger.error('subscribeToMessages', error))
+      })
     })
   }
 }
