@@ -242,9 +242,10 @@ export class MatrixClient {
 
     await this.requiresAuthorization('invite', (accessToken) =>
       Promise.all(
-        (roomsOrIds as any[]).map((roomOrId) => {
+        roomsOrIds.map((roomOrId) => {
           const room = this.store.getRoom(roomOrId)
-          this.roomService
+
+          return this.roomService
             .inviteToRoom(accessToken, user, room)
             .catch((error) => logger.warn('inviteToRooms', error))
         })
@@ -262,7 +263,7 @@ export class MatrixClient {
 
     await this.requiresAuthorization('join', (accessToken) =>
       Promise.all(
-        (roomsOrIds as any[]).map((roomOrId) => {
+        roomsOrIds.map((roomOrId) => {
           const room = this.store.getRoom(roomOrId)
 
           return this.roomService.joinRoom(accessToken, room)
