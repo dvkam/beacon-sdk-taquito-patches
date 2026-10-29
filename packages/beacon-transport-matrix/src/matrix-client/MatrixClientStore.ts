@@ -31,8 +31,6 @@ export interface MatrixStateUpdate extends MatrixState {
   rooms: MatrixRoom[]
 }
 
-const PRESERVED_FIELDS: (keyof MatrixState)[] = ['syncToken', 'rooms']
-
 /**
  * The class managing the local state of matrix
  */
@@ -171,19 +169,18 @@ export class MatrixClientStore {
    * @param stateUpdate
    */
   private updateStorage(stateUpdate: Partial<MatrixStateUpdate>): void {
-    const updatedCachedFields = Object.entries(stateUpdate).filter(
-      ([key, value]) => PRESERVED_FIELDS.includes(key as keyof MatrixStateUpdate) && Boolean(value)
+    const preservedState = {
+      syncToken: this.state.syncToken,
+      rooms: this.state.rooms
+    }
+    const hasUpdatedCachedFields = Object.entries(stateUpdate).some(
+      ([key, value]) => Object.prototype.hasOwnProperty.call(preservedState, key) && Boolean(value)
     )
 
-    if (updatedCachedFields.length > 0) {
-      const filteredState: Record<string, any> = {}
-      PRESERVED_FIELDS.forEach((key) => {
-        filteredState[key] = this.state[key]
-      })
-
+    if (hasUpdatedCachedFields) {
       // sync method, latest-wins write — observe rejection so it surfaces in logs.
       this.storage
-        .set(StorageKey.MATRIX_PRESERVED_STATE, this.prepareData(filteredState))
+        .set(StorageKey.MATRIX_PRESERVED_STATE, this.prepareData(preservedState))
         .catch((error) => logger.error('updateStorage', 'failed to persist matrix state', error))
     }
   }
