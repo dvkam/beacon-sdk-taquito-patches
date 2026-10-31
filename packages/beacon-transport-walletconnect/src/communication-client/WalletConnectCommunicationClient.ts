@@ -806,7 +806,6 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   public async close() {
-    this.storage.backup()
     await this.closePairings()
     this.unsubscribeFromEncryptedMessages()
     this.messageIds = []

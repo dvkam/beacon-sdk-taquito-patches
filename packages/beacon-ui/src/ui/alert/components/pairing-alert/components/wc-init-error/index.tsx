@@ -1,8 +1,8 @@
 import { StorageKey } from '@ecadlabs/beacon-types'
 import Info from '../../../../../../components/info'
-import { AlertState, WCInitErrorProps } from '../../../../../common'
+import { WCInitErrorProps } from '../../../../../common'
 
-const WCInitError: React.FC<WCInitErrorProps> = ({ title, handleUpdateState }) => {
+const WCInitError: React.FC<WCInitErrorProps> = ({ title }) => {
   const getErrorMessage = (message: string) => {
     // now accepts strings or JSX fragments
     const getJSXMessage = (content: React.ReactNode) => <span>{content}</span>
@@ -33,16 +33,6 @@ const WCInitError: React.FC<WCInitErrorProps> = ({ title, handleUpdateState }) =
   const description = (
     <>
       <h3 style={{ color: '#FF4136', margin: '0.6px' }}>A network error occurred.</h3>
-      <h4 className="body-style">
-        This issue does not concern your wallet or dApp. If the problem persists, please report it
-        to the Beacon team{' '}
-        <span
-          style={{ textDecoration: 'underline', color: '#007bff', cursor: 'pointer' }}
-          onClick={() => handleUpdateState(AlertState.BUG_REPORT)}
-        >
-          here
-        </span>
-      </h4>
       {errorMessage && getErrorMessage(errorMessage)}
     </>
   )

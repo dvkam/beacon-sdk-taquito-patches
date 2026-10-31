@@ -1,6 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import TopWallets from '../../src/components/top-wallets/index'
-import { StorageKey } from '@ecadlabs/beacon-types'
 import { MergedWallet } from 'src/utils/wallets'
 
 // --- Mock the Wallet component ---
@@ -50,7 +49,6 @@ describe('TopWallets Component', () => {
 
   // Dummy callbacks
   const onClickWallet = jest.fn()
-  const onClickLearnMore = jest.fn()
   const dummyOtherWallets = {
     images: ['other1.png', 'other2.png', 'other3.png'],
     onClick: jest.fn()
@@ -60,52 +58,19 @@ describe('TopWallets Component', () => {
   beforeEach(() => {
     localStorage.clear()
     onClickWallet.mockClear()
-    onClickLearnMore.mockClear()
     dummyOtherWallets.onClick.mockClear()
   })
 
-  test('renders header and bug report text when metrics are enabled', () => {
-    localStorage.setItem(StorageKey.ENABLE_METRICS, 'true')
-    render(
-      <TopWallets
-        wallets={dummyWallets}
-        onClickWallet={onClickWallet}
-        onClickLearnMore={onClickLearnMore}
-        isMobile={false}
-      />
-    )
-    // Check header
-    expect(screen.getByRole('heading', { name: /Connect Wallet/i })).toBeInTheDocument()
-    // Bug report text appears when ENABLE_METRICS is 'true'
-    expect(screen.getByText(/Do you wish to report a bug\?/i)).toBeInTheDocument()
-    expect(screen.getByText(/Click here/i)).toBeInTheDocument()
-  })
+  test('renders wallet selection without reporting controls even with a stale metrics preference', () => {
+    localStorage.setItem('beacon:enable_metrics', 'true')
+    render(<TopWallets wallets={dummyWallets} onClickWallet={onClickWallet} isMobile={false} />)
 
-  test('renders header and learn more text when metrics are disabled', () => {
-    localStorage.setItem(StorageKey.ENABLE_METRICS, 'false')
-    render(
-      <TopWallets
-        wallets={dummyWallets}
-        onClickWallet={onClickWallet}
-        onClickLearnMore={onClickLearnMore}
-        isMobile={false}
-      />
-    )
     expect(screen.getByRole('heading', { name: /Connect Wallet/i })).toBeInTheDocument()
-    // Normal text when ENABLE_METRICS is not 'true'
-    expect(screen.getByText(/Do you wish to report a bug\?/i)).toBeInTheDocument()
+    expect(screen.queryByText(/report a bug|Click here/i)).not.toBeInTheDocument()
   })
 
   test('renders a list of wallets and calls onClickWallet when a wallet is clicked', () => {
-    localStorage.setItem(StorageKey.ENABLE_METRICS, 'false')
-    render(
-      <TopWallets
-        wallets={dummyWallets}
-        onClickWallet={onClickWallet}
-        onClickLearnMore={onClickLearnMore}
-        isMobile={false}
-      />
-    )
+    render(<TopWallets wallets={dummyWallets} onClickWallet={onClickWallet} isMobile={false} />)
     // Our mocked Wallet renders elements with data-testid="wallet"
     const walletElements = screen.getAllByTestId('wallet')
     expect(walletElements).toHaveLength(dummyWallets.length)
@@ -115,12 +80,10 @@ describe('TopWallets Component', () => {
   })
 
   test('renders the other wallets section if provided and calls its onClick handler', () => {
-    localStorage.setItem(StorageKey.ENABLE_METRICS, 'false')
     render(
       <TopWallets
         wallets={dummyWallets}
         onClickWallet={onClickWallet}
-        onClickLearnMore={onClickLearnMore}
         otherWallets={dummyOtherWallets}
         isMobile={false}
       />

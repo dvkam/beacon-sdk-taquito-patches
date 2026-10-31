@@ -1,7 +1,6 @@
 import {
   closeAlert,
   openAlert,
-  openBugReport,
   AlertButton,
   AlertConfig,
   closeToast,
@@ -100,7 +99,6 @@ export enum BeaconEvent {
   PAIR_SUCCESS = 'PAIR_SUCCESS',
   CHANNEL_CLOSED = 'CHANNEL_CLOSED',
   GENERIC_ERROR = 'GENERIC_ERROR',
-  OPEN_BUG_REPORT = 'OPEN_BUG_REPORT',
   RELAYER_ERROR = 'RELAYER_ERROR',
 
   INTERNAL_ERROR = 'INTERNAL_ERROR',
@@ -123,9 +121,7 @@ export interface ExtraInfo {
  *   storage validation pass still found invalid persisted session state.
  */
 export type InvalidAccountDeactivatedReason =
-  | 'missing_active_account'
-  | 'invalid_active_account_storage'
-  | 'storage_validation_failed'
+  'missing_active_account' | 'invalid_active_account_storage' | 'storage_validation_failed'
 
 /**
  * Payload emitted with {@link BeaconEvent.INVALID_ACCOUNT_DEACTIVATED}.
@@ -252,7 +248,6 @@ export interface BeaconEventType {
     | ExtendedWalletConnectPairingResponse
   [BeaconEvent.CHANNEL_CLOSED]: string
   [BeaconEvent.INTERNAL_ERROR]: { text: string; buttons?: AlertButton[] }
-  [BeaconEvent.OPEN_BUG_REPORT]: undefined
   [BeaconEvent.RELAYER_ERROR]: undefined
   [BeaconEvent.UNKNOWN]: undefined
 }
@@ -294,14 +289,6 @@ const showSentToast = async (data: RequestSentInfo): Promise<void> => {
         logger.log('showSentToast', 'resetCallback invoked')
         await resetCallback()
       }
-    }
-  })
-  actions.push({
-    text: 'Do you wish to report a bug?',
-    actionText: 'Open',
-    actionCallback: async (): Promise<void> => {
-      closeToast()
-      openBugReport()
     }
   })
 
@@ -393,14 +380,7 @@ const showInvalidAccountDeactivated = async (
 const showGenericErrorAlert = async (errorMessage: string): Promise<void> => {
   openAlert({
     title: `${errorMessage}`,
-    body: 'Please try again. If this problem persists please send us a bug report.',
-    buttons: [
-      {
-        label: 'Send Report',
-        type: 'primary',
-        onClick: () => openBugReport()
-      }
-    ] as any
+    body: 'Please try again.'
   })
 }
 
@@ -500,10 +480,6 @@ const showRateLimitReached = async (): Promise<void> => {
  */
 const showExtensionConnectedAlert = () => {
   closeAlert()
-}
-
-const showBugReportForm = async () => {
-  await openBugReport()
 }
 
 const showRelayerErrorAlert = async (): Promise<void> => {
@@ -872,7 +848,6 @@ export const defaultEventCallbacks: {
   [BeaconEvent.HIDE_UI]: hideUI,
   [BeaconEvent.PAIR_INIT]: showPairAlert,
   [BeaconEvent.PAIR_SUCCESS]: showExtensionConnectedAlert,
-  [BeaconEvent.OPEN_BUG_REPORT]: showBugReportForm,
   [BeaconEvent.RELAYER_ERROR]: showRelayerErrorAlert,
   [BeaconEvent.CHANNEL_CLOSED]: showChannelClosedAlert,
   [BeaconEvent.INTERNAL_ERROR]: showInternalErrorAlert,
@@ -938,7 +913,6 @@ export class BeaconEventHandler {
     [BeaconEvent.HIDE_UI]: [defaultEventCallbacks.HIDE_UI],
     [BeaconEvent.PAIR_INIT]: [defaultEventCallbacks.PAIR_INIT],
     [BeaconEvent.PAIR_SUCCESS]: [defaultEventCallbacks.PAIR_SUCCESS],
-    [BeaconEvent.OPEN_BUG_REPORT]: [showBugReportForm],
     [BeaconEvent.CHANNEL_CLOSED]: [defaultEventCallbacks.CHANNEL_CLOSED],
     [BeaconEvent.INTERNAL_ERROR]: [defaultEventCallbacks.INTERNAL_ERROR],
     [BeaconEvent.RELAYER_ERROR]: [defaultEventCallbacks.RELAYER_ERROR],

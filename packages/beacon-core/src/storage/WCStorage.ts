@@ -91,12 +91,6 @@ export class WCStorage {
     return false
   }
 
-  public backup() {
-    this.indexedDB
-      .fillStore('beacon', 'bug_report', [StorageKey.WC_2_CORE_KEYCHAIN])
-      .catch((error) => console.error(error.message))
-  }
-
   public async resetState() {
     await this.indexedDB.clearStore()
 

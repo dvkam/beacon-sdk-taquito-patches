@@ -13,10 +13,7 @@ export const ARRAY_STORAGE_KEYS = new Set<StorageKey>([
   StorageKey.ONGOING_PROOF_OF_EVENT_CHALLENGES
 ])
 
-export const BOOLEAN_STORAGE_KEYS = new Set<StorageKey>([
-  StorageKey.MULTI_NODE_SETUP_DONE,
-  StorageKey.ENABLE_METRICS
-])
+export const BOOLEAN_STORAGE_KEYS = new Set<StorageKey>([StorageKey.MULTI_NODE_SETUP_DONE])
 
 export const OBJECT_STORAGE_KEYS = new Set<StorageKey>([
   StorageKey.LAST_SELECTED_WALLET,
@@ -27,10 +24,8 @@ export const OBJECT_STORAGE_KEYS = new Set<StorageKey>([
 export const STRING_STORAGE_KEYS = new Set<StorageKey>([
   StorageKey.ACTIVE_ACCOUNT,
   StorageKey.BEACON_SDK_SECRET_SEED,
-  StorageKey.BEACON_LAST_ERROR,
   StorageKey.BEACON_SDK_VERSION,
   StorageKey.MATRIX_SELECTED_NODE,
-  StorageKey.USER_ID,
   StorageKey.WC_INIT_ERROR,
   StorageKey.WC_2_CLIENT_SESSION,
   StorageKey.WC_2_CORE_PAIRING,

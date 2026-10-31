@@ -5,7 +5,6 @@ import { AlertConfig, ConfigurableAlertProps } from '../common'
 import PairingAlert from './components/pairing-alert'
 import InfoAlert from './components/info-alert'
 import { getColorMode } from 'src/utils/colorMode'
-import { NetworkType } from '@ecadlabs/beacon-types'
 
 // Import the bundled CSS as a raw string
 import cssText from './aggregated.css'
@@ -39,22 +38,6 @@ const createAlert = (config: AlertConfig) => {
 const openAlert = (config: AlertConfig) => {
   initDone ? config$.next(config) : createAlert(config)
   show$.next(true)
-}
-
-const openBugReport = () => {
-  const stub = Promise.resolve('')
-  openAlert({
-    title: '',
-    body: '',
-    buttons: [],
-    openBugReport: true,
-    pairingPayload: {
-      walletConnectSyncCode: stub,
-      p2pSyncCode: stub,
-      postmessageSyncCode: stub,
-      networkType: NetworkType.MAINNET
-    }
-  })
 }
 
 const closeAlert = () => {
@@ -100,7 +83,7 @@ const AlertRoot = (props: AlertConfig) => {
   }
 
   const Alert = () => {
-    return config.pairingPayload || config.openBugReport ? (
+    return config.pairingPayload ? (
       <PairingAlert {...filteredProps} />
     ) : (
       <InfoAlert {...filteredProps} />
@@ -110,4 +93,4 @@ const AlertRoot = (props: AlertConfig) => {
   return <div className={`theme__${getColorMode()}`}>{mount && <Alert />} </div>
 }
 
-export { openAlert, openBugReport, closeAlert, closeAlerts }
+export { openAlert, closeAlert, closeAlerts }

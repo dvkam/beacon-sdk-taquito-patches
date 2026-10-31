@@ -9,13 +9,11 @@ const QRCode: React.FC<QRCodeProps> = ({
   isMobile,
   qrCode,
   defaultPairing,
-  handleUpdateState,
   handleIsLoading
 }) => {
   const [codeQr, setCodeQr] = useState(qrCode)
   const supportsWalletConnect = wallet?.supportedInteractionStandards?.includes('wallet_connect')
-  const isConnected =
-    !supportsWalletConnect || isWCWorking
+  const isConnected = !supportsWalletConnect || isWCWorking
 
   useEffect(() => {
     if (qrCode) {
@@ -52,12 +50,7 @@ const QRCode: React.FC<QRCodeProps> = ({
   }, [codeQr, defaultPairing, handleIsLoading, supportsWalletConnect])
 
   if (!isConnected) {
-    return (
-      <WCInitError
-        title={`Connect with ${wallet?.name} Mobile`}
-        handleUpdateState={handleUpdateState}
-      />
-    )
+    return <WCInitError title={`Connect with ${wallet?.name} Mobile`} />
   }
 
   if (!codeQr || codeQr.length === 0) {

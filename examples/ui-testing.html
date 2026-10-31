@@ -56,7 +56,6 @@
           <h2 class="card-title text-xl pb-2 mb-4">Alert Components</h2>
           <div class="flex flex-wrap gap-2 mb-4">
             <button id="showPairingAlert" class="btn btn-primary">Show Pairing Alert</button>
-            <button id="showBugReportAlert" class="btn btn-primary">Show Bug Report Form</button>
             <button id="showQRCode" class="btn btn-primary">Show QR Code</button>
           </div>
           <pre id="alertCode" class="bg-base-200 p-4 rounded-lg overflow-auto max-h-40"></pre>
@@ -90,7 +89,7 @@
       }
 
       // Destructure the UI components from beacon
-      const { openAlert, closeAlert, openBugReport, openToast, closeToast } = beacon
+      const { openAlert, closeAlert, openToast, closeToast } = beacon
 
       // Dark mode toggle functionality
       const darkModeToggle = document.getElementById('darkModeToggle')
@@ -134,11 +133,6 @@
           pairingPayload: '/* Pairing payload object */',
           featuredWallets: ['temple-wallet', 'kukai-wallet', 'airgap-wallet']
         })
-      })
-
-      document.getElementById('showBugReportAlert').addEventListener('click', () => {
-        openBugReport()
-        displayCode('alertCode', '/* Bug report form opened */')
       })
 
       // QR Code Component Example

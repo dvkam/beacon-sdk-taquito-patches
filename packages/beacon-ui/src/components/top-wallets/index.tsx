@@ -7,12 +7,6 @@ const TopWallets: React.FC<TopWalletsProps> = (props: TopWalletsProps) => {
     <div className="top-wallets-wrapper">
       <div className="top-wallets-info">
         <h3>Connect Wallet</h3>
-        <span>
-          Do you wish to report a bug?{' '}
-          <span className="top-wallets-learn-more" onClick={props.onClickLearnMore}>
-            Click here
-          </span>
-        </span>
       </div>
       <div
         style={props.wallets.length === 1 ? { gridTemplateColumns: '1fr' } : undefined}

@@ -36,7 +36,6 @@ export interface StorageKeyReturnType {
   [StorageKey.ACTIVE_ACCOUNT]: AccountIdentifier | undefined
   [StorageKey.PUSH_TOKENS]: PushToken[]
   [StorageKey.BEACON_SDK_SECRET_SEED]: string | undefined
-  [StorageKey.BEACON_LAST_ERROR]: string | undefined
   [StorageKey.APP_METADATA_LIST]: AppMetadata[]
   [StorageKey.PERMISSION_LIST]: PermissionInfo[]
   [StorageKey.ONGOING_PROOF_OF_EVENT_CHALLENGES]: ({
@@ -48,8 +47,6 @@ export interface StorageKeyReturnType {
   [StorageKey.MATRIX_PEER_ROOM_IDS]: { [key: string]: string | undefined }
   [StorageKey.MATRIX_SELECTED_NODE]: string | undefined
   [StorageKey.MULTI_NODE_SETUP_DONE]: boolean | undefined
-  [StorageKey.USER_ID]: string | undefined
-  [StorageKey.ENABLE_METRICS]: boolean | undefined
   [StorageKey.WC_INIT_ERROR]: string | undefined
   [StorageKey.WC_2_CLIENT_SESSION]: string | undefined
   [StorageKey.WC_2_CORE_PAIRING]: string | undefined

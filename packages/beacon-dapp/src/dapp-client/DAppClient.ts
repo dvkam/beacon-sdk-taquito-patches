@@ -86,8 +86,6 @@ import {
   Logger,
   ClientEvents,
   StorageValidator,
-  SDK_VERSION,
-  IndexedDBStorage,
   MultiTabChannel,
   getError
 } from '@ecadlabs/beacon-core'
@@ -120,8 +118,7 @@ import {
   isBrowser,
   isDesktop,
   isMobileOS,
-  isIOS,
-  currentOS
+  isIOS
 } from '@ecadlabs/beacon-ui'
 import { WalletConnectTransport } from '@ecadlabs/beacon-transport-walletconnect'
 import { DappPostMessageTransport } from '../transports/DappPostMessageTransport'
@@ -191,9 +188,7 @@ export interface DAppClientRemoveAllPeersOptions {
 }
 
 type DAppInternalTransport =
-  | DappPostMessageTransport
-  | DappP2PTransport
-  | DappWalletConnectTransport
+  DappPostMessageTransport | DappP2PTransport | DappWalletConnectTransport
 
 interface TransportWithClientCleanup {
   doClientCleanup: () => Promise<void>
@@ -232,13 +227,6 @@ export class DAppClient extends Client {
    * Automatically switch between apps on Mobile Devices (Enabled by Default)
    */
   private readonly enableAppSwitching: boolean
-
-  /**
-   * Enable metrics tracking (Disabled by Default)
-   */
-  private enableMetrics?: boolean
-
-  private userId?: string
 
   public network: Network
 
@@ -319,8 +307,6 @@ export class DAppClient extends Client {
 
   private readonly storageValidator: StorageValidator
 
-  private readonly beaconIDB = new IndexedDBStorage('beacon', ['bug_report', 'metrics'])
-
   private debounceSetActiveAccount: boolean = false
 
   // Constructor-time invalid storage recovery can race through multiple async paths.
@@ -361,8 +347,6 @@ export class DAppClient extends Client {
 
     this.enableAppSwitching =
       config.enableAppSwitching === undefined ? true : Boolean(config.enableAppSwitching)
-
-    this.enableMetrics = config.enableMetrics ? true : false
     this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
 
     // Subscribe to storage changes and update the active account if it changes on other tabs
@@ -390,11 +374,6 @@ export class DAppClient extends Client {
         }
         if (event.key === this.storage.getPrefixedKey(StorageKey.ACCOUNTS)) {
           await this.recoverActiveAccountFromAccountsChange()
-
-          return
-        }
-        if (event.key === this.storage.getPrefixedKey(StorageKey.ENABLE_METRICS)) {
-          this.enableMetrics = Boolean(await this.storage.get(StorageKey.ENABLE_METRICS))
 
           return
         }
@@ -631,28 +610,6 @@ export class DAppClient extends Client {
       })
       .catch((err) => logger.error(err.message))
     this.retainStorageValidationPromise()
-
-    this.sendMetrics(
-      `enable-metrics?${this.addQueryParam('version', SDK_VERSION)}`,
-      undefined,
-      (res) => {
-        if (!res.ok) {
-          res.status === 426
-            ? console.error('Metrics are no longer supported for this version, please upgrade.')
-            : console.warn(
-                'Network error encountered. Metrics sharing have been automatically disabled.'
-              )
-        }
-        this.enableMetrics = res.ok
-        this.storage.set(StorageKey.ENABLE_METRICS, res.ok)
-      },
-      () => {
-        this.enableMetrics = false
-        this.storage.set(StorageKey.ENABLE_METRICS, false)
-      }
-    )
-
-    this.initUserID().catch((err) => logger.error(err.message))
   }
 
   private async checkIfBCLeaderExists() {
@@ -767,37 +724,6 @@ export class DAppClient extends Client {
       senderId: '',
       version: '2'
     }
-  }
-
-  private async createStateSnapshot() {
-    if (!localStorage || !this.enableMetrics) {
-      return
-    }
-    const keys = Object.values(StorageKey).filter(
-      (key) => !key.includes('wc@2') && !key.includes('secret') && !key.includes('account')
-    ) as unknown as StorageKey[]
-
-    try {
-      for (const key of keys) {
-        await this.beaconIDB.set(key, this.storage.getPrefixedKey(key))
-      }
-    } catch (err: any) {
-      logger.error('createStateSnapshot', err.message)
-    }
-  }
-
-  private async initUserID() {
-    const id = await this.storage.get(StorageKey.USER_ID)
-
-    if (id) {
-      this.userId = id
-
-      return
-    }
-
-    this.userId = await generateGUID()
-
-    this.storage.set(StorageKey.USER_ID, this.userId)
   }
 
   public async initInternalTransports(): Promise<void> {
@@ -969,8 +895,6 @@ export class DAppClient extends Client {
    */
   public async destroy(): Promise<void> {
     this.destroyed = true
-
-    await this.createStateSnapshot()
     await this.destroyInternalTransports()
     await super.destroy()
   }
@@ -1213,10 +1137,6 @@ export class DAppClient extends Client {
 
             const abortHandler = async () => {
               logger.log('init', 'ABORTED')
-              this.sendMetrics(
-                'performance-metrics/save',
-                await this.buildPayload('connect', 'abort')
-              )
               await Promise.all([
                 postMessageTransport.disconnect(),
                 // p2pTransport.disconnect(), do not abort connection manually
@@ -1227,7 +1147,9 @@ export class DAppClient extends Client {
                 this.p2pTransport =
                   undefined
               if (this._activeAccount.isResolved()) {
-                this.clearActiveAccount().catch((err) => logger.warn('init', 'clearActiveAccount', err))
+                this.clearActiveAccount().catch((err) =>
+                  logger.warn('init', 'clearActiveAccount', err)
+                )
               }
               // Reject _initPromise so any awaiter (makeRequest -> requestPermissions)
               // unwinds via handleRequestError instead of hanging. _initReject
@@ -1595,57 +1517,6 @@ export class DAppClient extends Client {
     window.location = link
   }
 
-  private addQueryParam(paramName: string, paramValue: string): string {
-    return `${paramName}=${paramValue}`
-  }
-
-  private async buildPayload(
-    action: 'connect' | 'message' | 'disconnect',
-    status: 'start' | 'abort' | 'success' | 'error'
-  ): Promise<RequestInit> {
-    const wallet = await this.storage.get(StorageKey.LAST_SELECTED_WALLET)
-    const transport = this._activeAccount.isResolved()
-      ? ((await this.getActiveAccount())?.origin.type ?? 'UNKNOWN')
-      : 'UNKNOWN'
-
-    return {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        userId: this.userId,
-        os: currentOS(),
-        walletName: wallet?.name ?? 'init',
-        walletType: wallet?.type ?? 'init',
-        sdkVersion: SDK_VERSION,
-        transport,
-        time: new Date(),
-        action,
-        status
-      })
-    }
-  }
-
-  // Metrics phone home to a Papers-controlled endpoint that the ECAD fork
-  // does not control or ingest. The disabled path also queued payloads into
-  // IndexedDB before the DB was ready, surfacing as unhandledRejection.
-  // Hard-disabled here; full removal (option, storage key, IDB store,
-  // BACKEND_URL constant, all call sites) tracked as a follow-up.
-  // Noop stub; full removal tracked as a follow-up. Args kept for signature
-  // compatibility with all existing call sites until the real implementation
-  // returns.
-  /* eslint-disable @typescript-eslint/no-unused-vars */
-  private sendMetrics(
-    _uri: string,
-    _options?: RequestInit,
-    _thenHandler?: (res: Response) => void,
-    _catchHandler?: (err: Error) => void
-  ) {
-    return
-  }
-  /* eslint-enable @typescript-eslint/no-unused-vars */
-
   private async checkMakeRequest() {
     const isResolved = this._transport.isResolved()
     const isWCInstance = isResolved && (await this.transport) instanceof WalletConnectTransport
@@ -1857,8 +1728,6 @@ export class DAppClient extends Client {
 
     logger.log('REQUESTION PERMIMISSION V3', 'xxx', request)
 
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('connect', 'start'))
-
     const logId = `makeRequestV3 ${Date.now()}`
     logger.time(true, logId)
     let resolved: {
@@ -1876,8 +1745,6 @@ export class DAppClient extends Client {
     }
     const { message: response, connectionInfo } = resolved
     logger.time(false, logId)
-
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('connect', 'start'))
 
     logger.log('RESPONSE V3', response, connectionInfo)
 
@@ -1947,8 +1814,6 @@ export class DAppClient extends Client {
       accountId: activeAccount.accountIdentifier
     }
 
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'start'))
-
     const logId = `makeRequestV3 ${Date.now()}`
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
@@ -1968,7 +1833,6 @@ export class DAppClient extends Client {
     const { message: response, connectionInfo } = resolved
 
     logger.time(false, logId)
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
 
     await blockchain.handleResponse({
       request,
@@ -2040,8 +1904,6 @@ export class DAppClient extends Client {
 
     this.analytics.track('event', 'DAppClient', 'Permission requested')
 
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('connect', 'start'))
-
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
 
@@ -2062,7 +1924,6 @@ export class DAppClient extends Client {
     }
     const { message, connectionInfo } = resolved
     logger.time(false, logId)
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('connect', 'success'))
 
     logger.log('requestPermissions', '######## MESSAGE #######')
     logger.log('requestPermissions', message)
@@ -2140,8 +2001,6 @@ export class DAppClient extends Client {
       contractAddress: activeAccount.address,
       payload: input.payload
     }
-
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'start'))
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
@@ -2161,7 +2020,6 @@ export class DAppClient extends Client {
     const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
 
     this.analytics.track(
       'event',
@@ -2312,8 +2170,6 @@ export class DAppClient extends Client {
       payload,
       sourceAddress: input.sourceAddress || activeAccount.address
     }
-
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'start'))
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
@@ -2333,7 +2189,6 @@ export class DAppClient extends Client {
     const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
 
     await this.notifySuccess(request, {
       account: activeAccount,
@@ -2429,8 +2284,6 @@ export class DAppClient extends Client {
     }
 
     this.analytics.track('event', 'DAppClient', 'Operation requested')
-
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'start'))
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
 
@@ -2451,7 +2304,6 @@ export class DAppClient extends Client {
     const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
 
     await this.notifySuccess(request, {
       account: activeAccount,
@@ -2492,8 +2344,6 @@ export class DAppClient extends Client {
     }
 
     this.analytics.track('event', 'DAppClient', 'Broadcast requested')
-
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'start'))
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
@@ -2513,7 +2363,6 @@ export class DAppClient extends Client {
     const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
 
     await this.notifySuccess(request, {
       network: this.network,
@@ -2652,11 +2501,6 @@ export class DAppClient extends Client {
     // guards on. Catch params are `unknown` under strict TS, same story.
     const typedRequest = request as BeaconRequestInputMessage
     const requestError = rawError as ErrorResponse
-    if (requestError.errorType === BeaconErrorType.ABORTED_ERROR) {
-      this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-    } else {
-      this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-    }
     logger.time(false, logId)
     await this.handleRequestError(typedRequest, requestError).catch(() => undefined)
   }
@@ -3286,16 +3130,12 @@ export class DAppClient extends Client {
 
       return
     }
-
-    await this.createStateSnapshot()
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('disconnect', 'start'))
     this.abortOpenRequests()
     const transports = this.getResolvedTransports(transport)
     await this.removeAllPeersFromTransports(transports)
     await this.clearActiveAccount()
     await this.disconnectResolvedTransports(transports)
     this.clearInternalTransportReferences()
-    this.sendMetrics('performance-metrics/save', await this.buildPayload('disconnect', 'success'))
   }
 
   private getInitializedTransports(): DAppInternalTransport[] {
