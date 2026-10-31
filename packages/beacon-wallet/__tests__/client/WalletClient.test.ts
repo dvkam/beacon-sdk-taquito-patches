@@ -507,4 +507,41 @@ describe('WalletClient', () => {
       deserialize.mockRestore()
     }
   })
+  it('delivers requests emitted during connect and keeps one listener after retry', async () => {
+    const listeners = new Set<any>()
+    const request = { id: 'startup-request' }
+    const context = { origin: 'p2p', id: 'peer' }
+    const transport = {
+      type: 'p2p',
+      connectionStatus: TransportStatus.NOT_CONNECTED,
+      addListener: jest.fn(async (listener: any) => {
+        listeners.add(listener)
+      }),
+      removeListener: jest.fn(async (listener: any) => {
+        listeners.delete(listener)
+      }),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      connect: jest
+        .fn()
+        .mockRejectedValueOnce(new Error('retry connection'))
+        .mockImplementationOnce(async () => {
+          for (const listener of listeners) await listener('serialized', context)
+        })
+    }
+    jest.spyOn(client as any, 'transport', 'get').mockResolvedValue(transport)
+    const handler = jest.fn().mockResolvedValue(undefined)
+    ;(client as any).handleResponse = handler
+    const deserialize = jest
+      .spyOn(Serializer.prototype, 'deserialize')
+      .mockResolvedValue(request as any)
+    try {
+      await client._connect()
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith(request, context)
+      expect(listeners.size).toBe(1)
+      expect(transport.removeListener).toHaveBeenCalledTimes(1)
+    } finally {
+      deserialize.mockRestore()
+    }
+  })
 })

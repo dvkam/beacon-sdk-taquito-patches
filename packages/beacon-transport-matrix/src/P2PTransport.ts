@@ -104,7 +104,7 @@ export class P2PTransport<
           id: publicKey
         }
 
-        this.notifyListeners(message, connectionContext).catch((error) => {
+        return this.notifyListeners(message, connectionContext).catch((error) => {
           logger.error('listen', error)
         })
       })

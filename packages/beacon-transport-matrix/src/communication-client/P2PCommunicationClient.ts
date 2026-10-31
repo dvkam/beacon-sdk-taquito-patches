@@ -77,6 +77,12 @@ const isMatrixError = (error: unknown): error is { errcode: string } =>
 export class P2PCommunicationClient extends CommunicationClient {
   private client: ExposedPromise<MatrixClient> = new ExposedPromise()
 
+  private initialReplay = {
+    pending: 0,
+    buffered: new WeakSet(),
+    claimed: new WeakSet()
+  }
+
   private initialEvent: MatrixClientEvent<MatrixClientEventType.MESSAGE> | undefined
   private initialListener:
     | ((event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => void)
@@ -374,9 +380,14 @@ export class P2PCommunicationClient extends CommunicationClient {
       storage: this.storage
     })
 
+    const replay = this.initialReplay
     this.initialListener = async (
       event: MatrixClientEvent<MatrixClientEventType.MESSAGE>
     ): Promise<void> => {
+      if (replay !== this.initialReplay) {
+        return
+      }
+      replay.buffered.add(event)
       if (this.initialEvent && this.initialEvent.timestamp && event && event.timestamp) {
         if (this.initialEvent.timestamp < event.timestamp) {
           this.initialEvent = event
@@ -479,6 +490,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     this.relayServer = undefined
     this.client = new ExposedPromise()
     this.activeListeners.clear()
+    this.initialReplay = { pending: 0, buffered: new WeakSet(), claimed: new WeakSet() }
     this.initialEvent = undefined
     this.initialListener = undefined
   }
@@ -494,64 +506,96 @@ export class P2PCommunicationClient extends CommunicationClient {
       'listenForEncryptedMessage',
       `start listening for encrypted messages from publicKey ${senderPublicKey}`
     )
+    const replay = this.initialReplay
+    replay.pending++
+    let matrixClient: MatrixClient | undefined
+    try {
+      matrixClient = await this.client.promise
+      if (replay !== this.initialReplay) {
+        return
+      }
+      if (!this.keyPair) {
+        throw new Error('Missing key pair')
+      }
+      const sharedKey = await this.createCryptoBoxServer(senderPublicKey, this.keyPair)
+      if (replay !== this.initialReplay) {
+        return
+      }
 
-    const sharedKey = await this.createCryptoBoxServer(senderPublicKey, this.keyPair!)
-
-    const callbackFunction = async (
-      event: MatrixClientEvent<MatrixClientEventType.MESSAGE>
-    ): Promise<void> => {
-      if (this.isTextMessage(event.content) && (await this.isSender(event, senderPublicKey))) {
-        let payload
-
-        await this.updateRelayServer(event.content.message.sender)
-        await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
-
-        try {
-          payload = Buffer.from(event.content.message.content, 'hex')
-          // content can be non-hex if it's a connection open request
-        } catch {
-          /* */
+      const callbackFunction = async (
+        event: MatrixClientEvent<MatrixClientEventType.MESSAGE>
+      ): Promise<void> => {
+        if (replay !== this.initialReplay) {
+          return
         }
-        if (payload && payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
-          let decryptedMessage: string
-          try {
-            decryptedMessage = await decryptCryptoboxPayload(payload, sharedKey.receive)
-          } catch {
-            // Some messages are encrypted for other recipients.
+        if (this.isTextMessage(event.content) && (await this.isSender(event, senderPublicKey))) {
+          if (replay !== this.initialReplay) {
             return
           }
-
-          logger.log(
-            'listenForEncryptedMessage',
-            `received a message from ${senderPublicKey}`,
-            decryptedMessage
-          )
-          await messageCallback(decryptedMessage)
+          let payload
+          await this.updateRelayServer(event.content.message.sender)
+          if (replay !== this.initialReplay) {
+            return
+          }
+          await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
+          if (replay !== this.initialReplay) {
+            return
+          }
+          try {
+            payload = Buffer.from(event.content.message.content, 'hex')
+          } catch {
+            // Connection-open requests may contain non-hex content.
+          }
+          if (payload && payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
+            let decryptedMessage: string
+            try {
+              decryptedMessage = await decryptCryptoboxPayload(payload, sharedKey.receive)
+            } catch {
+              // Some messages are encrypted for other recipients.
+              return
+            }
+            if (replay !== this.initialReplay) {
+              return
+            }
+            if (replay.buffered.has(event)) {
+              if (replay.claimed.has(event)) {
+                return
+              }
+              replay.claimed.add(event)
+              if (this.initialEvent === event) {
+                this.initialEvent = undefined
+              }
+            }
+            logger.log(
+              'listenForEncryptedMessage',
+              `received a message from ${senderPublicKey}`,
+              decryptedMessage
+            )
+            await messageCallback(decryptedMessage)
+          }
         }
       }
-    }
+      this.activeListeners.set(senderPublicKey, callbackFunction)
+      matrixClient.subscribe(MatrixClientEventType.MESSAGE, callbackFunction)
 
-    this.activeListeners.set(senderPublicKey, callbackFunction)
-    ;(await this.client.promise).subscribe(MatrixClientEventType.MESSAGE, callbackFunction)
-
-    const lastEvent = this.initialEvent
-    if (
-      lastEvent &&
-      lastEvent.timestamp &&
-      new Date().getTime() - lastEvent.timestamp < 5 * 60 * 1000
-    ) {
-      logger.log('listenForEncryptedMessage', 'Handling previous event')
-      await callbackFunction(lastEvent)
-    } else {
-      logger.log('listenForEncryptedMessage', 'No previous event found')
+      const lastEvent = this.initialEvent
+      if (lastEvent && lastEvent.timestamp && Date.now() - lastEvent.timestamp < 5 * 60 * 1000) {
+        logger.log('listenForEncryptedMessage', 'Handling previous event')
+        replay.buffered.add(lastEvent)
+        await callbackFunction(lastEvent)
+      } else {
+        logger.log('listenForEncryptedMessage', 'No previous event found')
+      }
+    } finally {
+      replay.pending--
+      if (matrixClient && replay === this.initialReplay && replay.pending === 0) {
+        if (this.initialListener) {
+          matrixClient.unsubscribe(MatrixClientEventType.MESSAGE, this.initialListener)
+        }
+        this.initialListener = undefined
+        this.initialEvent = undefined
+      }
     }
-
-    const initialListener = this.initialListener
-    if (initialListener) {
-      ;(await this.client.promise).unsubscribe(MatrixClientEventType.MESSAGE, initialListener)
-    }
-    this.initialListener = undefined
-    this.initialEvent = undefined
   }
 
   public async unsubscribeFromEncryptedMessage(senderPublicKey: string): Promise<void> {

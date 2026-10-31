@@ -162,7 +162,7 @@ export class WalletConnectTransport<
           id: publicKey
         }
 
-        this.notifyListeners(message, connectionContext).catch((error) => {
+        return this.notifyListeners(message, connectionContext).catch((error) => {
           logger.error('listen', error)
         })
       })
