@@ -275,6 +275,7 @@ export class WalletClient extends Client {
     }
 
     try {
+      await this.addListener(transport)
       await transport.connect()
     } catch (err: any) {
       logger.warn('_connect', err.message)
@@ -284,16 +285,6 @@ export class WalletClient extends Client {
       return
     }
 
-    transport
-      .addListener(async (message: unknown, connectionInfo: ConnectionContext) => {
-        if (typeof message === 'string') {
-          const deserializedMessage = (await new Serializer().deserialize(
-            message
-          )) as BeaconRequestMessage
-          await this.handleResponse(deserializedMessage, connectionInfo)
-        }
-      })
-      .catch((error) => logger.log('_connect', error))
     this._isConnected.resolve(true)
   }
 

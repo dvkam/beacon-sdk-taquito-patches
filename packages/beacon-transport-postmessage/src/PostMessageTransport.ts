@@ -181,7 +181,7 @@ export class PostMessageTransport<
           id: context.id
         }
 
-        this.notifyListeners(message, connectionContext).catch((error) => {
+        return this.notifyListeners(message, connectionContext).catch((error) => {
           logger.error('listen', error)
         })
       })

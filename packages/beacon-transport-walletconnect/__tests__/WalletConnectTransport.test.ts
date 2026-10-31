@@ -95,7 +95,7 @@ describe('WalletConnectTransport', () => {
     expect(accountsToRemove).toEqual([storedAccount])
   })
   it('reports asynchronous message handler failures at the event boundary', async () => {
-    let receive!: (message: string) => void
+    let receive!: (message: string) => void | Promise<void>
     const communicationClient = {
       listenForEncryptedMessage: jest.fn(async (_key: string, callback: typeof receive) => {
         receive = callback
@@ -112,16 +112,30 @@ describe('WalletConnectTransport', () => {
       wcOptions,
       isLeader
     )
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
     const failure = new Error('handler failed')
     const reported = new Promise<void>((resolve) => {
       jest.spyOn(Logger.prototype, 'error').mockImplementation(() => resolve())
     })
     try {
       await transport.addListener(async () => {
+        await pending
         throw failure
       })
       await transport.listen(walletPublicKey)
-      receive('message')
+      const delivery = receive('message')
+      expect(delivery).toBeInstanceOf(Promise)
+      let completed = false
+      Promise.resolve(delivery).then(() => {
+        completed = true
+      })
+      await Promise.resolve()
+      expect(completed).toBe(false)
+      finish()
+      await delivery
       await reported
       expect(Logger.prototype.error).toHaveBeenCalledWith('listen', failure)
     } finally {

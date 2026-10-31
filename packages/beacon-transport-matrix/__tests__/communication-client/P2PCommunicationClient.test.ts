@@ -199,6 +199,193 @@ describe('P2PCommunicationClient', () => {
       jest.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
     })
 
+    const initialMessage = () => ({
+      type: MatrixClientEventType.MESSAGE,
+      timestamp: Date.now(),
+      content: {
+        roomId: '!room:id',
+        message: {
+          type: MatrixMessageType.TEXT,
+          sender: '@sender:relay.server',
+          content: 'ab'.repeat(24),
+          timestamp: Date.now()
+        }
+      }
+    })
+    it('retains initial requests through a wrong peer and delayed matching setup', async () => {
+      const gate = createDeferred<any>()
+      ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
+        key === 'sender-pub' ? gate.promise : Promise.resolve({ receive: 'key' })
+      )
+      jest
+        .spyOn(client as any, 'isSender')
+        .mockImplementation(async (_event: unknown, key: unknown) => key === 'sender-pub')
+      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      const buffer = jest.fn()
+      ;(client as any).initialListener = buffer
+      const wrong = client.listenForEncryptedMessage('wrong-peer', jest.fn())
+      const handler = jest.fn()
+      const matching = client.listenForEncryptedMessage('sender-pub', handler)
+      await wrong
+      expect(fakeMatrixClient.unsubscribe).not.toHaveBeenCalled()
+      const event = initialMessage()
+      ;(client as any).initialEvent = event
+      gate.resolve({ receive: 'key' })
+      await matching
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith('decrypted-payload')
+      expect(fakeMatrixClient.unsubscribe).toHaveBeenCalledWith(
+        MatrixClientEventType.MESSAGE,
+        buffer
+      )
+      expect((client as any).initialEvent).toBeUndefined()
+    })
+    it('claims an overlapping live and replay event once before downstream handling', async () => {
+      const event = initialMessage()
+      ;(client as any).initialEvent = event
+      const gate = createDeferred<void>()
+      jest.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      const handler = jest.fn(() => gate.promise)
+      const registration = client.listenForEncryptedMessage('sender-pub', handler)
+      await waitFor(() => handler.mock.calls.length === 1)
+      const live = (client as any).activeListeners.get('sender-pub')(event)
+      await live
+      expect(handler).toHaveBeenCalledTimes(1)
+      gate.resolve()
+      await registration
+    })
+    it('does not finalize a new session when an old registration settles after reset', async () => {
+      const gate = createDeferred<any>()
+      ;(client as any).createCryptoBoxServer.mockReturnValueOnce(gate.promise)
+      const old = client.listenForEncryptedMessage('old-peer', jest.fn())
+      await client.reset()
+      ;(client as any).client.resolve(fakeMatrixClient)
+      const event = initialMessage()
+      const buffer = jest.fn()
+      ;(client as any).initialEvent = event
+      ;(client as any).initialListener = buffer
+      gate.resolve({ receive: 'key' })
+      await old
+      expect((client as any).initialEvent).toBe(event)
+      expect(fakeMatrixClient.unsubscribe).not.toHaveBeenCalledWith(
+        MatrixClientEventType.MESSAGE,
+        buffer
+      )
+    })
+
+    it('preserves a newer buffered request while the earlier handler is pending', async () => {
+      const keeper = createDeferred<any>()
+      ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
+        key === 'pending-peer' ? keeper.promise : Promise.resolve({ receive: 'key' })
+      )
+      jest
+        .spyOn(client as any, 'isSender')
+        .mockImplementation(async (_event: unknown, key: unknown) => key === 'sender-pub')
+      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      const event = initialMessage()
+      ;(client as any).initialEvent = event
+      const handlerGate = createDeferred<void>()
+      const handler = jest.fn(() => handlerGate.promise)
+      const pending = client.listenForEncryptedMessage('pending-peer', jest.fn())
+      const registration = client.listenForEncryptedMessage('sender-pub', handler)
+      await waitFor(() => handler.mock.calls.length === 1)
+      const newer = initialMessage()
+      ;(client as any).initialEvent = newer
+      handlerGate.resolve()
+      await registration
+      expect((client as any).initialEvent).toBe(newer)
+      keeper.resolve({ receive: 'key' })
+      await pending
+    })
+    it('keeps an undecryptable buffered event available while other peers register', async () => {
+      const keeper = createDeferred<any>()
+      ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
+        key === 'pending-peer' ? keeper.promise : Promise.resolve({ receive: 'key' })
+      )
+      jest.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      ;(decryptCryptoboxPayload as jest.Mock).mockRejectedValueOnce(new Error('wrong recipient'))
+      const event = initialMessage()
+      ;(client as any).initialEvent = event
+      const pending = client.listenForEncryptedMessage('pending-peer', jest.fn())
+      const handler = jest.fn()
+      await client.listenForEncryptedMessage('sender-pub', handler)
+      expect(handler).not.toHaveBeenCalled()
+      expect((client as any).initialEvent).toBe(event)
+      keeper.resolve({ receive: 'key' })
+      await pending
+    })
+    it('consumes a matching buffered event once even if its handler rejects', async () => {
+      const event = initialMessage()
+      ;(client as any).initialEvent = event
+      jest.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      const failure = new Error('handler rejected')
+      const handler = jest.fn().mockRejectedValue(failure)
+      await expect(client.listenForEncryptedMessage('sender-pub', handler)).rejects.toBe(failure)
+      await (client as any).activeListeners.get('sender-pub')(event)
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect((client as any).initialEvent).toBeUndefined()
+    })
+    it('does not replay an expired initial request', async () => {
+      const event = initialMessage()
+      event.timestamp = Date.now() - 6 * 60 * 1000
+      ;(client as any).initialEvent = event
+      const handler = jest.fn()
+      await client.listenForEncryptedMessage('sender-pub', handler)
+      expect(handler).not.toHaveBeenCalled()
+      expect((client as any).initialEvent).toBeUndefined()
+    })
+
+    it.each(['sender', 'relay', 'decrypt'] as const)(
+      'ignores a callback resumed after reset at the %s boundary',
+      async (boundary) => {
+        const gate = createDeferred<void>()
+        const sender = jest.spyOn(client as any, 'isSender').mockImplementation(async () => {
+          if (boundary === 'sender') await gate.promise
+          return true
+        })
+        const relay = jest.spyOn(client, 'updateRelayServer').mockImplementation(async () => {
+          if (boundary === 'relay') await gate.promise
+        })
+        const room = jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+        ;(decryptCryptoboxPayload as jest.Mock).mockImplementation(async () => {
+          if (boundary === 'decrypt') await gate.promise
+          return 'decrypted-payload'
+        })
+        const handler = jest.fn()
+        await client.listenForEncryptedMessage('sender-pub', handler)
+        const delivery = (client as any).activeListeners.get('sender-pub')(initialMessage())
+        await waitFor(() =>
+          boundary === 'sender'
+            ? sender.mock.calls.length > 0
+            : boundary === 'relay'
+              ? relay.mock.calls.length > 0
+              : (decryptCryptoboxPayload as jest.Mock).mock.calls.length > 0
+        )
+        await client.reset()
+        gate.resolve()
+        await delivery
+        expect(handler).not.toHaveBeenCalled()
+        if (boundary !== 'decrypt') expect(room).not.toHaveBeenCalled()
+      }
+    )
+    it('finalizes the buffer after standalone peer registration', async () => {
+      const buffer = jest.fn()
+      ;(client as any).initialListener = buffer
+      await client.listenForEncryptedMessage('sender-pub', jest.fn())
+      expect(fakeMatrixClient.unsubscribe).toHaveBeenCalledWith(
+        MatrixClientEventType.MESSAGE,
+        buffer
+      )
+      expect((client as any).initialListener).toBeUndefined()
+    })
     it.each(['reset', 'stop'] as const)(
       'subscribes a known peer on the new Matrix client after %s',
       async (operation) => {

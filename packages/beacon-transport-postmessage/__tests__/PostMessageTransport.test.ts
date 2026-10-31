@@ -87,4 +87,35 @@ describe('PostMessageTransport.connect', () => {
     await outcome
     expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
   })
+  it('returns the message listener completion promise', async () => {
+    const transport = new PostMessageTransport(
+      'test',
+      { publicKey: 'public', secretKey: 'secret' } as any,
+      {} as any,
+      StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
+    )
+    let receive!: (message: string, context: any) => void | Promise<void>
+    jest
+      .spyOn((transport as any).client, 'listenForEncryptedMessage')
+      .mockImplementation(async (_key: unknown, callback: any) => {
+        receive = callback
+      })
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    await transport.addListener(() => pending)
+    await transport.listen('peer')
+    const delivery = receive('message', { id: 'peer' })
+    expect(delivery).toBeInstanceOf(Promise)
+    let completed = false
+    Promise.resolve(delivery).then(() => {
+      completed = true
+    })
+    await Promise.resolve()
+    expect(completed).toBe(false)
+    finish()
+    await delivery
+    expect(completed).toBe(true)
+  })
 })

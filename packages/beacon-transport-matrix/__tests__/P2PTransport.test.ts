@@ -87,4 +87,60 @@ describe('P2PTransport.connect', () => {
     await outcome
     expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
   })
+  it('returns the message listener completion promise', async () => {
+    const transport = new P2PTransport(
+      'test',
+      { publicKey: 'public', secretKey: 'secret' } as any,
+      {} as any,
+      {},
+      StorageKey.TRANSPORT_P2P_PEERS_DAPP
+    )
+    let receive!: (message: string) => void | Promise<void>
+    jest
+      .spyOn((transport as any).client, 'listenForEncryptedMessage')
+      .mockImplementation(async (_key: unknown, callback: any) => {
+        receive = callback
+      })
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    await transport.addListener(() => pending)
+    await transport.listen('peer')
+    const delivery = receive('message')
+    expect(delivery).toBeInstanceOf(Promise)
+    let completed = false
+    Promise.resolve(delivery).then(() => {
+      completed = true
+    })
+    await Promise.resolve()
+    expect(completed).toBe(false)
+    finish()
+    await delivery
+    expect(completed).toBe(true)
+  })
+
+  it('cleans up the initial buffer when a peer is added after a no-peer connection', async () => {
+    const transport = new P2PTransport(
+      'test',
+      { publicKey: 'public', secretKey: 'secret' } as any,
+      {} as any,
+      {},
+      StorageKey.TRANSPORT_P2P_PEERS_DAPP
+    )
+    const communication = (transport as any).client
+    const matrix = { subscribe: jest.fn(), unsubscribe: jest.fn() }
+    const buffer = jest.fn()
+    communication.client.resolve(matrix)
+    communication.initialListener = buffer
+    jest.spyOn(communication, 'start').mockResolvedValue(undefined)
+    jest.spyOn(communication, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
+    jest.spyOn(transport, 'getPeers').mockResolvedValue([])
+    jest.spyOn((transport as any).peerManager, 'addPeer').mockResolvedValue(undefined)
+    await transport.connect()
+    expect(matrix.unsubscribe).not.toHaveBeenCalled()
+    await transport.addPeer({ publicKey: 'peer' } as any)
+    expect(matrix.unsubscribe).toHaveBeenCalledWith('message', buffer)
+    expect(communication.initialListener).toBeUndefined()
+  })
 })
