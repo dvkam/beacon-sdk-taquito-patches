@@ -1,6 +1,6 @@
-import { keys } from '@ecadlabs/beacon-utils'
 import { Logger } from '@ecadlabs/beacon-core'
 import { MatrixRequest, MatrixRequestParams } from './models/api/MatrixRequest'
+import { MatrixSyncRequestParams } from './models/api/MatrixSync'
 
 const logger = new Logger('MatrixHttpClient')
 
@@ -79,8 +79,7 @@ export class MatrixHttpClient {
       headers.Authorization = `Bearer ${config.accessToken}`
     }
 
-    const params = requestParams ? this.getParams(requestParams) : undefined
-    const url = this.buildUrl(this.apiUrl(CLIENT_API_R0), endpoint, params)
+    const url = this.buildUrl(this.apiUrl(CLIENT_API_R0), endpoint, requestParams)
 
     let response: Response
     try {
@@ -117,35 +116,24 @@ export class MatrixHttpClient {
     }
   }
 
-  private buildUrl(
-    base: string,
-    endpoint: string,
-    params?: Record<string, string | number | boolean>
-  ): string {
+  private buildUrl(base: string, endpoint: string, params?: MatrixSyncRequestParams): string {
     const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
     let url = `${base}${path}`
-    if (params && Object.keys(params).length > 0) {
+    if (params) {
       const search = new URLSearchParams()
-      for (const [key, value] of Object.entries(params)) {
-        search.append(key, String(value))
+      Object.entries(params).forEach(([key, value]: [string, unknown]) => {
+        if (value !== undefined) {
+          search.append(key, String(value))
+        }
+      })
+
+      const query = search.toString()
+      if (query) {
+        url += `?${query}`
       }
-      url += `?${search.toString()}`
     }
 
     return url
-  }
-
-  private getParams(
-    _params: MatrixRequestParams<any>
-  ): { [key: string]: string | number | boolean } | undefined {
-    if (!_params) {
-      return undefined
-    }
-
-    const params = Object.assign(_params, {})
-    keys(params).forEach((key) => params[key] === undefined && delete params[key])
-
-    return params as { [key: string]: string | number | boolean }
   }
 
   /**
