@@ -716,9 +716,9 @@ describe('useConnect hook', () => {
     )
 
     act(() => {
-      result.current[15](AlertState.BUG_REPORT)
+      result.current[15](AlertState.WALLETS)
     })
-    expect(result.current[3]).toBe(AlertState.BUG_REPORT)
+    expect(result.current[3]).toBe(AlertState.WALLETS)
 
     act(() => {
       result.current[16]('new-qr-code')

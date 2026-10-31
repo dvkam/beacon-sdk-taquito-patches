@@ -27,7 +27,6 @@ jest.mock('@ecadlabs/beacon-core', () => {
     WCStorage: jest.fn().mockImplementation(() => ({
       onMessageHandler: undefined,
       onErrorHandler: undefined,
-      backup: jest.fn(),
       resetState: jest.fn(),
       notify: jest.fn()
     })),

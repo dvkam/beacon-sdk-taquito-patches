@@ -139,11 +139,6 @@ export interface DAppClientOptions {
   enableAppSwitching?: boolean
 
   /**
-   * Enable metrics tracking (Disabled by Default)
-   */
-  enableMetrics?: boolean
-
-  /**
    * Maximum time in milliseconds to wait for a wallet acknowledge or response before rejecting
    * the request. Set to 0 or a negative value to disable request timeouts.
    */
