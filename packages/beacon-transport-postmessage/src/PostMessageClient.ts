@@ -99,7 +99,7 @@ export class PostMessageClient extends MessageBasedClient {
   }
 
   public async listenForChannelOpening(
-    messageCallback: (pairingResponse: ExtendedPostMessagePairingResponse) => void
+    messageCallback: (pairingResponse: ExtendedPostMessagePairingResponse) => void | Promise<void>
   ): Promise<void> {
     const fn = async (event: unknown): Promise<void> => {
       if (!isTrustedWindowMessage(event)) {
@@ -122,23 +122,29 @@ export class PostMessageClient extends MessageBasedClient {
         const payload = Buffer.from(payloadHex, 'hex')
 
         if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
+          let response: ExtendedPostMessagePairingResponse
           try {
             const pairingResponse: PostMessagePairingResponse = JSON.parse(
               await openCryptobox(payload, this.keyPair!.publicKey, this.keyPair!.secretKey)
             )
 
-            messageCallback(
-              new ExtendedPostMessagePairingResponse(
-                pairingResponse.id,
-                pairingResponse.name,
-                pairingResponse.publicKey,
-                pairingResponse.version,
-                await getSenderId(pairingResponse.publicKey),
-                extensionId
-              )
+            response = new ExtendedPostMessagePairingResponse(
+              pairingResponse.id,
+              pairingResponse.name,
+              pairingResponse.publicKey,
+              pairingResponse.version,
+              await getSenderId(pairingResponse.publicKey),
+              extensionId
             )
-          } catch (decryptionError) {
-            /* NO-OP. We try to decode every message, but some might not be addressed to us. */
+          } catch {
+            // Some messages are encrypted for other recipients.
+            return
+          }
+
+          try {
+            await messageCallback(response)
+          } catch (error) {
+            logger.error('listenForChannelOpening', error)
           }
         }
       }
