@@ -26,6 +26,8 @@ export class P2PTransport<
 > extends Transport<T, K, P2PCommunicationClient> {
   public readonly type: TransportType = TransportType.P2P
 
+  private connectionGeneration = Symbol('P2P connection')
+
   constructor(
     name: string,
     keyPair: KeyPair,
@@ -51,19 +53,30 @@ export class P2PTransport<
       return
     }
 
+    const generation = Symbol('P2P connection')
+    this.connectionGeneration = generation
     logger.log('connect')
     this._isConnected = TransportStatus.CONNECTING
 
     try {
       await this.client.start()
+      if (generation !== this.connectionGeneration) {
+        return
+      }
 
       const knownPeers = await this.getPeers()
+      if (generation !== this.connectionGeneration) {
+        return
+      }
 
       if (knownPeers.length > 0) {
         logger.log('connect', `connecting to ${knownPeers.length} peers`)
         const registrations = await Promise.allSettled(
           knownPeers.map((peer) => this.listen(peer.publicKey))
         )
+        if (generation !== this.connectionGeneration) {
+          return
+        }
         for (const registration of registrations) {
           if (registration.status === 'rejected') {
             throw registration.reason
@@ -72,17 +85,26 @@ export class P2PTransport<
       }
 
       await this.startOpenChannelListener()
+      if (generation !== this.connectionGeneration) {
+        return
+      }
       await super.connect()
     } catch (error) {
+      if (generation !== this.connectionGeneration) {
+        return
+      }
       await this.client.stop().catch((cleanupError) => {
         logger.error('connect', 'failed to stop matrix client', cleanupError)
       })
-      this._isConnected = TransportStatus.NOT_CONNECTED
-      throw error
+      if (generation === this.connectionGeneration) {
+        this._isConnected = TransportStatus.NOT_CONNECTED
+        throw error
+      }
     }
   }
 
   public async disconnect(): Promise<void> {
+    this.connectionGeneration = Symbol('P2P connection')
     await this.client.stop()
 
     return super.disconnect()
