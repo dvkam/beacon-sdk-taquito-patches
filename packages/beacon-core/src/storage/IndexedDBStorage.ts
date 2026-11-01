@@ -56,8 +56,8 @@ export class IndexedDBStorage extends Storage {
         })
       }
 
-      openRequest.onsuccess = (event: any) => {
-        const db = event.target.result as IDBDatabase
+      openRequest.onsuccess = () => {
+        const db = openRequest.result
         // Check if all stores exist – if not, perform an upgrade.
         const missingStores = this.storeNames.filter(
           (storeName) => !db.objectStoreNames.contains(storeName)
@@ -76,19 +76,19 @@ export class IndexedDBStorage extends Storage {
             })
           }
 
-          upgradeRequest.onsuccess = (event: any) => {
-            this.db = event.target.result as IDBDatabase
+          upgradeRequest.onsuccess = () => {
+            this.db = upgradeRequest.result
             resolve(this.db)
           }
 
-          upgradeRequest.onerror = (event: any) => reject(event.target.error)
+          upgradeRequest.onerror = () => reject(upgradeRequest.error)
         } else {
           this.db = db
           resolve(db)
         }
       }
 
-      openRequest.onerror = (event: any) => reject(event.target.error)
+      openRequest.onerror = () => reject(openRequest.error)
     })
   }
 
@@ -279,13 +279,13 @@ export class IndexedDBStorage extends Storage {
 
     const targetDBRequest = indexedDB.open(targetDBName)
 
-    targetDBRequest.onerror = (event: any) => {
-      throw new Error(`Failed to open target database: ${event.target.error}`)
+    targetDBRequest.onerror = () => {
+      throw new Error(`Failed to open target database: ${targetDBRequest.error}`)
     }
 
     const targetDB = await new Promise<IDBDatabase>((resolve, reject) => {
-      targetDBRequest.onsuccess = (event) => resolve((event.target as IDBOpenDBRequest).result)
-      targetDBRequest.onerror = (event: any) => reject(event.target.error)
+      targetDBRequest.onsuccess = () => resolve(targetDBRequest.result)
+      targetDBRequest.onerror = () => reject(targetDBRequest.error)
     })
 
     // Copy items from the source store to the target store, skipping any specified keys.
