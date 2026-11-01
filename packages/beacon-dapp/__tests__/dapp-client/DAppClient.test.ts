@@ -1,6 +1,7 @@
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
+  AccountInfo,
   BeaconMessageType,
   BeaconErrorType,
   NetworkType,
@@ -14,9 +15,15 @@ import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { LocalStorage } from '@ecadlabs/beacon-core'
 import { WalletConnectTransport } from '@ecadlabs/beacon-transport-walletconnect'
 import { BeaconEvent } from '../../src/events'
+import { DappPostMessageTransport } from '../../src/transports/DappPostMessageTransport'
+import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
+import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
+import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
 import { getDAppClientInstance } from '../../src/utils/get-instance'
 
 const mockLoggerWarn = jest.fn()
+const mockLoggerError = jest.fn()
+let mockBroadcastMessage: ((message: unknown) => Promise<void>) | undefined
 let storageChangedCallback:
   | ((event: {
       eventType: 'storageCleared' | 'entryModified'
@@ -72,6 +79,7 @@ jest.mock('@ecadlabs/beacon-core', () => {
       }
       subscribeToStorageChanged(cb: typeof storageChangedCallback) {
         storageChangedCallback = cb
+        return Promise.resolve()
       }
       getPrefixedKey(key: string) {
         return key
@@ -123,7 +131,9 @@ jest.mock('@ecadlabs/beacon-core', () => {
     getSenderId: jest.fn().mockResolvedValue('senderId'),
     Logger: class {
       constructor(_name: string) {}
-      error() {}
+      error(...args: unknown[]) {
+        mockLoggerError(...args)
+      }
       log() {}
       warn(...args: unknown[]) {
         mockLoggerWarn(...args)
@@ -145,7 +155,9 @@ jest.mock('@ecadlabs/beacon-core', () => {
       delete() {}
     },
     MultiTabChannel: class {
-      constructor(_a: any, _b: any, _c: any) {}
+      constructor(_a: string, callback: (message: unknown) => Promise<void>, _c: unknown) {
+        mockBroadcastMessage = callback
+      }
       isLeader() {
         return true
       }
@@ -175,7 +187,9 @@ describe('DAppClient — basic unit tests', () => {
   beforeEach(() => {
     ;(window as any).beaconCreatedClientInstance = false
     mockLoggerWarn.mockClear()
+    mockLoggerError.mockClear()
     storageChangedCallback = undefined
+    mockBroadcastMessage = undefined
     client = new DAppClient({
       name: 'TestApp',
       storage: new LocalStorage(),
@@ -190,7 +204,7 @@ describe('DAppClient — basic unit tests', () => {
     await (client as any).storage.set(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP, [])
   }
 
-  const createStoredAccount = () => ({
+  const createStoredAccount = (): AccountInfo => ({
     accountIdentifier: '2Hhz5SFLypkQAgwvMCX7',
     senderId: 'wallet-sender-id',
     origin: {
@@ -859,7 +873,7 @@ describe('DAppClient — basic unit tests', () => {
 
     await testClient.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
     await testClient.storage.set(StorageKey.ACCOUNTS, [account])
-    const setActiveAccount = jest.spyOn(testClient, 'setActiveAccount').mockResolvedValue(undefined)
+    const initialize = jest.spyOn(client, 'initInternalTransports').mockResolvedValue(undefined)
 
     await storageChangedCallback?.({
       eventType: 'entryModified',
@@ -868,8 +882,8 @@ describe('DAppClient — basic unit tests', () => {
       newValue: JSON.stringify([account])
     })
 
-    expect(setActiveAccount).toHaveBeenCalledWith(account)
-    setActiveAccount.mockRestore()
+    await expect(client.getActiveAccount()).resolves.toEqual(account)
+    initialize.mockRestore()
   })
 
   it('does not re-set the active account when accounts storage changes but memory already matches', async () => {
@@ -2057,6 +2071,11 @@ describe('DAppClient — basic unit tests', () => {
     jest.spyOn(storedStateClient as any, 'getWalletInfo').mockResolvedValue({})
     jest.spyOn((storedStateClient as any).accountManager, 'addAccount').mockResolvedValue(undefined)
 
+    const restored: unknown = Reflect.get(storedStateClient, 'activeAccountLoaded')
+    if (!(restored instanceof Promise)) {
+      throw new Error('Missing startup completion promise')
+    }
+    await restored
     await expect(storedStateClient.requestPermissions()).resolves.toEqual({
       ...permissionResponse,
       walletKey: accountInfo.walletKey,
@@ -2203,12 +2222,14 @@ describe('DAppClient — basic unit tests', () => {
     const firstValidation = new ExposedPromise<boolean>()
     ;(storage as any).validateResults = [firstValidation.promise, false]
     const p2pPeer = createV480P2PPeer()
+    const disconnectP2P = jest.fn().mockResolvedValue(undefined)
     const initInternalTransports = jest
       .spyOn(DAppClient.prototype as any, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.p2pTransport = {
           connectionStatus: TransportStatus.CONNECTED,
-          getPeers: jest.fn().mockResolvedValue([p2pPeer])
+          getPeers: jest.fn().mockResolvedValue([p2pPeer]),
+          disconnect: disconnectP2P
         }
       })
     const getWalletInfo = jest
@@ -2236,6 +2257,7 @@ describe('DAppClient — basic unit tests', () => {
       await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
       await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
       await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
+      expect(disconnectP2P).toHaveBeenCalledTimes(1)
       expect(invalidAccountHandler).toHaveBeenCalledWith(
         { reason: 'storage_validation_failed' },
         undefined
@@ -2415,5 +2437,663 @@ describe('DAppClient — basic unit tests', () => {
       ;(timeoutClient as any).clearOpenRequest('session_update')
       jest.useRealTimers()
     }
+  })
+  const delayedStartup = async () => {
+    const account = createStoredAccount()
+    const storage = new LocalStorage()
+    await storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
+    await storage.set(StorageKey.ACCOUNTS, [account])
+    await storage.set(StorageKey.PERMISSION_LIST, [createV480Permission()])
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    const transport = new DappP2PTransport(
+      'Delayed startup',
+      { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
+      storage,
+      {}
+    )
+    jest.spyOn(transport, 'connect').mockImplementation(async () => {
+      entered.resolve()
+      await release.promise
+    })
+    jest
+      .spyOn(transport, 'getPeers')
+      .mockResolvedValue([{ ...createV480P2PPeer(), type: 'p2p-pairing-response' }])
+    jest.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
+    jest.spyOn(transport, 'disconnect').mockResolvedValue(undefined)
+    const selected = jest.fn()
+    class StartupClient extends DAppClient {
+      public async initInternalTransports(): Promise<void> {
+        this.p2pTransport = transport
+      }
+      public hasSelectedTransport(): boolean {
+        return this._transport.isResolved()
+      }
+      public selectedTransport() {
+        return this.transport
+      }
+    }
+    Reflect.set(window, 'beaconCreatedClientInstance', false)
+    const startupClient = new StartupClient({
+      name: 'Delayed startup',
+      storage,
+      disableDefaultEvents: true,
+      eventHandlers: { [BeaconEvent.ACTIVE_ACCOUNT_SET]: { handler: selected } }
+    })
+    await entered.promise
+    const startup: unknown = Reflect.get(startupClient, 'activeAccountLoaded')
+    if (!(startup instanceof Promise)) {
+      throw new Error('Missing startup completion promise')
+    }
+    return { startupClient, storage, account, selected, release, startup, transport }
+  }
+
+  it('does not restore a disconnected account when an older startup connection completes', async () => {
+    const { startupClient, storage, selected, release, startup, account } = await delayedStartup()
+    await startupClient.disconnect({ notifyPeers: false })
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    selected.mockClear()
+    release.resolve()
+    await expect(startup).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+    expect(selected).not.toHaveBeenCalledWith(account, undefined)
+  })
+
+  it('restores a valid account without rewriting the shared account pointer', async () => {
+    const { startupClient, storage, selected, release, startup, account } = await delayedStartup()
+    const write = jest.spyOn(storage, 'set')
+    release.resolve()
+    await expect(startup).resolves.toEqual(account)
+    await expect(startupClient.getActiveAccount()).resolves.toEqual(account)
+    expect(write).not.toHaveBeenCalledWith(StorageKey.ACTIVE_ACCOUNT, expect.anything())
+    expect(selected).toHaveBeenCalledWith(account, undefined)
+  })
+
+  it('invalidates pending startup even when clearActiveAccount is repeated', async () => {
+    const { startupClient, storage, release, startup } = await delayedStartup()
+    await startupClient.clearActiveAccount()
+    await startupClient.clearActiveAccount()
+    release.resolve()
+    await expect(startup).resolves.toBeUndefined()
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+  })
+
+  it('handles a storage clear event while startup is pending', async () => {
+    const { startupClient, storage, release, startup } = await delayedStartup()
+    await storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    await storageChangedCallback?.({
+      eventType: 'storageCleared',
+      key: null,
+      oldValue: null,
+      newValue: null
+    })
+    release.resolve()
+    await expect(startup).resolves.toBeUndefined()
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+  })
+
+  it.each(['pointer', 'membership'])(
+    'rejects a startup snapshot after its %s changes without an event',
+    async (changed) => {
+      const { startupClient, storage, release, startup } = await delayedStartup()
+      if (changed === 'pointer') {
+        await storage.delete(StorageKey.ACTIVE_ACCOUNT)
+      } else {
+        await storage.set(StorageKey.ACCOUNTS, [])
+      }
+      const write = jest.spyOn(storage, 'set')
+      release.resolve()
+      await expect(startup).resolves.toBeUndefined()
+      await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+      expect(startupClient.hasSelectedTransport()).toBe(false)
+      expect(write).not.toHaveBeenCalledWith(StorageKey.ACTIVE_ACCOUNT, expect.anything())
+    }
+  )
+
+  it('does not publish an older startup selection after a newer explicit selection', async () => {
+    const { startupClient, storage, release, startup, account } = await delayedStartup()
+    const newer = { ...account, accountIdentifier: 'newer-account' }
+    const selection = startupClient.setActiveAccount(newer)
+    release.resolve()
+    await selection
+    await expect(startup).resolves.toBeUndefined()
+    await expect(startupClient.getActiveAccount()).resolves.toEqual(newer)
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(newer.accountIdentifier)
+  })
+
+  it('allows a new intentional selection after disconnect cancels startup', async () => {
+    const { startupClient, storage, release, startup, account } = await delayedStartup()
+    await startupClient.disconnect({ notifyPeers: false })
+    release.resolve()
+    await startup
+    await startupClient.setActiveAccount(account)
+    await expect(startupClient.getActiveAccount()).resolves.toEqual(account)
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(account.accountIdentifier)
+    expect(startupClient.hasSelectedTransport()).toBe(true)
+  })
+
+  it('does not publish startup state after destroy', async () => {
+    const { startupClient, storage, release, startup, selected } = await delayedStartup()
+    await startupClient.destroy()
+    const write = jest.spyOn(storage, 'set')
+    selected.mockClear()
+    release.resolve()
+    await expect(startup).resolves.toBeUndefined()
+    expect(write).not.toHaveBeenCalledWith(StorageKey.ACTIVE_ACCOUNT, expect.anything())
+    expect(selected).not.toHaveBeenCalled()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+  })
+
+  it('cancels pending startup on a broadcast disconnect before transport selection', async () => {
+    const { startupClient, storage, release, startup } = await delayedStartup()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+    if (!mockBroadcastMessage) {
+      throw new Error('Missing broadcast subscription')
+    }
+    await mockBroadcastMessage({ type: 'DISCONNECT' })
+    release.resolve()
+    await expect(startup).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+  })
+
+  it('orders a clear after an explicit account write already in progress', async () => {
+    const { startupClient, storage, release, startup, account } = await delayedStartup()
+    await startupClient.clearActiveAccount()
+    release.resolve()
+    await startup
+    const entered = new ExposedPromise<void>()
+    const commit = new ExposedPromise<void>()
+    const write = storage.set.bind(storage)
+    jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+      if (key === StorageKey.ACTIVE_ACCOUNT) {
+        entered.resolve()
+        await commit.promise
+      }
+      await write(key, value)
+    })
+    const selection = startupClient.setActiveAccount(account)
+    await entered.promise
+    const clear = startupClient.clearActiveAccount()
+    commit.resolve()
+    await Promise.all([selection, clear])
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+  })
+
+  it('does not create transports after disconnect supersedes slow seed loading', async () => {
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    class SlowSeedStorage extends LocalStorage {
+      public holdSeed = false
+      public async get<K extends StorageKey>(key: K) {
+        if (this.holdSeed && key === StorageKey.BEACON_SDK_SECRET_SEED) {
+          entered.resolve()
+          await release.promise
+        }
+        return super.get(key)
+      }
+    }
+    class ResourceClient extends DAppClient {
+      public hasInitializedTransports(): boolean {
+        return Boolean(
+          this.postMessageTransport || this.p2pTransport || this.walletConnectTransport
+        )
+      }
+    }
+    const storage = new SlowSeedStorage()
+    Reflect.set(window, 'beaconCreatedClientInstance', false)
+    const resourceClient = new ResourceClient({
+      name: 'Slow seed',
+      storage,
+      disableDefaultEvents: true
+    })
+    await resourceClient.getActiveAccount()
+    await resourceClient.beaconId
+    storage.holdSeed = true
+    const initialization = resourceClient.initInternalTransports()
+    await entered.promise
+    await resourceClient.disconnect({ notifyPeers: false })
+    release.resolve()
+    await initialization
+    expect(resourceClient.hasInitializedTransports()).toBe(false)
+    await expect(resourceClient.getActiveAccount()).resolves.toBeUndefined()
+  })
+  it('cancels an init waiting for startup before the delayed connection completes', async () => {
+    const { startupClient, release, startup } = await delayedStartup()
+    const initialization = expect(startupClient.init()).rejects.toMatchObject({
+      errorType: BeaconErrorType.ABORTED_ERROR
+    })
+    await startupClient.disconnect({ notifyPeers: false })
+    await initialization
+    release.resolve()
+    await startup
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+  })
+
+  it('allows a new explicit init without waiting for canceled startup work', async () => {
+    const { startupClient, release, startup, transport } = await delayedStartup()
+    await startupClient.disconnect({ notifyPeers: false })
+    await expect(startupClient.init(transport)).resolves.toBe(TransportType.P2P)
+    const disconnect = jest.spyOn(transport, 'disconnect')
+    disconnect.mockClear()
+    release.resolve()
+    await startup
+    expect(startupClient.hasSelectedTransport()).toBe(true)
+    expect(disconnect).not.toHaveBeenCalled()
+  })
+
+  it('removes a stored account without waiting for startup transport connection', async () => {
+    const { startupClient, storage, release, startup, account } = await delayedStartup()
+    await startupClient.removeAccount(account.accountIdentifier)
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([])
+    release.resolve()
+    await expect(startup).resolves.toBeUndefined()
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+  })
+
+  it('clears a dangling shared pointer when memory is already empty', async () => {
+    const { startupClient, storage, release, startup } = await delayedStartup()
+    await storage.set(StorageKey.ACCOUNTS, [])
+    release.resolve()
+    await startup
+    await storageChangedCallback?.({
+      eventType: 'entryModified',
+      key: StorageKey.ACCOUNTS,
+      oldValue: '[{}]',
+      newValue: '[]'
+    })
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+  })
+
+  it('keeps a committed account when a newer account pointer write fails', async () => {
+    const { startupClient, storage, release, startup, account, selected } = await delayedStartup()
+    release.resolve()
+    await startup
+    selected.mockClear()
+    const failure = new Error('account write failed')
+    const write = storage.set.bind(storage)
+    jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+      if (key === StorageKey.ACTIVE_ACCOUNT) {
+        throw failure
+      }
+      await write(key, value)
+    })
+    const newer = { ...account, accountIdentifier: 'newer-account' }
+    await expect(startupClient.setActiveAccount(newer)).rejects.toBe(failure)
+    await expect(startupClient.getActiveAccount()).resolves.toEqual(account)
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(account.accountIdentifier)
+    expect(selected).not.toHaveBeenCalled()
+  })
+
+  it('settles empty account state when the first explicit selection fails', async () => {
+    const { startupClient, release, startup, account, transport } = await delayedStartup()
+    const failure = new Error('connection failed')
+    jest.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
+    await expect(
+      startupClient.setActiveAccount({ ...account, accountIdentifier: 'newer-account' })
+    ).rejects.toBe(failure)
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    release.resolve()
+    await startup
+  })
+
+  it('does not emit a stale account when a transport event synchronously clears selection', async () => {
+    const { startupClient, storage, release, startup, selected } = await delayedStartup()
+    let cleared: Promise<void> | undefined
+    await startupClient.subscribeToEvent(BeaconEvent.ACTIVE_TRANSPORT_SET, (transport) => {
+      if (transport && !cleared) {
+        cleared = startupClient.clearActiveAccount()
+      }
+    })
+    release.resolve()
+    await startup
+    await cleared
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+    expect(selected.mock.calls.some(([account]) => account !== undefined)).toBe(false)
+  })
+
+  it('waits for an account write already in progress before destroy completes', async () => {
+    const { startupClient, storage, release, startup, account } = await delayedStartup()
+    await startupClient.clearActiveAccount()
+    release.resolve()
+    await startup
+    const entered = new ExposedPromise<void>()
+    const commit = new ExposedPromise<void>()
+    const write = storage.set.bind(storage)
+    jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+      if (key === StorageKey.ACTIVE_ACCOUNT) {
+        entered.resolve()
+        await commit.promise
+      }
+      await write(key, value)
+    })
+    const selection = startupClient.setActiveAccount(account)
+    await entered.promise
+    const destroy = startupClient.destroy()
+    await expect(
+      Promise.race([destroy.then(() => 'destroyed'), Promise.resolve('pending')])
+    ).resolves.toBe('pending')
+    commit.resolve()
+    await Promise.all([selection, destroy])
+    const writeCount = jest.mocked(storage.set).mock.calls.length
+    await startup
+    expect(jest.mocked(storage.set).mock.calls).toHaveLength(writeCount)
+  })
+
+  it('keeps a pending stored selection when an unrelated account is removed', async () => {
+    const { startupClient, storage, release, startup, account } = await delayedStartup()
+    const inactive = { ...account, accountIdentifier: 'inactive-account' }
+    await storage.set(StorageKey.ACCOUNTS, [account, inactive])
+    await startupClient.removeAccount(inactive.accountIdentifier)
+    release.resolve()
+    await expect(startup).resolves.toEqual(account)
+    await expect(startupClient.getActiveAccount()).resolves.toEqual(account)
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(account.accountIdentifier)
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([account])
+  })
+  it('settles account reads and logs a failed remote selection while startup is pending', async () => {
+    const { startupClient, storage, release, startup, account, transport } = await delayedStartup()
+    const remote = { ...account, accountIdentifier: 'remote-account' }
+    await storage.set(StorageKey.ACCOUNTS, [account, remote])
+    await storage.set(StorageKey.ACTIVE_ACCOUNT, remote.accountIdentifier)
+    const failure = new Error('remote transport failed')
+    jest.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
+    await storageChangedCallback?.({
+      eventType: 'entryModified',
+      key: StorageKey.ACTIVE_ACCOUNT,
+      oldValue: account.accountIdentifier,
+      newValue: remote.accountIdentifier
+    })
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    expect(mockLoggerError).toHaveBeenCalledWith('storageChanged', failure)
+    release.resolve()
+    await startup
+  })
+
+  it('does not select a transport from canceled delayed init registration', async () => {
+    const { startupClient, storage, release, startup, transport } = await delayedStartup()
+    await startupClient.disconnect({ notifyPeers: false })
+    const registered = new ExposedPromise<void>()
+    const finishRegistration = new ExposedPromise<void>()
+    jest.spyOn(transport, 'addListener').mockImplementation(async () => {
+      registered.resolve()
+      await finishRegistration.promise
+    })
+    const originalInit = expect(startupClient.init(transport)).rejects.toMatchObject({
+      errorType: BeaconErrorType.ABORTED_ERROR
+    })
+    await registered.promise
+    await startupClient.clearActiveAccount()
+    await originalInit
+    const freshTransport = new DappP2PTransport(
+      'Fresh init',
+      { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
+      storage,
+      {}
+    )
+    const freshInit = startupClient.init(freshTransport)
+    finishRegistration.resolve()
+    await freshInit
+    await expect(startupClient.selectedTransport()).resolves.toBe(freshTransport)
+    release.resolve()
+    await startup
+    await expect(startupClient.selectedTransport()).resolves.toBe(freshTransport)
+  })
+
+  it('ignores a retained pairing callback after a newer init owns selection', async () => {
+    const originalBroadcastChannel = Object.getOwnPropertyDescriptor(globalThis, 'BroadcastChannel')
+    Object.defineProperty(globalThis, 'BroadcastChannel', {
+      configurable: true,
+      value: class {
+        public onmessage: unknown
+        public onmessageerror: unknown
+        public postMessage(_message: unknown): void {}
+        public close(): void {}
+      }
+    })
+    const extensions = jest
+      .spyOn(PostMessageTransport, 'getAvailableExtensions')
+      .mockResolvedValue([])
+    try {
+      const storage = new LocalStorage()
+      const keys = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) }
+      const post = new DappPostMessageTransport('Old pairing', keys, storage)
+      const p2p = new DappP2PTransport('Old pairing', keys, storage, {})
+      const wc = new DappWalletConnectTransport(
+        'Old pairing',
+        keys,
+        storage,
+        { network: NetworkType.MAINNET, opts: { projectId: 'test-project' } },
+        async () => true
+      )
+      for (const transport of [post, p2p, wc]) {
+        jest.spyOn(transport, 'connect').mockResolvedValue(undefined)
+        jest.spyOn(transport, 'disconnect').mockResolvedValue(undefined)
+        jest.spyOn(transport, 'getPeers').mockResolvedValue([])
+        jest.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
+        jest.spyOn(transport, 'stopListeningForNewPeers').mockResolvedValue(undefined)
+      }
+      jest.spyOn(post, 'getPairingRequestInfo').mockResolvedValue({
+        id: 'post',
+        type: 'postmessage-pairing-request',
+        name: 'Old pairing',
+        publicKey: 'post-key',
+        version: '4'
+      })
+      jest.spyOn(p2p, 'getPairingRequestInfo').mockResolvedValue({
+        id: 'p2p',
+        type: 'p2p-pairing-request',
+        name: 'Old pairing',
+        publicKey: 'p2p-key',
+        version: '4',
+        relayServer: 'matrix.example.com'
+      })
+      let retained: Parameters<DappPostMessageTransport['listenForNewPeer']>[0] | undefined
+      const registered = new ExposedPromise<void>()
+      jest.spyOn(post, 'listenForNewPeer').mockImplementation(async (callback) => {
+        retained = callback
+        registered.resolve()
+      })
+      class PairingClient extends DAppClient {
+        public selectedTransport() {
+          return this.transport
+        }
+        public async initInternalTransports(): Promise<void> {
+          this.postMessageTransport = post
+          this.p2pTransport = p2p
+          this.walletConnectTransport = wc
+        }
+      }
+      Reflect.set(window, 'beaconCreatedClientInstance', false)
+      const pairingClient = new PairingClient({
+        name: 'Pairing ownership',
+        storage,
+        disableDefaultEvents: true
+      })
+      await pairingClient.getActiveAccount()
+      const paired = jest.fn()
+      await pairingClient.subscribeToEvent(BeaconEvent.PAIR_SUCCESS, paired)
+      const oldInit = expect(pairingClient.init()).rejects.toMatchObject({
+        errorType: BeaconErrorType.ABORTED_ERROR
+      })
+      await registered.promise
+      await pairingClient.clearActiveAccount()
+      await oldInit
+      const fresh = new DappP2PTransport('New init', keys, storage, {})
+      await pairingClient.init(fresh)
+      for (const transport of [post, p2p, wc]) {
+        jest.mocked(transport.stopListeningForNewPeers).mockClear()
+      }
+      if (!retained) {
+        throw new Error('Missing retained pairing callback')
+      }
+      retained({
+        id: 'old-peer',
+        type: 'postmessage-pairing-response',
+        name: 'Old wallet',
+        publicKey: 'old-key',
+        version: '4',
+        extensionId: 'old-extension',
+        senderId: 'old-sender'
+      })
+      await expect(pairingClient.selectedTransport()).resolves.toBe(fresh)
+      expect(paired).not.toHaveBeenCalled()
+      for (const transport of [post, p2p, wc]) {
+        expect(transport.stopListeningForNewPeers).not.toHaveBeenCalled()
+      }
+      jest.spyOn(wc, 'forceUpdate').mockReturnValue(undefined)
+      const walletConnectAccount = createStoredAccount()
+      walletConnectAccount.origin.type = Origin.WALLETCONNECT
+      await pairingClient.setActiveAccount(walletConnectAccount)
+      for (const transport of [post, p2p, wc]) {
+        jest.mocked(transport.disconnect).mockClear()
+      }
+      await pairingClient.clearActiveAccount()
+      for (const transport of [post, p2p, wc]) {
+        expect(transport.disconnect).toHaveBeenCalledTimes(1)
+      }
+    } finally {
+      extensions.mockRestore()
+      if (originalBroadcastChannel) {
+        Object.defineProperty(globalThis, 'BroadcastChannel', originalBroadcastChannel)
+      } else {
+        Reflect.deleteProperty(globalThis, 'BroadcastChannel')
+      }
+    }
+  })
+  it('settles an account read already waiting on startup when the client is destroyed', async () => {
+    const { startupClient, release, startup } = await delayedStartup()
+    const read = startupClient.getActiveAccount()
+    await startupClient.destroy()
+    await expect(read).resolves.toBeUndefined()
+    release.resolve()
+    await expect(startup).resolves.toBeUndefined()
+  })
+  it('notifies subscribers when account-list removal clears a previously active account', async () => {
+    const { startupClient, storage, release, startup, selected } = await delayedStartup()
+    release.resolve()
+    await startup
+    selected.mockClear()
+    await storage.set(StorageKey.ACCOUNTS, [])
+    await storageChangedCallback?.({
+      eventType: 'entryModified',
+      key: StorageKey.ACCOUNTS,
+      oldValue: '[{}]',
+      newValue: '[]'
+    })
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    expect(selected).toHaveBeenCalledWith(undefined, undefined)
+  })
+  it('completes the account-clear notification when a transport subscriber clears again', async () => {
+    const { startupClient, storage, release, startup, selected } = await delayedStartup()
+    release.resolve()
+    await startup
+    selected.mockClear()
+    let nestedClear: Promise<void> | undefined
+    let requested = false
+    await startupClient.subscribeToEvent(BeaconEvent.ACTIVE_TRANSPORT_SET, (transport) => {
+      if (!transport && !requested) {
+        requested = true
+        nestedClear = startupClient.clearActiveAccount()
+      }
+    })
+    await startupClient.clearActiveAccount()
+    await nestedClear
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+    expect(selected).toHaveBeenCalledWith(undefined, undefined)
+    const peerState: unknown = Reflect.get(startupClient, '_activePeer')
+    if (
+      typeof peerState !== 'object' ||
+      peerState === null ||
+      !('promise' in peerState) ||
+      !(peerState.promise instanceof Promise)
+    ) {
+      throw new Error('Missing selected peer state')
+    }
+    await expect(peerState.promise).resolves.toBeUndefined()
+  })
+  it('notifies a committed clear when the superseding selection fails', async () => {
+    const { startupClient, storage, release, startup, selected, account, transport } =
+      await delayedStartup()
+    release.resolve()
+    await startup
+    selected.mockClear()
+    const failure = new Error('new selection failed')
+    jest.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
+    let attempted = false
+    let selection: Promise<void> | undefined
+    let rejected: unknown
+    await startupClient.subscribeToEvent(BeaconEvent.ACTIVE_TRANSPORT_SET, (selectedTransport) => {
+      if (!selectedTransport && !attempted) {
+        attempted = true
+        selection = startupClient
+          .setActiveAccount({ ...account, accountIdentifier: 'newer-account' })
+          .catch((error: unknown) => {
+            rejected = error
+          })
+      }
+    })
+    await startupClient.clearActiveAccount()
+    await selection
+    expect(rejected).toBe(failure)
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    expect(startupClient.hasSelectedTransport()).toBe(false)
+    expect(selected).toHaveBeenCalledWith(undefined, undefined)
+    expect(selected.mock.calls.some(([account]) => account !== undefined)).toBe(false)
+  })
+  it('finishes a clear notification when account-list recovery observes already-empty memory', async () => {
+    const { startupClient, storage, release, startup, selected } = await delayedStartup()
+    release.resolve()
+    await startup
+    selected.mockClear()
+    let recovered: Promise<void> | undefined
+    let notified = false
+    await startupClient.subscribeToEvent(BeaconEvent.ACTIVE_TRANSPORT_SET, (transport) => {
+      if (!transport && !notified) {
+        notified = true
+        recovered = storageChangedCallback?.({
+          eventType: 'entryModified',
+          key: StorageKey.ACCOUNTS,
+          oldValue: '[]',
+          newValue: '[{}]'
+        })
+      }
+    })
+    await startupClient.clearActiveAccount()
+    await recovered
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    expect(selected).toHaveBeenCalledWith(undefined, undefined)
+  })
+  it('settles account reads when a remote lookup fails before account preparation', async () => {
+    const { startupClient, release, startup, account } = await delayedStartup()
+    const read = startupClient.getActiveAccount()
+    const failure = new Error('account lookup failed')
+    jest.spyOn(startupClient, 'getAccount').mockRejectedValueOnce(failure)
+    await storageChangedCallback?.({
+      eventType: 'entryModified',
+      key: StorageKey.ACTIVE_ACCOUNT,
+      oldValue: account.accountIdentifier,
+      newValue: 'remote-account'
+    })
+    expect(mockLoggerError).toHaveBeenCalledWith('storageChanged', failure)
+    await expect(read).resolves.toBeUndefined()
+    release.resolve()
+    await startup
   })
 })

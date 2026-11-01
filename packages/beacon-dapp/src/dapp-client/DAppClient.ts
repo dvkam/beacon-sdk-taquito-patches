@@ -68,7 +68,8 @@ import {
   SimulatedProofOfEventChallengeRequest,
   SimulatedProofOfEventChallengeResponse,
   RequestSimulatedProofOfEventChallengeInput,
-  TransportStatus
+  TransportStatus,
+  Storage
   // PermissionRequestV3
   // RequestEncryptPayloadInput,
   // EncryptPayloadResponseOutput,
@@ -191,9 +192,7 @@ export interface DAppClientRemoveAllPeersOptions {
 }
 
 type DAppInternalTransport =
-  | DappPostMessageTransport
-  | DappP2PTransport
-  | DappWalletConnectTransport
+  DappPostMessageTransport | DappP2PTransport | DappWalletConnectTransport
 
 interface TransportWithClientCleanup {
   doClientCleanup: () => Promise<void>
@@ -208,6 +207,14 @@ interface PeerNotification {
   transport: DAppInternalTransport
   peer: ExtendedPeerInfo
 }
+
+type PreparedAccountSelection =
+  | { kind: 'superseded' }
+  | {
+      kind: 'ready'
+      transport: DAppInternalTransport | undefined
+      peer: PeerInfoType | undefined
+    }
 
 /**
  * @publicapi
@@ -278,6 +285,8 @@ export class DAppClient extends Client {
    */
   private _activeAccount: ExposedPromise<AccountInfo | undefined> = new ExposedPromise()
 
+  private activeAccountNotificationPending = false
+
   /**
    * The currently active peer. This is used to address a peer in case the active account is not set. (Eg. for permission requests)
    */
@@ -304,6 +313,25 @@ export class DAppClient extends Client {
   private _sdkSecretSeedPromise: Promise<string> | undefined
 
   private destroyed = false
+
+  private accountTransition = new AbortController()
+
+  private readonly startupTransition = this.accountTransition.signal
+
+  private activeAccountWrite: Promise<void> = Promise.resolve()
+
+  private pendingActiveAccountWrites = 0
+
+  private beginAccountTransition(): AbortSignal {
+    this.accountTransition.abort()
+    this.accountTransition = new AbortController()
+
+    return this.accountTransition.signal
+  }
+
+  private isCurrentAccountTransition(transition: AbortSignal): boolean {
+    return !this.destroyed && !transition.aborted && transition === this.accountTransition.signal
+  }
 
   private readonly activeAccountLoaded: Promise<AccountInfo | undefined>
 
@@ -366,52 +394,22 @@ export class DAppClient extends Client {
     this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
 
     // Subscribe to storage changes and update the active account if it changes on other tabs
-    this.storage.subscribeToStorageChanged(async (event) => {
-      if (event.oldValue === event.newValue) {
-        return
-      }
+    this.storage
+      .subscribeToStorageChanged((event) =>
+        this.onStorageChanged(event).catch((error: unknown) =>
+          logger.error('storageChanged', error)
+        )
+      )
+      .catch((error: unknown) => logger.error('subscribeToStorageChanged', error))
 
-      if (event.eventType === 'storageCleared') {
-        await this.setActiveAccount(undefined)
-
-        return
-      }
-      if (event.eventType === 'entryModified') {
-        if (event.key === this.storage.getPrefixedKey(StorageKey.ACTIVE_ACCOUNT)) {
-          const accountIdentifier = event.newValue
-          if (!accountIdentifier || accountIdentifier === 'undefined') {
-            await this.setActiveAccount(undefined)
-          } else {
-            const account = await this.getAccount(accountIdentifier)
-            await this.setActiveAccount(account)
-          }
-
-          return
-        }
-        if (event.key === this.storage.getPrefixedKey(StorageKey.ACCOUNTS)) {
-          await this.recoverActiveAccountFromAccountsChange()
-
-          return
-        }
-        if (event.key === this.storage.getPrefixedKey(StorageKey.ENABLE_METRICS)) {
-          this.enableMetrics = Boolean(await this.storage.get(StorageKey.ENABLE_METRICS))
-
-          return
-        }
-        if (event.key === this.storage.getPrefixedKey(StorageKey.BEACON_SDK_SECRET_SEED)) {
-          this._keyPair = new ExposedPromise()
-          this._beaconId = new ExposedPromise()
-          await this.initSDK()
-
-          return
-        }
-      }
-    })
-
+    const startupTransition = this.startupTransition
     this.activeAccountLoaded = this.storage
       .get(StorageKey.ACTIVE_ACCOUNT)
       .then(async (activeAccountIdentifier) => {
         const accounts = await this.accountManager.getAccounts()
+        if (!this.isCurrentAccountTransition(startupTransition)) {
+          return undefined
+        }
 
         if (activeAccountIdentifier === 'undefined') {
           // Non-normalizing storage backends can still surface legacy sentinel strings directly.
@@ -431,9 +429,9 @@ export class DAppClient extends Client {
             return undefined
           }
 
-          await this.setActiveAccount(account)
+          const restored = await this.applyActiveAccount(account, startupTransition, 'storage')
 
-          return account
+          return restored ? account : undefined
         }
 
         if (accounts.length > 0 && this.hasStoredActiveAccountPointer()) {
@@ -442,13 +440,15 @@ export class DAppClient extends Client {
           return undefined
         }
 
-        await this.setActiveAccount(undefined)
+        await this.applyActiveAccount(undefined, startupTransition, 'storage')
 
         return undefined
       })
       .catch(async (storageError) => {
         logger.error(storageError)
-        await this.deactivateInvalidAccountState('invalid_active_account_storage')
+        if (this.isCurrentAccountTransition(startupTransition)) {
+          await this.deactivateInvalidAccountState('invalid_active_account_storage')
+        }
 
         return undefined
       })
@@ -598,11 +598,17 @@ export class DAppClient extends Client {
       .validate()
       .then(async (isValid) => {
         const account = await this.activeAccountLoaded
+        if (!this.isCurrentAccountTransition(startupTransition)) {
+          return
+        }
 
         if (!isValid) {
           const info = await this.getWalletInfo(undefined, account, false)
           info.type =
             info.type === 'extension' && account?.origin.type === Origin.P2P ? 'mobile' : info.type
+          if (!this.isCurrentAccountTransition(startupTransition)) {
+            return
+          }
           await this.storage.set(StorageKey.LAST_SELECTED_WALLET, {
             icon: info.icon ?? '',
             key: info.name,
@@ -612,6 +618,9 @@ export class DAppClient extends Client {
           })
 
           const nowValid = await this.storageValidator.validate()
+          if (!this.isCurrentAccountTransition(startupTransition)) {
+            return
+          }
 
           if (!nowValid && account) {
             await this.deactivateInvalidAccountState('storage_validation_failed')
@@ -707,7 +716,7 @@ export class DAppClient extends Client {
         this.handleResponse(message.data.message, message.data.connectionInfo)
         break
       case 'DISCONNECT':
-        this._transport.isResolved() && this.disconnect()
+        await this.disconnect()
         break
       default:
         logger.error('onBCMessageHandler', 'message type not recognized', message)
@@ -800,16 +809,67 @@ export class DAppClient extends Client {
     this.storage.set(StorageKey.USER_ID, this.userId)
   }
 
+  private async onStorageChanged(
+    event: Parameters<Parameters<Storage['subscribeToStorageChanged']>[0]>[0]
+  ): Promise<void> {
+    if (event.eventType === 'storageCleared') {
+      await this.applyActiveAccount(undefined, this.beginAccountTransition(), 'storage')
+
+      return
+    }
+    if (event.oldValue === event.newValue) {
+      return
+    }
+    if (event.eventType === 'entryModified') {
+      if (event.key === this.storage.getPrefixedKey(StorageKey.ACTIVE_ACCOUNT)) {
+        const transition = this.beginAccountTransition()
+        const accountIdentifier = event.newValue
+        if (!accountIdentifier || accountIdentifier === 'undefined') {
+          await this.applyActiveAccount(undefined, transition, 'storage')
+        } else {
+          await this.runAccountTransition(transition, async () => {
+            const account = await this.getAccount(accountIdentifier)
+            await this.commitActiveAccount(account, transition, 'storage')
+          })
+        }
+
+        return
+      }
+      if (event.key === this.storage.getPrefixedKey(StorageKey.ACCOUNTS)) {
+        await this.recoverActiveAccountFromAccountsChange()
+
+        return
+      }
+      if (event.key === this.storage.getPrefixedKey(StorageKey.ENABLE_METRICS)) {
+        this.enableMetrics = Boolean(await this.storage.get(StorageKey.ENABLE_METRICS))
+
+        return
+      }
+      if (event.key === this.storage.getPrefixedKey(StorageKey.BEACON_SDK_SECRET_SEED)) {
+        this._keyPair = new ExposedPromise()
+        this._beaconId = new ExposedPromise()
+        await this.initSDK()
+
+        return
+      }
+    }
+  }
+
   public async initInternalTransports(): Promise<void> {
+    const transition = this.accountTransition.signal
     const seed = await this.getOrCreateSDKSecretSeed()
     const keyPair = await getKeypairFromSeed(seed)
 
-    if (this.postMessageTransport || this.p2pTransport || this.walletConnectTransport) {
+    if (
+      !this.isCurrentAccountTransition(transition) ||
+      this.postMessageTransport ||
+      this.p2pTransport ||
+      this.walletConnectTransport
+    ) {
       return
     }
 
     this.postMessageTransport = new DappPostMessageTransport(this.name, keyPair, this.storage)
-    await this.addListener(this.postMessageTransport)
 
     this.p2pTransport = new DappP2PTransport(
       this.name,
@@ -819,8 +879,6 @@ export class DAppClient extends Client {
       this.iconUrl,
       this.appUrl
     )
-
-    await this.addListener(this.p2pTransport)
 
     const wcOptions = {
       projectId: this.wcProjectId,
@@ -846,7 +904,11 @@ export class DAppClient extends Client {
 
     this.initEvents()
 
-    await this.addListener(this.walletConnectTransport)
+    await Promise.all([
+      this.addListener(this.postMessageTransport),
+      this.addListener(this.p2pTransport),
+      this.addListener(this.walletConnectTransport)
+    ])
   }
 
   private async getOrCreateSDKSecretSeed(): Promise<string> {
@@ -968,11 +1030,19 @@ export class DAppClient extends Client {
    * If you wish to disconnect your dApp, use `disconnect` instead.
    */
   public async destroy(): Promise<void> {
+    this.beginAccountTransition()
+    if (!this._activeAccount.isSettled()) {
+      this._activeAccount.resolve(undefined)
+    }
     this.destroyed = true
 
-    await this.createStateSnapshot()
-    await this.destroyInternalTransports()
-    await super.destroy()
+    try {
+      await this.activeAccountWrite
+    } finally {
+      await this.createStateSnapshot()
+      await this.destroyInternalTransports()
+      await super.destroy()
+    }
   }
 
   private async destroyInternalTransports(): Promise<void> {
@@ -1063,13 +1133,26 @@ export class DAppClient extends Client {
       return this._initPromise
     }
 
-    try {
-      await this.activeAccountLoaded
-    } catch {
-      //
+    const transition = this.accountTransition.signal
+    if (!this.startupTransition.aborted) {
+      await this.waitForAccountRestoration(transition)
+    }
+    this.assertNotDestroyed()
+    if (!this.isCurrentAccountTransition(transition)) {
+      throw this.createAbortedError()
     }
 
+    if (this._initPromise) {
+      return this.init(transport, substratePairing)
+    }
+    let removeAbortListener: () => void = () => undefined
     this._initPromise = new Promise(async (resolve, reject) => {
+      const abort = () => {
+        this._initPromise = undefined
+        reject(this.createAbortedError())
+      }
+      transition.addEventListener('abort', abort, { once: true })
+      removeAbortListener = () => transition.removeEventListener('abort', abort)
       this._initSubstratePairing = requestedSubstratePairing
       // Capture reject so abort paths (modal close, transport-level rejection)
       // can unwedge a pending `await this.init()`. _initReject is cleared by
@@ -1088,29 +1171,30 @@ export class DAppClient extends Client {
       try {
         if (transport) {
           await this.addListener(transport)
-
+          if (!this.isCurrentAccountTransition(transition)) {
+            return
+          }
           resolve(await super.init(transport))
         } else if (this._transport.isSettled()) {
-          await (await this.transport).connect()
-
-          resolve(await super.init(await this.transport))
+          const selectedTransport = await this.transport
+          if (!this.isCurrentAccountTransition(transition)) {
+            return
+          }
+          await selectedTransport.connect()
+          if (!this.isCurrentAccountTransition(transition)) {
+            return
+          }
+          resolve(await super.init(selectedTransport))
         } else {
           const activeAccount = await this.getActiveAccount()
-          const stopListening = () => {
-            const onError = (err: unknown) => logger.error('stopListeningForNewPeers', err)
-            if (this.postMessageTransport) {
-              this.postMessageTransport.stopListeningForNewPeers().catch(onError)
-            }
-            if (this.p2pTransport) {
-              this.p2pTransport.stopListeningForNewPeers().catch(onError)
-            }
-            if (this.walletConnectTransport) {
-              this.walletConnectTransport.stopListeningForNewPeers().catch(onError)
-            }
+          if (!this.isCurrentAccountTransition(transition)) {
+            return
           }
 
           await this.initInternalTransports()
-
+          if (!this.isCurrentAccountTransition(transition)) {
+            return
+          }
           if (!this.postMessageTransport || !this.p2pTransport || !this.walletConnectTransport) {
             // Bare return here used to strand the promise forever -- no UI is
             // emitted, no peer ever pairs, no abort path fires. Reject explicitly
@@ -1127,7 +1211,17 @@ export class DAppClient extends Client {
             return
           }
 
-          this.postMessageTransport
+          const p2pTransport = this.p2pTransport
+          const postMessageTransport = this.postMessageTransport
+          const walletConnectTransport = this.walletConnectTransport
+          const stopListening = () => {
+            const onError = (err: unknown) => logger.error('stopListeningForNewPeers', err)
+            postMessageTransport.stopListeningForNewPeers().catch(onError)
+            p2pTransport.stopListeningForNewPeers().catch(onError)
+            walletConnectTransport.stopListeningForNewPeers().catch(onError)
+          }
+
+          postMessageTransport
             .connect()
             .then()
             .catch((err) => logger.error('init', 'postmessage connect', err))
@@ -1136,19 +1230,18 @@ export class DAppClient extends Client {
             const origin = activeAccount.origin.type
             // Select the transport that matches the active account
             if (origin === Origin.EXTENSION) {
-              resolve(await super.init(this.postMessageTransport))
+              resolve(await super.init(postMessageTransport))
             } else if (origin === Origin.P2P) {
-              resolve(await super.init(this.p2pTransport))
+              resolve(await super.init(p2pTransport))
             } else if (origin === Origin.WALLETCONNECT) {
-              resolve(await super.init(this.walletConnectTransport))
+              resolve(await super.init(walletConnectTransport))
             }
           } else {
-            const p2pTransport = this.p2pTransport
-            const postMessageTransport = this.postMessageTransport
-            const walletConnectTransport = this.walletConnectTransport
-
             postMessageTransport
               .listenForNewPeer((peer) => {
+                if (!this.isCurrentAccountTransition(transition)) {
+                  return
+                }
                 logger.log('init', 'postmessage transport peer connected', peer)
                 this.analytics.track('event', 'DAppClient', 'Extension connected', {
                   peerName: peer.name
@@ -1157,10 +1250,11 @@ export class DAppClient extends Client {
                   .emit(BeaconEvent.PAIR_SUCCESS, peer)
                   .catch((emitError) => logger.warn('init', emitError))
 
-                this.setActivePeer(peer).catch((err) => logger.error('init', err))
-                this.setTransport(this.postMessageTransport).catch((err) =>
-                  logger.error('init', err)
-                )
+                if (!this.isCurrentAccountTransition(transition)) {
+                  return
+                }
+                this.setActivePeer(peer, transition).catch((err) => logger.error('init', err))
+                this.setTransport(postMessageTransport).catch((err) => logger.error('init', err))
                 stopListening()
                 resolve(TransportType.POST_MESSAGE)
               })
@@ -1168,6 +1262,9 @@ export class DAppClient extends Client {
 
             p2pTransport
               .listenForNewPeer((peer) => {
+                if (!this.isCurrentAccountTransition(transition)) {
+                  return
+                }
                 logger.log('init', 'p2p transport peer connected', peer)
                 this.analytics.track('event', 'DAppClient', 'Beacon Wallet connected', {
                   peerName: peer.name
@@ -1176,8 +1273,11 @@ export class DAppClient extends Client {
                   .emit(BeaconEvent.PAIR_SUCCESS, peer)
                   .catch((emitError) => logger.warn('init', emitError))
 
-                this.setActivePeer(peer).catch((err) => logger.error('init', err))
-                this.setTransport(this.p2pTransport).catch((err) => logger.error('init', err))
+                if (!this.isCurrentAccountTransition(transition)) {
+                  return
+                }
+                this.setActivePeer(peer, transition).catch((err) => logger.error('init', err))
+                this.setTransport(p2pTransport).catch((err) => logger.error('init', err))
                 stopListening()
                 resolve(TransportType.P2P)
               })
@@ -1185,6 +1285,9 @@ export class DAppClient extends Client {
 
             walletConnectTransport
               .listenForNewPeer((peer) => {
+                if (!this.isCurrentAccountTransition(transition)) {
+                  return
+                }
                 logger.log('init', 'walletconnect transport peer connected', peer)
                 this.analytics.track('event', 'DAppClient', 'WalletConnect Wallet connected', {
                   peerName: peer.name
@@ -1193,10 +1296,11 @@ export class DAppClient extends Client {
                   .emit(BeaconEvent.PAIR_SUCCESS, peer)
                   .catch((emitError) => logger.warn('init', emitError))
 
-                this.setActivePeer(peer).catch((err) => logger.error('init', err))
-                this.setTransport(this.walletConnectTransport).catch((err) =>
-                  logger.error('init', err)
-                )
+                if (!this.isCurrentAccountTransition(transition)) {
+                  return
+                }
+                this.setActivePeer(peer, transition).catch((err) => logger.error('init', err))
+                this.setTransport(walletConnectTransport).catch((err) => logger.error('init', err))
                 stopListening()
                 resolve(TransportType.WALLETCONNECT)
               })
@@ -1207,32 +1311,36 @@ export class DAppClient extends Client {
                 this.analytics.track('event', 'DAppClient', 'Extensions detected', { extensions })
               })
               .catch((error) => {
+                if (!this.isCurrentAccountTransition(transition)) {
+                  return
+                }
                 this._initPromise = undefined
                 logger.error('init', 'getAvailableExtensions', error)
               })
 
-            const abortHandler = async () => {
-              logger.log('init', 'ABORTED')
-              this.sendMetrics(
-                'performance-metrics/save',
-                await this.buildPayload('connect', 'abort')
-              )
+            const abortHandler = async (): Promise<AbortSignal | undefined> => {
+              if (!this.isCurrentAccountTransition(transition)) {
+                return undefined
+              }
+              this.abortPendingInit()
+              const cleanupTransition = this.beginAccountTransition()
               await Promise.all([
                 postMessageTransport.disconnect(),
-                // p2pTransport.disconnect(), do not abort connection manually
+                p2pTransport.disconnect(),
                 walletConnectTransport.disconnect()
               ])
+              if (!this.isCurrentAccountTransition(cleanupTransition)) {
+                return
+              }
               this.postMessageTransport =
                 this.walletConnectTransport =
                 this.p2pTransport =
                   undefined
-              if (this._activeAccount.isResolved()) {
-                this.clearActiveAccount().catch((err) => logger.warn('init', 'clearActiveAccount', err))
-              }
-              // Reject _initPromise so any awaiter (makeRequest -> requestPermissions)
-              // unwinds via handleRequestError instead of hanging. _initReject
-              // also clears _initPromise as a side effect.
-              this._initReject?.(this.createAbortedError())
+              await this.applyActiveAccount(undefined, cleanupTransition, 'local')
+
+              return this.isCurrentAccountTransition(cleanupTransition)
+                ? cleanupTransition
+                : undefined
             }
 
             const serializer = new Serializer()
@@ -1240,15 +1348,29 @@ export class DAppClient extends Client {
               try {
                 await p2pTransport.connect()
               } catch (err: unknown) {
-                const error = err as Error
-                logger.error('init', error.message)
-                await this.hideUI(['alert']) // hide pairing alert
-                setTimeout(() => {
-                  this.events
-                    .emit(BeaconEvent.GENERIC_ERROR, error.message)
-                    .catch((emitErr) => logger.warn('init', 'GENERIC_ERROR emit', emitErr))
-                }, 1000)
-                abortHandler().catch((abortErr) => logger.warn('init', 'abortHandler', abortErr))
+                if (!this.isCurrentAccountTransition(transition)) {
+                  resolveP2pPeerInfo('')
+
+                  return
+                }
+                const message = err instanceof Error ? err.message : String(err)
+                logger.error('init', err)
+                await this.hideUI(['alert'])
+                const errorTransition = await abortHandler()
+                if (errorTransition) {
+                  setTimeout(() => {
+                    if (this.isCurrentAccountTransition(errorTransition)) {
+                      this.events
+                        .emit(BeaconEvent.GENERIC_ERROR, message)
+                        .catch((emitErr) => logger.warn('init', 'GENERIC_ERROR emit', emitErr))
+                    }
+                  }, 1000)
+                }
+                resolveP2pPeerInfo('')
+
+                return
+              }
+              if (!this.isCurrentAccountTransition(transition)) {
                 resolveP2pPeerInfo('')
 
                 return
@@ -1275,13 +1397,18 @@ export class DAppClient extends Client {
               )
             })
 
+            if (!this.isCurrentAccountTransition(transition)) {
+              return
+            }
             this.events
               .emit(BeaconEvent.PAIR_INIT, {
                 p2pPeerInfo,
                 postmessagePeerInfo,
                 walletConnectPeerInfo,
                 networkType: this.network.type,
-                abortedHandler: abortHandler.bind(this),
+                abortedHandler: async () => {
+                  await abortHandler()
+                },
                 disclaimerText: this.disclaimerText,
                 analytics: this.analytics,
                 featuredWallets: this.featuredWallets,
@@ -1300,7 +1427,7 @@ export class DAppClient extends Client {
     // Drop the _initReject reference whether init resolved or rejected, so the
     // field is never stale. Using an explicit helper keeps the dangling
     // observer chain out of statement position (which the lint rules forbid).
-    this.clearInitRejectOnSettle(this._initPromise)
+    this.clearInitRejectOnSettle(this._initPromise, removeAbortListener)
 
     return this._initPromise
   }
@@ -1311,11 +1438,17 @@ export class DAppClient extends Client {
    * Errors on the observer chain are swallowed; only the original
    * {@link _initPromise} surfaces them to its awaiters.
    */
-  private clearInitRejectOnSettle(initPromise: Promise<TransportType>): void {
+  private clearInitRejectOnSettle(
+    initPromise: Promise<TransportType>,
+    removeAbortListener: () => void
+  ): void {
     initPromise
       .finally(() => {
-        this._initReject = undefined
-        this._initSubstratePairing = undefined
+        removeAbortListener()
+        if (!this._initPromise || this._initPromise === initPromise) {
+          this._initReject = undefined
+          this._initSubstratePairing = undefined
+        }
       })
       .catch(() => {
         // observer-only; original promise's rejection is delivered to awaiters
@@ -1331,6 +1464,28 @@ export class DAppClient extends Client {
     return this._activeAccount.promise
   }
 
+  private waitForAccountRestoration(transition: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const abort = () => reject(this.createAbortedError())
+      if (transition.aborted) {
+        abort()
+
+        return
+      }
+      transition.addEventListener('abort', abort, { once: true })
+      this.activeAccountLoaded.then(
+        () => {
+          transition.removeEventListener('abort', abort)
+          resolve()
+        },
+        (error: unknown) => {
+          transition.removeEventListener('abort', abort)
+          reject(error)
+        }
+      )
+    })
+  }
+
   private retainStorageValidationPromise(): void {
     // Constructor validation is intentionally fire-and-forget, but retaining
     // the promise gives tests a deterministic hook without changing public API.
@@ -1338,26 +1493,35 @@ export class DAppClient extends Client {
   }
 
   private async deactivateInvalidAccountState(
-    reason: InvalidAccountDeactivatedReason
+    reason: InvalidAccountDeactivatedReason,
+    transition: AbortSignal = this.accountTransition.signal
   ): Promise<void> {
-    if (this.hasEmittedInvalidAccountDeactivated) {
+    if (!this.isCurrentAccountTransition(transition) || this.hasEmittedInvalidAccountDeactivated) {
       return
     }
 
     this.hasEmittedInvalidAccountDeactivated = true
     logger.log('deactivateInvalidAccountState', reason)
     if (reason === 'missing_active_account') {
-      await this.repairMissingActiveAccount()
+      await this.repairMissingActiveAccount(transition)
     } else {
-      await this.resetInvalidState(false)
+      await this.resetInvalidState(false, transition)
     }
-    await this.events.emit(BeaconEvent.INVALID_ACCOUNT_DEACTIVATED, { reason })
+    if (this.isCurrentAccountTransition(transition)) {
+      await this.events.emit(BeaconEvent.INVALID_ACCOUNT_DEACTIVATED, { reason })
+    }
   }
 
-  private async repairMissingActiveAccount(): Promise<void> {
+  private async repairMissingActiveAccount(
+    transition: AbortSignal = this.beginAccountTransition()
+  ): Promise<void> {
+    const identifier = await this.storage.get(StorageKey.ACTIVE_ACCOUNT)
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
+    }
     this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(undefined)
-    await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
-    await this.setActivePeer(undefined)
+    await this.persistActiveAccount(undefined, transition, identifier)
+    await this.setActivePeer(undefined, transition)
   }
 
   private hasStoredActiveAccountPointer(): boolean {
@@ -1373,31 +1537,47 @@ export class DAppClient extends Client {
     }
   }
 
-  private async isInvalidState(account: AccountInfo) {
-    const activeAccount = await this._activeAccount.promise
-
-    return !activeAccount
-      ? false
-      : activeAccount?.address !== account?.address && !this.isGetActiveAccountHandled
-  }
-
-  private async resetInvalidState(emit: boolean = true) {
+  private async resetInvalidState(
+    emit: boolean = true,
+    transition: AbortSignal = this.beginAccountTransition()
+  ) {
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
+    }
     await this.accountManager.removeAllAccounts()
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
+    }
     this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(undefined)
-    await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    await this.persistActiveAccount(undefined, transition)
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
+    }
     if (emit) {
       await this.events.emit(BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE)
     } else {
       await this.hideUI(['alert'])
     }
-    await Promise.all([
-      this.postMessageTransport?.disconnect(),
-      this.walletConnectTransport?.disconnect()
-    ])
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
+    }
+    const postMessageTransport = this.postMessageTransport
+    const p2pTransport = this.p2pTransport
+    const walletConnectTransport = this.walletConnectTransport
     this.postMessageTransport = this.p2pTransport = this.walletConnectTransport = undefined
-    await this.setActivePeer(undefined)
+    await Promise.all([
+      postMessageTransport?.disconnect(),
+      p2pTransport?.disconnect(),
+      walletConnectTransport?.disconnect()
+    ])
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
+    }
+    await this.setActivePeer(undefined, transition)
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
+    }
     await this.setTransport(undefined)
-    this._initPromise = undefined
   }
 
   /**
@@ -1406,6 +1586,48 @@ export class DAppClient extends Client {
    * @param account The account that will be set as the active account
    */
   public async setActiveAccount(account?: AccountInfo): Promise<void> {
+    if (account && this._disconnectPromise) {
+      await this._disconnectPromise
+    }
+    await this.applyActiveAccount(account, this.beginAccountTransition(), 'local')
+  }
+
+  private applyActiveAccount(
+    account: AccountInfo | undefined,
+    transition: AbortSignal,
+    source: 'local' | 'storage'
+  ): Promise<boolean> {
+    return this.runAccountTransition(transition, () =>
+      this.commitActiveAccount(account, transition, source)
+    )
+  }
+
+  private async runAccountTransition<T>(
+    transition: AbortSignal,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await operation()
+    } catch (error: unknown) {
+      if (this.isCurrentAccountTransition(transition) && !this._activeAccount.isSettled()) {
+        this._activeAccount.resolve(undefined)
+      }
+      await this.notifyActiveAccount(transition).catch((notificationError: unknown) =>
+        logger.error('ACTIVE_ACCOUNT_SET', notificationError)
+      )
+      throw error
+    }
+  }
+
+  private async commitActiveAccount(
+    account: AccountInfo | undefined,
+    transition: AbortSignal,
+    source: 'local' | 'storage'
+  ): Promise<boolean> {
+    if (!this.isCurrentAccountTransition(transition)) {
+      return false
+    }
+    const hasPendingAccountWrite = this.pendingActiveAccountWrites > 0
     const activeAccountAlreadyCleared = !account && (await this.isActiveAccountAlreadyCleared())
 
     if (!activeAccountAlreadyCleared && !this.isGetActiveAccountHandled) {
@@ -1415,125 +1637,235 @@ export class DAppClient extends Client {
       )
     }
 
-    if (account && this._activeAccount.isSettled() && (await this.isInvalidState(account))) {
-      const tranport = await this.transport
-
-      if (tranport instanceof WalletConnectTransport && tranport.wasDisconnectedByWallet()) {
-        await this.resetInvalidState()
-
-        return
-      }
+    if (!account) {
+      await this.clearWalletConnectSelection(transition)
     }
-
-    // when I'm resetting the activeAccount
-    if (!account && this._activeAccount.isResolved() && (await this.getActiveAccount())) {
-      const transport = this._transport.isResolved() ? await this.transport : undefined
-      const activeAccount = await this.getActiveAccount()
-
-      if (!activeAccount) {
-        return
-      }
-
-      if (!this.debounceSetActiveAccount && transport instanceof WalletConnectTransport) {
-        this.debounceSetActiveAccount = true
-        this._initPromise = undefined
-        this.postMessageTransport = this.p2pTransport = this.walletConnectTransport = undefined
-        if (this.multiTabChannel.isLeader() || isMobileOS(window)) {
-          await transport.disconnect()
-          this.openRequestsOtherTabs.clear()
-        } else {
-          this.multiTabChannel.postMessage({
-            type: 'DISCONNECT'
-          })
-        }
-        this.abortOpenRequests()
-        this.debounceSetActiveAccount = false
-      }
+    if (!this.isCurrentAccountTransition(transition)) {
+      return false
     }
-
-    if (activeAccountAlreadyCleared) {
-      // Keep peer and transport cleanup below idempotent, but do not write storage or emit
-      // another ACTIVE_ACCOUNT_SET(undefined) for an already-empty account.
-    } else if (this._activeAccount.isSettled()) {
-      // If the promise has already been resolved we need to create a new one.
-      this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(account)
-    } else {
-      this._activeAccount.resolve(account)
+    if (await this.resetDisconnectedWalletConnectSelection(transition)) {
+      return false
     }
-
-    if (!this.isGetActiveAccountHandled && this._transport.isResolved()) {
-      const transport = await this.transport
-
-      if (transport instanceof WalletConnectTransport && transport.wasDisconnectedByWallet()) {
-        await this.resetInvalidState()
-
-        return
-      }
+    const prepared = await this.prepareAccountSelection(account, transition, source)
+    if (prepared.kind === 'superseded' || !this.isCurrentAccountTransition(transition)) {
+      return false
     }
-
-    if (account) {
-      const origin = account.origin.type
-      await this.initInternalTransports()
-
-      // Select the transport that matches the active account
-      if (origin === Origin.EXTENSION) {
-        await this.setTransport(this.postMessageTransport)
-      } else if (origin === Origin.P2P) {
-        await this.setTransport(this.p2pTransport)
-      } else if (origin === Origin.WALLETCONNECT) {
-        await this.setTransport(this.walletConnectTransport)
-        this.walletConnectTransport?.forceUpdate('INIT')
-      }
-      if (this._transport.isResolved()) {
-        const transport = await this.transport
-
-        if (transport.connectionStatus === TransportStatus.NOT_CONNECTED) {
-          await transport.connect()
-        }
-      }
-      const peer = await this.getPeer(account)
-      await this.setActivePeer(peer)
-    } else {
-      await this.setActivePeer(undefined)
-      await this.setTransport(undefined)
+    if (source === 'local' && (!activeAccountAlreadyCleared || hasPendingAccountWrite)) {
+      await this.persistActiveAccount(account, transition)
     }
-
-    if (account) {
-      await this.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
-    } else if (!activeAccountAlreadyCleared) {
-      await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    if (!this.isCurrentAccountTransition(transition)) {
+      return false
     }
-
     if (!activeAccountAlreadyCleared) {
-      await this.events.emit(BeaconEvent.ACTIVE_ACCOUNT_SET, account)
+      if (this._activeAccount.isSettled()) {
+        this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(account)
+      } else {
+        this._activeAccount.resolve(account)
+      }
+      this.activeAccountNotificationPending = true
+    }
+    this.resolveActivePeer(prepared.peer)
+    await this.setTransport(prepared.transport)
+    if (!this.isCurrentAccountTransition(transition)) {
+      return false
+    }
+    if (account?.origin.type === Origin.WALLETCONNECT) {
+      this.walletConnectTransport?.forceUpdate('INIT')
+    }
+    await this.notifyActiveAccount(transition)
+
+    return this.isCurrentAccountTransition(transition)
+  }
+
+  private async notifyActiveAccount(transition: AbortSignal): Promise<void> {
+    if (!this.isCurrentAccountTransition(transition) || !this.activeAccountNotificationPending) {
+      return
+    }
+    const account = await this._activeAccount.promise
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
+    }
+    this.activeAccountNotificationPending = false
+    await this.events.emit(BeaconEvent.ACTIVE_ACCOUNT_SET, account)
+  }
+
+  private async clearWalletConnectSelection(transition: AbortSignal): Promise<void> {
+    if (!this._activeAccount.isResolved() || !(await this.getActiveAccount())) {
+      return
+    }
+    const transport = this._transport.isResolved() ? await this.transport : undefined
+    if (
+      !this.isCurrentAccountTransition(transition) ||
+      this.debounceSetActiveAccount ||
+      !(transport instanceof WalletConnectTransport)
+    ) {
+      return
+    }
+    this.debounceSetActiveAccount = true
+    this._initPromise = undefined
+    const secondaryTransports = this.getInitializedTransports().filter(
+      (candidate) => candidate !== transport
+    )
+    this.postMessageTransport = this.p2pTransport = this.walletConnectTransport = undefined
+    try {
+      const disconnects = secondaryTransports.map((secondary) => secondary.disconnect())
+      if (this.multiTabChannel.isLeader() || isMobileOS(window)) {
+        disconnects.push(transport.disconnect())
+      } else {
+        this.multiTabChannel.postMessage({ type: 'DISCONNECT' })
+      }
+      await Promise.all(disconnects)
+      if (this.isCurrentAccountTransition(transition)) {
+        this.openRequestsOtherTabs.clear()
+        this.abortOpenRequests()
+      }
+    } finally {
+      this.debounceSetActiveAccount = false
+    }
+  }
+
+  private async resetDisconnectedWalletConnectSelection(transition: AbortSignal): Promise<boolean> {
+    if (this.isGetActiveAccountHandled || !this._transport.isResolved()) {
+      return false
+    }
+    const transport = await this.transport
+    if (
+      this.isCurrentAccountTransition(transition) &&
+      transport instanceof WalletConnectTransport &&
+      transport.wasDisconnectedByWallet()
+    ) {
+      await this.resetInvalidState(true, transition)
+
+      return true
     }
 
-    return
+    return false
+  }
+
+  private selectAccountTransport(account: AccountInfo): DAppInternalTransport | undefined {
+    switch (account.origin.type) {
+      case Origin.EXTENSION:
+        return this.postMessageTransport
+      case Origin.P2P:
+        return this.p2pTransport
+      case Origin.WALLETCONNECT:
+        return this.walletConnectTransport
+      default:
+        return undefined
+    }
+  }
+
+  private async prepareAccountSelection(
+    account: AccountInfo | undefined,
+    transition: AbortSignal,
+    source: 'local' | 'storage'
+  ): Promise<PreparedAccountSelection> {
+    if (!account) {
+      return { kind: 'ready', peer: undefined, transport: undefined }
+    }
+    await this.initInternalTransports()
+    if (!this.isCurrentAccountTransition(transition)) {
+      return { kind: 'superseded' }
+    }
+    const transport = this.selectAccountTransport(account)
+    if (transport?.connectionStatus === TransportStatus.NOT_CONNECTED) {
+      await transport.connect()
+    }
+    if (!this.isCurrentAccountTransition(transition)) {
+      return { kind: 'superseded' }
+    }
+    const peer = await this.getPeer(account)
+    if (source === 'storage' && !(await this.isStoredAccountCurrent(account))) {
+      await this.applyActiveAccount(undefined, transition, 'storage')
+
+      return { kind: 'superseded' }
+    }
+
+    return { kind: 'ready', peer, transport }
+  }
+
+  private async isStoredAccountCurrent(account: AccountInfo): Promise<boolean> {
+    const [identifier, accounts] = await Promise.all([
+      this.storage.get(StorageKey.ACTIVE_ACCOUNT),
+      this.accountManager.getAccounts()
+    ])
+
+    return (
+      identifier === account.accountIdentifier &&
+      accounts.some((stored) => stored.accountIdentifier === account.accountIdentifier)
+    )
+  }
+
+  private persistActiveAccount(
+    account: AccountInfo | undefined,
+    transition: AbortSignal,
+    expectedIdentifier?: string
+  ): Promise<void> {
+    const commit = async (): Promise<void> => {
+      if (!this.isCurrentAccountTransition(transition)) {
+        return
+      }
+      if (expectedIdentifier !== undefined) {
+        const identifier = await this.storage.get(StorageKey.ACTIVE_ACCOUNT)
+        if (!this.isCurrentAccountTransition(transition) || identifier !== expectedIdentifier) {
+          return
+        }
+      }
+      if (account) {
+        await this.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
+      } else {
+        await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
+      }
+    }
+    // Only storage commits are ordered. Disconnect never waits behind transport initialization.
+    this.pendingActiveAccountWrites++
+    this.activeAccountWrite = this.activeAccountWrite.then(commit, commit).finally(() => {
+      this.pendingActiveAccountWrites--
+    })
+
+    return this.activeAccountWrite
   }
 
   private async isActiveAccountAlreadyCleared(): Promise<boolean> {
-    return this._activeAccount.isResolved() && !(await this.getActiveAccount())
+    return (
+      this._activeAccount.isResolved() &&
+      !(await this.getActiveAccount()) &&
+      !this.activeAccountNotificationPending
+    )
   }
 
   private async recoverActiveAccountFromAccountsChange(): Promise<void> {
-    const activeAccountIdentifier = await this.storage.get(StorageKey.ACTIVE_ACCOUNT)
-    if (!activeAccountIdentifier || activeAccountIdentifier === 'undefined') {
-      return
-    }
-
-    if (this._activeAccount.isResolved()) {
-      const activeAccount = await this.getActiveAccount()
-      if (activeAccount?.accountIdentifier === activeAccountIdentifier) {
+    const transition = this.beginAccountTransition()
+    await this.runAccountTransition(transition, async () => {
+      const activeAccountIdentifier = await this.storage.get(StorageKey.ACTIVE_ACCOUNT)
+      const account = activeAccountIdentifier
+        ? await this.getAccount(activeAccountIdentifier)
+        : undefined
+      if (!this.isCurrentAccountTransition(transition)) {
         return
       }
-    }
+      if (!account && activeAccountIdentifier) {
+        const activeAccount = this._activeAccount.isResolved()
+          ? await this.getActiveAccount()
+          : undefined
+        if (activeAccount || this.activeAccountNotificationPending) {
+          await this.commitActiveAccount(undefined, transition, 'local')
+        } else {
+          await this.repairMissingActiveAccount(transition)
+        }
 
-    const account = await this.getAccount(activeAccountIdentifier)
-    if (!account) {
-      return
-    }
+        return
+      }
+      if (this._activeAccount.isResolved()) {
+        const activeAccount = await this.getActiveAccount()
+        if (activeAccount?.accountIdentifier === account?.accountIdentifier) {
+          await this.notifyActiveAccount(transition)
 
-    await this.setActiveAccount(account)
+          return
+        }
+      }
+      await this.commitActiveAccount(account, transition, 'storage')
+    })
   }
 
   /**
@@ -1661,22 +1993,31 @@ export class DAppClient extends Client {
    * @param accountIdentifier ID of the account
    */
   public async removeAccount(accountIdentifier: string): Promise<void> {
-    const removeAccountResult = super.removeAccount(accountIdentifier)
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
-
-    if (activeAccount && activeAccount.accountIdentifier === accountIdentifier) {
-      await this.setActiveAccount(undefined)
+    const observedTransition = this.accountTransition.signal
+    const storedIdentifier = await this.storage.get(StorageKey.ACTIVE_ACCOUNT)
+    const activeAccount = this._activeAccount.isResolved()
+      ? await this.getActiveAccount()
+      : undefined
+    const removesSelection =
+      storedIdentifier === accountIdentifier ||
+      activeAccount?.accountIdentifier === accountIdentifier
+    const transition =
+      removesSelection && this.isCurrentAccountTransition(observedTransition)
+        ? this.beginAccountTransition()
+        : undefined
+    await super.removeAccount(accountIdentifier)
+    if (transition) {
+      await this.applyActiveAccount(undefined, transition, 'local')
     }
-
-    return removeAccountResult
   }
 
   /**
    * Remove all accounts and set active account to undefined
    */
   public async removeAllAccounts(): Promise<void> {
+    const transition = this.beginAccountTransition()
     await super.removeAllAccounts()
-    await this.setActiveAccount(undefined)
+    await this.applyActiveAccount(undefined, transition, 'local')
   }
 
   /**
@@ -2528,24 +2869,38 @@ export class DAppClient extends Client {
     return message
   }
 
-  protected async setActivePeer(peer?: PeerInfoType): Promise<void> {
-    if (this._activePeer.isSettled()) {
-      // If the promise has already been resolved we need to create a new one.
-      this._activePeer = ExposedPromise.resolve(peer)
-    } else {
-      this._activePeer.resolve(peer)
+  protected async setActivePeer(
+    peer?: PeerInfoType,
+    transition: AbortSignal = this.accountTransition.signal
+  ): Promise<void> {
+    if (!this.isCurrentAccountTransition(transition)) {
+      return
     }
+    if (peer) {
+      await this.initInternalTransports()
+      if (!this.isCurrentAccountTransition(transition)) {
+        return
+      }
+    }
+    this.resolveActivePeer(peer)
 
     if (!peer) {
       return
     }
 
-    await this.initInternalTransports()
-
     if (peer.type === 'postmessage-pairing-response') {
       await this.setTransport(this.postMessageTransport)
     } else if (peer.type === 'p2p-pairing-response') {
       await this.setTransport(this.p2pTransport)
+    }
+  }
+
+  private resolveActivePeer(peer?: PeerInfoType): void {
+    if (this._activePeer.isSettled()) {
+      // If the promise has already been resolved we need to create a new one.
+      this._activePeer = ExposedPromise.resolve(peer)
+    } else {
+      this._activePeer.resolve(peer)
     }
   }
 
@@ -2610,7 +2965,9 @@ export class DAppClient extends Client {
     await this.accountManager.removeAccounts(accountIdentifiersToRemove)
 
     // Check if one of the accounts that was removed was the active account and if yes, set it to undefined
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount = this._activeAccount.isResolved()
+      ? await this.getActiveAccount()
+      : undefined
 
     if (activeAccount) {
       if (accountIdentifiersToRemove.includes(activeAccount.accountIdentifier)) {
@@ -3248,6 +3605,7 @@ export class DAppClient extends Client {
     const { notifyPeers = true } = options
 
     if (!this._disconnectPromise) {
+      this.beginAccountTransition()
       this._disconnectNotifyPeers = false
     }
 

@@ -33,6 +33,7 @@ const RETRY_INTERVAL = 5000
  */
 export class MatrixClient {
   private isActive: boolean = true
+  private session = Symbol('Matrix client session')
   private _isReady: ExposedPromise<void> = new ExposedPromise()
   private txnIdLock: Promise<void> = Promise.resolve()
 
@@ -111,12 +112,22 @@ export class MatrixClient {
    * @param user
    */
   public async start(user: MatrixLoginConfig): Promise<void> {
+    const session = this.session
+    if (!this.isActive) {
+      return
+    }
     const response = await this.userService.login(user.id, user.password, user.deviceId)
 
+    if (!this.isActive || session !== this.session) {
+      return
+    }
     await this.store.update({
       accessToken: response.access_token
     })
 
+    if (!this.isActive || session !== this.session) {
+      return
+    }
     const initialPollingResult = new Promise<void>(async (resolve, reject) => {
       await this.poll(
         0,
@@ -142,11 +153,14 @@ export class MatrixClient {
           })
         }
       )
+      resolve()
     })
 
     initialPollingResult
       .then(() => {
-        this._isReady.resolve()
+        if (this.isActive && session === this.session) {
+          this._isReady.resolve()
+        }
       })
       .catch(console.error)
 
@@ -163,6 +177,7 @@ export class MatrixClient {
   public async stop(): Promise<void> {
     logger.log(`MATRIX CLIENT STOPPED`)
     this.isActive = false
+    this.session = Symbol('Matrix client session')
     this._isReady = new ExposedPromise()
 
     return this.httpClient.cancelAllRequests()
@@ -309,6 +324,7 @@ export class MatrixClient {
     onSyncSuccess: (response: MatrixSyncResponse) => void,
     onSyncError: (error: unknown) => void
   ): Promise<void> {
+    const session = this.session
     const store = this.store
     const sync = this.sync.bind(this)
 
@@ -316,20 +332,29 @@ export class MatrixClient {
     const pollSync = async (
       resolve: (value?: void | PromiseLike<void> | undefined) => void
     ): Promise<void> => {
+      if (!this.isActive || session !== this.session) {
+        resolve()
+
+        return
+      }
       let syncingRetries: number = 0
       try {
         const response = await sync()
-        onSyncSuccess(response)
+        if (this.isActive && session === this.session) {
+          onSyncSuccess(response)
+        }
       } catch (error) {
-        onSyncError(error)
+        if (this.isActive && session === this.session) {
+          onSyncError(error)
+        }
 
         syncingRetries = store.get('pollingRetries')
         // console.warn('Could not sync:', error)
-        if (this.isActive) {
+        if (this.isActive && session === this.session) {
           logger.log(`Retry syncing... ${syncingRetries} retries so far`)
         }
       } finally {
-        if (this.isActive) {
+        if (this.isActive && session === this.session) {
           setTimeout(
             async () => {
               await pollSync(resolve)

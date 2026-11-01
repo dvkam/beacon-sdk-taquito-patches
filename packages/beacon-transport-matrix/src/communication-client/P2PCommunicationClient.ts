@@ -77,6 +77,10 @@ const isMatrixError = (error: unknown): error is { errcode: string } =>
 export class P2PCommunicationClient extends CommunicationClient {
   private client: ExposedPromise<MatrixClient> = new ExposedPromise()
 
+  private matrixClient: MatrixClient | undefined
+
+  private session = Symbol('Matrix session')
+
   private initialReplay = {
     pending: 0,
     buffered: new WeakSet(),
@@ -85,14 +89,12 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   private initialEvent: MatrixClientEvent<MatrixClientEventType.MESSAGE> | undefined
   private initialListener:
-    | ((event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => void)
-    | undefined
+    ((event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => void) | undefined
 
   private selectedRegion?: Regions
   private readonly ENABLED_RELAY_SERVERS: NodeDistributions
   public relayServer:
-    | ExposedPromise<{ server: string; timestamp: number; localTimestamp: number }>
-    | undefined
+    ExposedPromise<{ server: string; timestamp: number; localTimestamp: number }> | undefined
 
   private readonly activeListeners: Map<string, (event: MatrixClientEvent<any>) => void> = new Map()
 
@@ -165,9 +167,9 @@ export class P2PCommunicationClient extends CommunicationClient {
    * DNS and SSL handshakes make "faster" connections slower. So we need to do 2 requests
    * and check which request was the fastest after 1s.
    */
-  public async findBestRegionAndGetServer(): Promise<
-    { server: string; timestamp: number } | undefined
-  > {
+  public async findBestRegionAndGetServer(
+    session = this.session
+  ): Promise<{ server: string; timestamp: number } | undefined> {
     if (this.selectedRegion) {
       return this.relayServer?.promiseResult
     }
@@ -223,12 +225,15 @@ export class P2PCommunicationClient extends CommunicationClient {
     // 5) Pick the lowest-latency reply
     const best = results.reduce((a, b) => (b.time < a.time ? b : a))
 
-    this.selectedRegion = best.region
+    if (session === this.session) {
+      this.selectedRegion = best.region
+    }
 
     return { server: best.server, timestamp: best.timestamp }
   }
 
   public async getRelayServer(): Promise<{ server: string; timestamp: number }> {
+    const session = this.session
     // Fast path: in-memory cached relay server that's still fresh
     if (this.relayServer) {
       const currentPromise = this.relayServer
@@ -256,9 +261,11 @@ export class P2PCommunicationClient extends CommunicationClient {
           'getRelayServer',
           `cached server ${relayServer.server} is unreachable, resetting`
         )
-        await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
+        if (session === this.session) {
+          await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
+        }
         const replacementRelayPromise = this.relayServer
-        if (replacementRelayPromise === currentPromise) {
+        if (session === this.session && replacementRelayPromise === currentPromise) {
           this.relayServer = undefined
           this.selectedRegion = undefined
         } else if (replacementRelayPromise) {
@@ -282,7 +289,9 @@ export class P2PCommunicationClient extends CommunicationClient {
       timestamp: number
       localTimestamp: number
     }>()
-    this.relayServer = discoveryPromise
+    if (session === this.session) {
+      this.relayServer = discoveryPromise
+    }
 
     try {
       // Try the localStorage-cached node first
@@ -302,20 +311,24 @@ export class P2PCommunicationClient extends CommunicationClient {
             'getRelayServer',
             `stored node ${node} is unreachable, falling through to discovery`
           )
-          await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
+          if (session === this.session) {
+            await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
+          }
         }
       }
 
       // Full discovery: probe all servers, pick the fastest
-      const server = await this.findBestRegionAndGetServer()
+      const server = await this.findBestRegionAndGetServer(session)
 
       if (!server) {
         throw new Error('No servers found')
       }
 
-      this.storage
-        .set(StorageKey.MATRIX_SELECTED_NODE, server.server)
-        .catch((error) => logger.log(error))
+      if (session === this.session && this.relayServer === discoveryPromise) {
+        this.storage
+          .set(StorageKey.MATRIX_SELECTED_NODE, server.server)
+          .catch((error) => logger.log(error))
+      }
 
       discoveryPromise.resolve({
         server: server.server,
@@ -327,7 +340,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     } catch (error) {
       // Always settle the ExposedPromise so concurrent callers don't hang forever
       discoveryPromise.reject(error)
-      if (this.relayServer === discoveryPromise) {
+      if (session === this.session && this.relayServer === discoveryPromise) {
         this.relayServer = undefined
       }
       throw error
@@ -369,16 +382,21 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async start(): Promise<void> {
+    const session = this.session
     logger.log('start', 'starting client')
 
     logger.log('start', `connecting to server`)
 
     const relayServer: { server: string; timestamp: number } = await this.getRelayServer()
+    if (session !== this.session) {
+      return
+    }
 
     const client = MatrixClient.create({
       baseUrl: `https://${relayServer.server}`,
       storage: this.storage
     })
+    this.matrixClient = client
 
     const replay = this.initialReplay
     this.initialListener = async (
@@ -429,26 +447,45 @@ export class P2PCommunicationClient extends CommunicationClient {
 
     const loginRawDigest = hash(encode(loginString), 32)
 
-    const secretKey = this.keyPair!.secretKey ?? (this.keyPair as any).privateKey
+    const keyPair = this.keyPair
+    if (!keyPair) {
+      throw new Error('Missing key pair')
+    }
+    const rawSignature = sign(keyPair.secretKey, loginRawDigest)
 
-    const rawSignature = sign(secretKey, loginRawDigest)
-
+    const login = {
+      id: await this.getPublicKeyHash(),
+      password: `ed:${toHex(rawSignature)}:${await this.getPublicKey()}`,
+      deviceId: toHex(keyPair.publicKey)
+    }
+    if (session !== this.session) {
+      return
+    }
     try {
-      await client.start({
-        id: await this.getPublicKeyHash(),
-        password: `ed:${toHex(rawSignature)}:${await this.getPublicKey()}`,
-        deviceId: toHex(this.keyPair!.publicKey)
-      })
-    } catch (error: any) {
+      await client.start(login)
+    } catch (error: unknown) {
+      if (session !== this.session) {
+        return
+      }
       logger.error('start', 'Could not log in, retrying', error)
 
-      if (error.errcode === 'M_USER_DEACTIVATED') {
-        await this.generateNewKeyPair()
-        await this.reset()
+      if (isMatrixError(error) && error.errcode === 'M_USER_DEACTIVATED') {
+        await this.generateNewKeyPair(session)
+        if (session !== this.session) {
+          return
+        }
+        await this.resetSession(session)
+        if (session !== this.session) {
+          return
+        }
         throw new Error('The account is deactivated.')
       }
 
-      await this.reset() // If we can't log in, let's reset
+      await client.stop()
+      await this.resetSession(session)
+      if (session !== this.session) {
+        return
+      }
       if (!this.selectedRegion) {
         throw new Error('No region selected.')
       }
@@ -466,25 +503,50 @@ export class P2PCommunicationClient extends CommunicationClient {
       }
     }
 
+    if (session !== this.session) {
+      return
+    }
     logger.log('start', 'login successful, client is ready')
     this.client.resolve(client)
   }
 
   public async stop(): Promise<void> {
     logger.log('stop', 'stopping client')
-
-    if (this.client.isResolved()) {
-      await (await this.client.promise).stop().catch((error) => logger.error(error))
+    const session = Symbol('Matrix session')
+    this.session = session
+    const client =
+      this.matrixClient ?? (this.client.isResolved() ? await this.client.promise : undefined)
+    this.matrixClient = undefined
+    if (client) {
+      await client.stop().catch((error) => logger.error(error))
     }
-    await this.reset()
+    await this.resetSession(session)
   }
 
   public async reset(): Promise<void> {
+    await this.stop()
+  }
+
+  private async resetSession(session: symbol): Promise<void> {
     logger.log('reset', 'resetting connection')
 
+    if (session !== this.session) {
+      return
+    }
     await this.storage.delete(StorageKey.MATRIX_PEER_ROOM_IDS).catch((error) => logger.log(error))
+    if (session !== this.session) {
+      return
+    }
     await this.storage.delete(StorageKey.MATRIX_PRESERVED_STATE).catch((error) => logger.log(error))
+    if (session !== this.session) {
+      return
+    }
     await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((error) => logger.log(error))
+
+    if (session !== this.session) {
+      return
+    }
+    this.matrixClient = undefined
 
     // Instead of resetting everything, maybe we should make sure a new instance is created?
     this.relayServer = undefined
@@ -872,14 +934,22 @@ export class P2PCommunicationClient extends CommunicationClient {
     )
   }
 
-  private async generateNewKeyPair() {
+  private async generateNewKeyPair(session: symbol): Promise<void> {
     const newSeed = await generateGUID()
+    if (session !== this.session) {
+      return
+    }
 
     console.warn(`The current user ID has been deactivated. Generating new ID: ${newSeed}`)
 
-    this.storage.set(StorageKey.BEACON_SDK_SECRET_SEED, newSeed)
-
-    this.keyPair = await getKeypairFromSeed(newSeed)
+    await this.storage.set(StorageKey.BEACON_SDK_SECRET_SEED, newSeed)
+    if (session !== this.session) {
+      return
+    }
+    const keyPair = await getKeypairFromSeed(newSeed)
+    if (session === this.session) {
+      this.keyPair = keyPair
+    }
   }
 
   private async getRelevantRoom(recipient: string): Promise<string> {
