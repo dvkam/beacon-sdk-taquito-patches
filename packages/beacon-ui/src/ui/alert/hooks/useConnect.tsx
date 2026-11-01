@@ -264,8 +264,7 @@ const useConnect = (
       payload: await postPayload,
       targetId: wallet?.id
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    windowRef.postMessage(message as any, windowRef.location.origin)
+    windowRef.postMessage(message, windowRef.location.origin)
 
     if (wallet?.firefoxId) {
       const message: ExtensionMessage<string> = {
@@ -273,8 +272,7 @@ const useConnect = (
         payload: await postPayload,
         targetId: wallet?.firefoxId
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      windowRef.postMessage(message as any, windowRef.location.origin)
+      windowRef.postMessage(message, windowRef.location.origin)
     }
 
     localStorage.setItem(

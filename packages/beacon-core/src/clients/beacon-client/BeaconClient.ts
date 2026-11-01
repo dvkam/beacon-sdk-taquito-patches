@@ -67,12 +67,12 @@ export abstract class BeaconClient {
     this.analytics = config.analytics ?? new MockAnalytics()
 
     // TODO: This is a temporary "workaround" to prevent users from creating multiple Client instances
-    if ((windowRef as any).beaconCreatedClientInstance) {
+    if (windowRef.beaconCreatedClientInstance) {
       console.error(
         '[BEACON] It looks like you created multiple Beacon SDK Client instances. This can lead to problems. Only create one instance and re-use it everywhere.'
       )
     } else {
-      ;(windowRef as any).beaconCreatedClientInstance = true
+      windowRef.beaconCreatedClientInstance = true
     }
 
     this.initSDK().catch(console.error)
@@ -83,7 +83,7 @@ export abstract class BeaconClient {
    */
   public async destroy(): Promise<void> {
     await this.removeBeaconEntriesFromStorage()
-    ;(windowRef as any).beaconCreatedClientInstance = false
+    windowRef.beaconCreatedClientInstance = false
   }
 
   /**
