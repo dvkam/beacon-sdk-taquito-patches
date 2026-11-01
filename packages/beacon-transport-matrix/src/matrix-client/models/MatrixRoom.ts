@@ -133,10 +133,10 @@ export class MatrixRoom {
    *
    * @param events
    */
-  private static getMessagesFromEvents(events: MatrixStateEvent[]): MatrixMessage<any>[] {
+  private static getMessagesFromEvents(events: MatrixStateEvent[]): MatrixMessage<unknown>[] {
     return MatrixRoom.getUniqueEvents(events.filter(isMessageEvent))
       .map((event) => MatrixMessage.from(event))
-      .filter(Boolean) as MatrixMessage<any>[]
+      .filter((message) => message !== undefined)
   }
 
   /**
@@ -166,6 +166,6 @@ export class MatrixRoom {
     public readonly id: string,
     public readonly status: MatrixRoomStatus = MatrixRoomStatus.UNKNOWN,
     public readonly members: string[] = [],
-    public messages: MatrixMessage<any>[] = []
+    public messages: MatrixMessage<unknown>[] = []
   ) {}
 }

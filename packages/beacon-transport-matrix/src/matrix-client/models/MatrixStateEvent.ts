@@ -10,8 +10,8 @@ export interface MatrixStateEventMessageText extends MatrixStateEventMessage {
 
 export interface MatrixStateEventMessageContent {
   msgtype: string
-  body: any
-  [key: string]: any
+  body: unknown
+  [key: string]: unknown
 }
 
 export interface MatrixStateEventMessage extends MatrixStateEvent {

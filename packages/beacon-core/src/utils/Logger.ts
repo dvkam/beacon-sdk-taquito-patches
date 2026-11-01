@@ -1,12 +1,12 @@
 import { getDebugEnabled } from '../debug'
 
 export interface LoggerInterface {
-  debug(method: string, ...args: any[]): void
-  log(method: string, ...args: any[]): void
-  warn(method: string, ...args: any[]): void
-  error(method: string, ...args: any[]): void
+  debug(method: string, ...args: unknown[]): void
+  log(method: string, ...args: unknown[]): void
+  warn(method: string, ...args: unknown[]): void
+  error(method: string, ...args: unknown[]): void
   time(start: boolean, label?: string): void
-  timeLog(method: string, ...args: any[]): void
+  timeLog(method: string, ...args: unknown[]): void
 }
 
 /**
@@ -15,19 +15,19 @@ export interface LoggerInterface {
 export class InternalLogger implements LoggerInterface {
   constructor() {}
 
-  debug(name: string, method: string, ...args: any[]): void {
+  public debug(name: string, method: string, ...args: unknown[]): void {
     this._log('debug', name, method, args)
   }
 
-  log(name: string, method: string, ...args: any[]): void {
+  public log(name: string, method: string, ...args: unknown[]): void {
     this._log('log', name, method, args)
   }
 
-  warn(name: string, method: string, ...args: any[]): void {
+  public warn(name: string, method: string, ...args: unknown[]): void {
     this._log('warn', name, method, args)
   }
 
-  error(name: string, method: string, ...args: any[]): void {
+  public error(name: string, method: string, ...args: unknown[]): void {
     this._log('error', name, method, args)
   }
 
@@ -35,7 +35,7 @@ export class InternalLogger implements LoggerInterface {
     start ? console.time(label) : console.timeEnd(label)
   }
 
-  timeLog(name: string, method: string, ...args: any[]): void {
+  public timeLog(name: string, method: string, ...args: unknown[]): void {
     this._log('timeLog', name, method, args)
   }
 
@@ -92,19 +92,19 @@ export class Logger implements LoggerInterface {
     this.name = service
   }
 
-  debug(method: string, ...args: any[]): void {
+  public debug(method: string, ...args: unknown[]): void {
     logger.debug(this.name, method, args)
   }
 
-  log(method: string, ...args: any[]): void {
+  public log(method: string, ...args: unknown[]): void {
     logger.log(this.name, method, args)
   }
 
-  warn(method: string, ...args: any[]): void {
+  public warn(method: string, ...args: unknown[]): void {
     logger.warn(this.name, method, args)
   }
 
-  error(method: string, ...args: any[]): void {
+  public error(method: string, ...args: unknown[]): void {
     logger.error(this.name, method, args)
   }
 
@@ -112,7 +112,7 @@ export class Logger implements LoggerInterface {
     logger.time(start, label)
   }
 
-  timeLog(method: string, ...args: any[]): void {
+  public timeLog(method: string, ...args: unknown[]): void {
     logger.timeLog(method, args)
   }
 }

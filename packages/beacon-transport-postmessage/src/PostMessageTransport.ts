@@ -66,8 +66,7 @@ export class PostMessageTransport<
         target: ExtensionMessageTarget.EXTENSION,
         payload: 'ping'
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      windowRef.postMessage(message as any, windowRef.location.origin)
+      windowRef.postMessage(message, windowRef.location.origin)
     })
   }
 
@@ -123,8 +122,7 @@ export class PostMessageTransport<
       target: ExtensionMessageTarget.EXTENSION,
       payload: 'ping'
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    windowRef.postMessage(message as any, windowRef.location.origin)
+    windowRef.postMessage(message, windowRef.location.origin)
 
     listeningForExtensions = true
   }

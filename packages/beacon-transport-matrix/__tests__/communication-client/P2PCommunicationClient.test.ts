@@ -68,7 +68,10 @@ import {
 } from '@ecadlabs/beacon-utils'
 import { MatrixClient } from '../../src/matrix-client/MatrixClient'
 import { P2PPairingRequest, Regions, StorageKey } from '@ecadlabs/beacon-types'
-import { MatrixClientEventType } from '../../src/matrix-client/models/MatrixClientEvent'
+import {
+  MatrixClientEvent,
+  MatrixClientEventType
+} from '../../src/matrix-client/models/MatrixClientEvent'
 import { MatrixMessageType } from '../../src/matrix-client/models/MatrixMessage'
 import { P2PCommunicationClient } from '../../src/communication-client/P2PCommunicationClient'
 
@@ -440,6 +443,44 @@ describe('P2PCommunicationClient', () => {
       ).rejects.toBe(failure)
       expect(handler).toHaveBeenCalledWith('decrypted-payload')
     })
+  })
+
+  describe('text message validation', () => {
+    const messageEvent = (body: unknown): MatrixClientEvent<MatrixClientEventType.MESSAGE> => ({
+      type: MatrixClientEventType.MESSAGE,
+      content: {
+        roomId: '!room:relay',
+        message: {
+          type: MatrixMessageType.TEXT,
+          sender: '@peer:relay',
+          content: body,
+          timestamp: 123
+        }
+      }
+    })
+
+    it.each(['', 'hello', 'Tezos π'])('accepts a string body: %p', (body) => {
+      expect(client.isTextMessage(messageEvent(body).content)).toBe(true)
+    })
+
+    it.each([undefined, null, 42, false, {}, []])('rejects a non-string body: %p', (body) => {
+      expect(client.isTextMessage(messageEvent(body).content)).toBe(false)
+    })
+
+    it.each([undefined, null, 42, false, {}, []])(
+      'ignores malformed channel-opening bodies before string operations: %p',
+      async (body) => {
+        const callback = jest.fn()
+        await client.listenForChannelOpening(callback)
+        const listener: (event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => Promise<void> =
+          fakeMatrixClient.subscribe.mock.calls[0][1]
+
+        await expect(listener(messageEvent(body))).resolves.toBeUndefined()
+        expect(callback).not.toHaveBeenCalled()
+        expect(openCryptobox).not.toHaveBeenCalled()
+        expect(mockStorage.set).not.toHaveBeenCalled()
+      }
+    )
   })
 
   describe('getPairingRequestInfo', () => {
