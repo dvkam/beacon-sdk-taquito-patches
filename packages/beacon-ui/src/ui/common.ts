@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { NetworkType, AnalyticsInterface, WalletInfo } from '@ecadlabs/beacon-types'
 import { MergedWallet } from '../utils/wallets'
 
@@ -41,7 +42,7 @@ export interface ConfigurableAlertProps extends Omit<AlertConfig, 'closeButtonCa
 export interface AlertProps {
   open: boolean
   showMore?: boolean
-  extraContent?: any
+  extraContent?: ReactNode
   loading?: boolean
   onCloseClick: () => void
   onClickShowMore?: () => void
@@ -89,9 +90,9 @@ export interface WCInitErrorProps {
 
 export interface InfoProps {
   title: string
-  description?: string
+  description?: ReactNode
   data?: string
-  icon?: any
+  icon?: ReactNode
   border?: boolean
   iconBadge?: boolean
   bigIcon?: boolean

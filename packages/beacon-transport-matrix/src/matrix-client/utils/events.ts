@@ -38,4 +38,6 @@ export const isTextMessageEvent = (event: MatrixStateEvent): event is MatrixStat
   event.content instanceof Object &&
   'msgtype' in event.content &&
   // eslint-disable-next-line dot-notation
-  event.content['msgtype'] === MatrixMessageType.TEXT
+  event.content['msgtype'] === MatrixMessageType.TEXT &&
+  'body' in event.content &&
+  typeof event.content.body === 'string'

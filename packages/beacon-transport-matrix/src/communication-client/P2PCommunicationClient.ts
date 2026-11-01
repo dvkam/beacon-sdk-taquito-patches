@@ -822,9 +822,11 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public isTextMessage(
-    content: MatrixClientEventMessageContent<any>
+    content: MatrixClientEventMessageContent<unknown>
   ): content is MatrixClientEventMessageContent<string> {
-    return content.message.type === MatrixMessageType.TEXT
+    return (
+      content.message.type === MatrixMessageType.TEXT && typeof content.message.content === 'string'
+    )
   }
 
   public async updateRelayServer(sender: string) {
