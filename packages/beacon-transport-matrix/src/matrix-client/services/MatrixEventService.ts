@@ -4,13 +4,13 @@ import { MatrixEventSendResponse } from '../models/api/MatrixEventSend'
 import { MatrixSyncResponse } from '../models/api/MatrixSync'
 import { MatrixStateEventMessageContent } from '../models/MatrixStateEvent'
 
-interface MatrixScheduledEvent<T> {
+interface MatrixScheduledEvent {
   accessToken: string
   roomId: string
   type: MatrixEventType
   content: any
   txnId: string
-  onSuccess(response: T): void
+  onSuccess(response: MatrixEventSendResponse): void
   onError(error: unknown): void
 }
 
@@ -27,7 +27,7 @@ export interface MatrixSyncOptions {
  * A service to help with matrix event management
  */
 export class MatrixEventService {
-  private readonly cachedPromises: Map<CacheKeys, Promise<any>> = new Map()
+  private readonly cachedPromises: Map<CacheKeys, Promise<MatrixSyncResponse>> = new Map()
 
   constructor(private readonly httpClient: MatrixHttpClient) {}
 
@@ -82,7 +82,7 @@ export class MatrixEventService {
    *
    * @param event
    */
-  public scheduleEvent(event: MatrixScheduledEvent<any>) {
+  public scheduleEvent(event: MatrixScheduledEvent) {
     // TODO: actual scheduling
     this.sendEvent(event)
   }
@@ -92,7 +92,7 @@ export class MatrixEventService {
    *
    * @param scheduledEvent
    */
-  public async sendEvent(scheduledEvent: MatrixScheduledEvent<any>): Promise<void> {
+  public async sendEvent(scheduledEvent: MatrixScheduledEvent): Promise<void> {
     const { roomId, type, txnId, content, accessToken } = scheduledEvent
 
     try {
@@ -113,7 +113,10 @@ export class MatrixEventService {
    * @param key
    * @param promiseProvider
    */
-  private withCache<T>(key: CacheKeys, promiseProvider: () => Promise<T>): Promise<T> {
+  private withCache(
+    key: CacheKeys,
+    promiseProvider: () => Promise<MatrixSyncResponse>
+  ): Promise<MatrixSyncResponse> {
     let promise = this.cachedPromises.get(key)
 
     if (!promise) {
