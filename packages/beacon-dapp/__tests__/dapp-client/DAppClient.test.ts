@@ -172,7 +172,6 @@ jest.mock('@ecadlabs/beacon-core', () => {
       }
       postMessage(_msg: any) {}
     },
-    BACKEND_URL: '',
     getError: (_t: any, _d: any) => new Error('beacon error')
   }
 })
@@ -244,12 +243,6 @@ describe('DAppClient — basic unit tests', () => {
     },
     website: 'https://example.com',
     connectedAt: 1
-  })
-
-  it('addQueryParam returns "key=value"', () => {
-    // addQueryParam is private — cast to any to reach it
-    const result = (client as any).addQueryParam('foo', 'bar')
-    expect(result).toBe('foo=bar')
   })
 
   it('addOpenRequest stores given promise in openRequests map', () => {
@@ -417,8 +410,6 @@ describe('DAppClient — basic unit tests', () => {
       senderId: 'dapp-sender-id',
       name: 'TestApp'
     })
-    jest.spyOn(client as any, 'buildPayload').mockResolvedValue({})
-    jest.spyOn(client as any, 'sendMetrics').mockResolvedValue(undefined)
     jest.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
     jest.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
     jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
@@ -518,8 +509,6 @@ describe('DAppClient — basic unit tests', () => {
       senderId: 'dapp-sender-id',
       name: 'TestApp'
     })
-    jest.spyOn(client as any, 'buildPayload').mockResolvedValue({})
-    jest.spyOn(client as any, 'sendMetrics').mockResolvedValue(undefined)
     jest.spyOn(client as any, 'runRequestErrorSideEffects').mockResolvedValue(undefined)
     jest.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
     jest.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
@@ -2064,8 +2053,6 @@ describe('DAppClient — basic unit tests', () => {
       senderId: 'dapp-sender-id',
       name: 'RepairThenConnectApp'
     })
-    jest.spyOn(storedStateClient as any, 'buildPayload').mockResolvedValue({})
-    jest.spyOn(storedStateClient as any, 'sendMetrics').mockResolvedValue(undefined)
     jest.spyOn(storedStateClient as any, 'onNewAccount').mockResolvedValue(accountInfo)
     jest.spyOn(storedStateClient as any, 'notifySuccess').mockResolvedValue(undefined)
     jest.spyOn(storedStateClient as any, 'getWalletInfo').mockResolvedValue({})

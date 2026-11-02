@@ -7,13 +7,21 @@ jest.mock('@ecadlabs/beacon-ui', () => ({
   isMobile: jest.fn().mockReturnValue(false),
   isMobileOS: jest.fn().mockReturnValue(false),
   openAlert: jest.fn(),
-  openBugReport: jest.fn(),
   openToast: jest.fn()
 }))
 
 describe('default event callbacks', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+  })
+
+  it('shows a usable generic error without a retired reporting action', async () => {
+    await defaultEventCallbacks[BeaconEvent.GENERIC_ERROR]('Connection failed')
+
+    expect(openAlert).toHaveBeenCalledWith({
+      title: 'Connection failed',
+      body: 'Please try again.'
+    })
   })
 
   it('repairs a missing active account silently', async () => {
