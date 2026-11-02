@@ -1,4 +1,4 @@
-import { openAlert } from '@ecadlabs/beacon-ui'
+import { openAlert, openToast } from '@ecadlabs/beacon-ui'
 import { BeaconEvent, defaultEventCallbacks } from '../src/events'
 
 jest.mock('@ecadlabs/beacon-ui', () => ({
@@ -32,6 +32,18 @@ describe('default event callbacks', () => {
     expect(openAlert).toHaveBeenCalledWith({
       title: 'Error',
       body: 'Your session has expired. Please pair with your wallet again.'
+    })
+  })
+
+  it('shows blockchain success with only wallet information', async () => {
+    const walletInfo = { name: 'Chain Wallet' }
+    await defaultEventCallbacks[BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]({ walletInfo })
+
+    expect(openToast).toHaveBeenCalledWith({
+      body: '{{wallet}}\u00A0 request successfully executed',
+      timer: 5000,
+      state: 'finished',
+      walletInfo
     })
   })
 })

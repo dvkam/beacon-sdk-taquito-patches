@@ -211,7 +211,7 @@ export interface BeaconEventType {
   //   walletInfo: WalletInfo
   // }
   // [BeaconEvent.ENCRYPT_REQUEST_ERROR]: { errorResponse: ErrorResponse; walletInfo: WalletInfo }
-  [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: RequestSentInfo
+  [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: { walletInfo: WalletInfo }
   [BeaconEvent.BROADCAST_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.BROADCAST_REQUEST_SUCCESS]: {
     network: Network

@@ -1984,12 +1984,9 @@ export class DAppClient extends Client {
       walletInfo: await this.getWalletInfo()
     })
 
-    await this.notifySuccess(
-      request as any,
-      {
-        walletInfo: await this.getWalletInfo()
-      } as any
-    )
+    await this.notifySuccess(request, {
+      walletInfo: await this.getWalletInfo()
+    })
 
     return response.message
   }
@@ -2741,7 +2738,11 @@ export class DAppClient extends Client {
    * @param request The request we sent
    * @param response The response we received
    */
-  private async notifySuccess(
+  private notifySuccess(
+    request: BlockchainRequestV3,
+    response: BeaconEventType[BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]
+  ): Promise<void>
+  private notifySuccess(
     request: BeaconRequestInputMessage,
     response:
       | {
@@ -2789,6 +2790,10 @@ export class DAppClient extends Client {
           connectionContext: ConnectionContext
           walletInfo: WalletInfo
         }
+  ): Promise<void>
+  private async notifySuccess(
+    request: BeaconRequestInputMessage | BlockchainRequestV3,
+    response: BeaconEventType[BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]
   ): Promise<void> {
     this.events
       .emit(messageEvents[request.type].success, response)
