@@ -49,9 +49,13 @@ export class IncomingRequestInterceptor {
     logger.log('INTERCEPTING REQUEST', config.message)
 
     if (config.message.version === '2') {
-      IncomingRequestInterceptor.handleV2Message(config as IncomingRequestInterceptorOptionsV2)
+      return IncomingRequestInterceptor.handleV2Message(
+        config as IncomingRequestInterceptorOptionsV2
+      )
     } else if (config.message.version === '3') {
-      IncomingRequestInterceptor.handleV3Message(config as IncomingRequestInterceptorOptionsV3)
+      return IncomingRequestInterceptor.handleV3Message(
+        config as IncomingRequestInterceptorOptionsV3
+      )
     }
   }
 
@@ -80,9 +84,14 @@ export class IncomingRequestInterceptor {
         {
           logger.log('PERMISSION REQUEST V*', message)
           // TODO: Remove v1 compatibility in later version
-          if ((message.appMetadata as any).beaconId && !message.appMetadata.senderId) {
-            message.appMetadata.senderId = (message.appMetadata as any).beaconId
-            delete (message.appMetadata as any).beaconId
+          const appMetadata = message.appMetadata
+          if ('beaconId' in appMetadata) {
+            const legacyId = appMetadata.beaconId
+            if (typeof legacyId === 'string' && legacyId && !appMetadata.senderId) {
+              appMetadata.senderId = legacyId
+              const legacyMetadata: { beaconId?: unknown } = appMetadata
+              delete legacyMetadata.beaconId
+            }
           }
 
           await appMetadataManager.addAppMetadata(message.appMetadata)
