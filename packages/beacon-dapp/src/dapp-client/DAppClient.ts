@@ -138,6 +138,7 @@ import {
   BeaconEventType,
   InvalidAccountDeactivatedReason
 } from '../events'
+import { getLegacyPublicKey } from '../utils/legacy-public-key'
 import { InitializationAttempt } from './InitializationAttempt'
 import { InitializationLifecycle } from './InitializationLifecycle'
 import { PairingAttempt } from './PairingAttempt'
@@ -3799,7 +3800,7 @@ export class DAppClient extends Client {
       peer = peers.find((peerEl) => peerEl.senderId === account.senderId)
       if (!peer) {
         // We could not find an exact match for a sender, so we most likely received it over a relay
-        peer = peers.find((peerEl) => (peerEl as any).id === account.origin.id)
+        peer = peers.find((peerEl) => peerEl.id === account.origin.id)
       }
     } else {
       peer = await this._activePeer.promise
@@ -4888,8 +4889,7 @@ export class DAppClient extends Client {
     owner?.assertCurrent()
     const generation = changeGeneration ?? ++this._accountChangeGeneration
     // TODO: Migration code. Remove sometime after 1.0.0 release.
-    const tempPK: string | undefined =
-      message.publicKey || (message as any).pubkey || (message as any).pubKey
+    const tempPK = getLegacyPublicKey(message)
 
     const publicKey = tempPK ? prefixPublicKey(tempPK) : undefined
 
