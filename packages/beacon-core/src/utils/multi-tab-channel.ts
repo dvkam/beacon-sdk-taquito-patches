@@ -1,29 +1,25 @@
 import { createLeaderElection, BroadcastChannel, LeaderElector } from 'broadcast-channel'
 
-interface Message {
-  type: string
-  id: string
-  data: any
-}
-
 export class MultiTabChannel {
-  private readonly channel: BroadcastChannel
+  private readonly channel: BroadcastChannel<unknown>
   private readonly elector: LeaderElector
-  private readonly eventListeners = [
-    () => this.onBeforeUnloadHandler(),
-    (message: any) => this.onMessageHandler(message)
-  ]
-  private readonly onBCMessageHandler: Function
-  private readonly onElectedLeaderHandler: Function
+  private readonly beforeUnloadListener = () => this.onBeforeUnloadHandler()
+  private readonly messageListener = (message: unknown) => this.onMessageHandler(message)
+  private readonly onBCMessageHandler: (message: unknown) => unknown
+  private readonly onElectedLeaderHandler: () => unknown
   // Auxiliary variable needed for handling beforeUnload.
   // Closing a tab causes the elector to be killed immediately
   private wasLeader: boolean = false
   private initialized: boolean = false
 
-  constructor(name: string, onBCMessageHandler: Function, onElectedLeaderHandler: Function) {
+  constructor(
+    name: string,
+    onBCMessageHandler: (message: unknown) => unknown,
+    onElectedLeaderHandler: () => unknown
+  ) {
     this.onBCMessageHandler = onBCMessageHandler
     this.onElectedLeaderHandler = onElectedLeaderHandler
-    this.channel = new BroadcastChannel(name)
+    this.channel = new BroadcastChannel<unknown>(name)
     this.elector = createLeaderElection(this.channel)
   }
 
@@ -39,16 +35,16 @@ export class MultiTabChannel {
       this.wasLeader = this.isLeader()
     }
 
-    this.channel.onmessage = this.eventListeners[1]
-    window?.addEventListener('beforeunload', this.eventListeners[0])
+    this.channel.onmessage = this.messageListener
+    window?.addEventListener('beforeunload', this.beforeUnloadListener)
 
     this.initialized = true
   }
 
   public async close() {
     const wasLeader = this.wasLeader
-    window?.removeEventListener('beforeunload', this.eventListeners[0])
-    this.channel.removeEventListener('message', this.eventListeners[1])
+    window?.removeEventListener('beforeunload', this.beforeUnloadListener)
+    this.channel.removeEventListener('message', this.messageListener)
     this.channel.onmessage = null
     await this.elector.die()
     if (wasLeader) {
@@ -65,12 +61,17 @@ export class MultiTabChannel {
       this.postMessage({ type: 'LEADER_DEAD' })
     }
 
-    window?.removeEventListener('beforeunload', this.eventListeners[0])
-    this.channel.removeEventListener('message', this.eventListeners[1])
+    window?.removeEventListener('beforeunload', this.beforeUnloadListener)
+    this.channel.removeEventListener('message', this.messageListener)
   }
 
-  private async onMessageHandler(message: Message) {
-    if (message.type === 'LEADER_DEAD') {
+  private async onMessageHandler(message: unknown) {
+    if (
+      message !== null &&
+      (typeof message === 'object' || typeof message === 'function') &&
+      'type' in message &&
+      message.type === 'LEADER_DEAD'
+    ) {
       await this.elector.awaitLeadership()
 
       this.wasLeader = this.isLeader()
@@ -97,7 +98,7 @@ export class MultiTabChannel {
     return this.elector.hasLeader()
   }
 
-  postMessage(message: any): void {
+  public postMessage(message: unknown): void {
     this.channel.postMessage(message)
   }
 }
