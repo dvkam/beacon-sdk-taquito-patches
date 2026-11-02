@@ -73,6 +73,7 @@ export {
 
 // Transport
 export { Transport, getPairingPeerOwnership, MessageBasedClient, CommunicationClient }
+export type { ClientTransport } from './transports/ClientTransport'
 
 // Storage
 export { ChromeStorage, LocalStorage, WCStorage, IndexedDBStorage, StorageValidator, getStorage }
