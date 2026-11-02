@@ -9,6 +9,7 @@ import {
   ExtendedWalletConnectPairingRequest,
   PeerInfo,
   StorageKey,
+  StorageKeyReturnType,
   WalletConnectPairingRequest,
   NetworkType,
   TransportType
@@ -189,7 +190,7 @@ export class WalletConnectTransport<
     }
   }
 
-  public async getPeers(): Promise<T[]> {
+  public async getPeers(): Promise<StorageKeyReturnType[K]> {
     if (this.released) {
       return []
     }
@@ -207,7 +208,7 @@ export class WalletConnectTransport<
         name: session.peer.metadata.name,
         publicKey: session.peer.publicKey,
         version: 'first'
-      } as T
+      }
     ]
   }
 
