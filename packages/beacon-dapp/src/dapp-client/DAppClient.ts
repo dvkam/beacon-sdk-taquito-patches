@@ -205,6 +205,10 @@ interface PeerNotification {
   peer: ExtendedPeerInfo
 }
 
+type AccountRemovalSelection =
+  | { kind: 'clear'; transition: AbortSignal }
+  | { kind: 'previous'; transition: AbortSignal; identifier: string }
+
 type PreparedAccountSelection =
   | { kind: 'superseded' }
   | {
@@ -308,6 +312,13 @@ export class DAppClient extends Client {
 
   private readonly startupTransition = this.accountTransition.signal
 
+  private pendingAccountSelection:
+    | {
+        readonly transition: AbortSignal
+        readonly account: Pick<AccountInfo, 'accountIdentifier' | 'senderId'>
+      }
+    | undefined
+
   private activeAccountWrite: Promise<void> = Promise.resolve()
 
   private pendingActiveAccountWrites = 0
@@ -315,6 +326,7 @@ export class DAppClient extends Client {
   private beginAccountTransition(): AbortSignal {
     this.accountTransition.abort()
     this.accountTransition = new AbortController()
+    this.pendingAccountSelection = undefined
 
     return this.accountTransition.signal
   }
@@ -1391,6 +1403,14 @@ export class DAppClient extends Client {
     return this._activeAccount.promise
   }
 
+  private resolveActiveAccount(account: AccountInfo | undefined): void {
+    if (this._activeAccount.isSettled()) {
+      this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(account)
+    } else {
+      this._activeAccount.resolve(account)
+    }
+  }
+
   private waitForAccountRestoration(transition: AbortSignal): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const abort = () => reject(this.createAbortedError())
@@ -1446,7 +1466,7 @@ export class DAppClient extends Client {
     if (!this.isCurrentAccountTransition(transition)) {
       return
     }
-    this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(undefined)
+    this.resolveActiveAccount(undefined)
     await this.persistActiveAccount(undefined, transition, identifier)
     await this.setActivePeer(undefined, transition)
   }
@@ -1475,7 +1495,7 @@ export class DAppClient extends Client {
     if (!this.isCurrentAccountTransition(transition)) {
       return
     }
-    this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(undefined)
+    this.resolveActiveAccount(undefined)
     await this.persistActiveAccount(undefined, transition)
     if (!this.isCurrentAccountTransition(transition)) {
       return
@@ -1543,6 +1563,10 @@ export class DAppClient extends Client {
         logger.error('ACTIVE_ACCOUNT_SET', notificationError)
       )
       throw error
+    } finally {
+      if (this.pendingAccountSelection?.transition === transition) {
+        this.pendingAccountSelection = undefined
+      }
     }
   }
 
@@ -1554,6 +1578,12 @@ export class DAppClient extends Client {
     if (!this.isCurrentAccountTransition(transition)) {
       return false
     }
+    this.pendingAccountSelection = account
+      ? {
+          transition,
+          account: { accountIdentifier: account.accountIdentifier, senderId: account.senderId }
+        }
+      : undefined
     const hasPendingAccountWrite = this.pendingActiveAccountWrites > 0
     const activeAccountAlreadyCleared = !account && (await this.isActiveAccountAlreadyCleared())
 
@@ -1584,11 +1614,7 @@ export class DAppClient extends Client {
       return false
     }
     if (!activeAccountAlreadyCleared) {
-      if (this._activeAccount.isSettled()) {
-        this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(account)
-      } else {
-        this._activeAccount.resolve(account)
-      }
+      this.resolveActiveAccount(account)
       this.activeAccountNotificationPending = true
     }
     this.resolveActivePeer(prepared.peer)
@@ -1869,22 +1895,81 @@ export class DAppClient extends Client {
    * @param accountIdentifier ID of the account
    */
   public async removeAccount(accountIdentifier: string): Promise<void> {
-    const observedTransition = this.accountTransition.signal
+    const transition = await this.beginAccountRemoval(this.accountTransition.signal, {
+      accountIdentifiers: [accountIdentifier],
+      senderIds: []
+    })
+    await super.removeAccount(accountIdentifier)
+    await this.completeAccountRemoval(transition)
+  }
+
+  private async beginAccountRemoval(
+    observedTransition: AbortSignal,
+    removed: { accountIdentifiers: readonly string[]; senderIds: readonly string[] }
+  ): Promise<AccountRemovalSelection | undefined> {
+    const pending = this.pendingAccountSelection
     const storedIdentifier = await this.storage.get(StorageKey.ACTIVE_ACCOUNT)
+    if (!this.isCurrentAccountTransition(observedTransition)) {
+      return undefined
+    }
     const activeAccount = this._activeAccount.isResolved()
       ? await this.getActiveAccount()
       : undefined
-    const removesSelection =
-      storedIdentifier === accountIdentifier ||
-      activeAccount?.accountIdentifier === accountIdentifier
-    const transition =
-      removesSelection && this.isCurrentAccountTransition(observedTransition)
-        ? this.beginAccountTransition()
-        : undefined
-    await super.removeAccount(accountIdentifier)
-    if (transition) {
-      await this.applyActiveAccount(undefined, transition, 'local')
+    if (!this.isCurrentAccountTransition(observedTransition)) {
+      return undefined
     }
+    const matches = (account: Pick<AccountInfo, 'accountIdentifier' | 'senderId'> | undefined) =>
+      account !== undefined &&
+      (removed.accountIdentifiers.includes(account.accountIdentifier) ||
+        removed.senderIds.includes(account.senderId))
+    const previousIdentifier =
+      storedIdentifier !== undefined && removed.accountIdentifiers.includes(storedIdentifier)
+        ? storedIdentifier
+        : matches(activeAccount)
+          ? activeAccount?.accountIdentifier
+          : undefined
+    const ownsPending = pending?.transition === observedTransition
+    const removesPending = ownsPending && matches(pending.account)
+    if (ownsPending && !removesPending) {
+      return previousIdentifier === undefined
+        ? undefined
+        : { kind: 'previous', transition: observedTransition, identifier: previousIdentifier }
+    }
+    if (removesPending || previousIdentifier !== undefined) {
+      const transition = this.beginAccountTransition()
+      // Canceling an uncommitted replacement must not clear a different active account.
+
+      return previousIdentifier === undefined && activeAccount
+        ? undefined
+        : { kind: 'clear', transition }
+    }
+
+    return undefined
+  }
+
+  private async completeAccountRemoval(
+    removal: AccountRemovalSelection | undefined
+  ): Promise<void> {
+    if (!removal) {
+      return
+    }
+    if (removal.kind === 'clear') {
+      await this.applyActiveAccount(undefined, removal.transition, 'local')
+
+      return
+    }
+    await this.persistActiveAccount(undefined, removal.transition, removal.identifier)
+    if (!this.isCurrentAccountTransition(removal.transition)) {
+      return
+    }
+    const account = this._activeAccount.isResolved() ? this._activeAccount.promiseResult : undefined
+    if (account?.accountIdentifier !== removal.identifier) {
+      return
+    }
+    this.resolveActiveAccount(undefined)
+    this.resolveActivePeer(undefined)
+    this.activeAccountNotificationPending = false
+    await this.events.emit(BeaconEvent.ACTIVE_ACCOUNT_SET, undefined)
   }
 
   /**
@@ -2809,25 +2894,17 @@ export class DAppClient extends Client {
   }
 
   private async removeAccountsForPeerIds(peerIds: string[]): Promise<void> {
+    const observedTransition = this.accountTransition.signal
     const accounts = (await this.accountManager.getAccounts()) ?? []
-
-    // Remove all accounts with origin of the specified peer
-    const accountsToRemove = accounts.filter((account) => peerIds.includes(account.senderId))
-    const accountIdentifiersToRemove = accountsToRemove.map(
-      (accountInfo) => accountInfo.accountIdentifier
-    )
+    const accountIdentifiersToRemove = accounts
+      .filter((account) => peerIds.includes(account.senderId))
+      .map((account) => account.accountIdentifier)
+    const transition = await this.beginAccountRemoval(observedTransition, {
+      accountIdentifiers: accountIdentifiersToRemove,
+      senderIds: peerIds
+    })
     await this.accountManager.removeAccounts(accountIdentifiersToRemove)
-
-    // Check if one of the accounts that was removed was the active account and if yes, set it to undefined
-    const activeAccount = this._activeAccount.isResolved()
-      ? await this.getActiveAccount()
-      : undefined
-
-    if (activeAccount) {
-      if (accountIdentifiersToRemove.includes(activeAccount.accountIdentifier)) {
-        await this.setActiveAccount(undefined)
-      }
-    }
+    await this.completeAccountRemoval(transition)
   }
 
   /**

@@ -8,6 +8,7 @@ import {
   Origin,
   PermissionScope,
   StorageKey,
+  StorageKeyReturnType,
   TransportStatus,
   TransportType
 } from '@ecadlabs/beacon-types'
@@ -2439,10 +2440,16 @@ describe('DAppClient — basic unit tests', () => {
       .mockResolvedValue([{ ...createV480P2PPeer(), type: 'p2p-pairing-response' }])
     jest.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
     jest.spyOn(transport, 'disconnect').mockResolvedValue(undefined)
+    jest.spyOn(transport, 'removePeer').mockResolvedValue(undefined)
+    let incoming: Parameters<DappP2PTransport['addListener']>[0] | undefined
+    jest.spyOn(transport, 'addListener').mockImplementation(async (listener) => {
+      incoming = listener
+    })
     const selected = jest.fn()
     class StartupClient extends DAppClient {
       public async initInternalTransports(): Promise<void> {
         this.p2pTransport = transport
+        await this.addListener(transport)
       }
       public hasSelectedTransport(): boolean {
         return this._transport.isResolved()
@@ -2463,8 +2470,359 @@ describe('DAppClient — basic unit tests', () => {
     if (!(startup instanceof Promise)) {
       throw new Error('Missing startup completion promise')
     }
-    return { startupClient, storage, account, selected, release, startup, transport }
+    const receiveDisconnect = async (): Promise<void> => {
+      if (!incoming) {
+        throw new Error('Expected the public transport message subscription')
+      }
+      const { Serializer } =
+        jest.requireActual<typeof import('@ecadlabs/beacon-core')>('@ecadlabs/beacon-core')
+      await incoming(
+        await new Serializer().serialize({
+          id: 'peer-disconnect',
+          version: '2',
+          senderId: account.senderId,
+          type: BeaconMessageType.Disconnect
+        }),
+        { origin: Origin.P2P, id: account.origin.id }
+      )
+    }
+    return {
+      startupClient,
+      storage,
+      account,
+      selected,
+      release,
+      startup,
+      transport,
+      receiveDisconnect
+    }
   }
+
+  const holdNextConnection = (transport: DappP2PTransport) => {
+    const entered = new ExposedPromise<void>()
+    const prepared = new ExposedPromise<void>()
+    jest.spyOn(transport, 'connect').mockImplementationOnce(async () => {
+      entered.resolve()
+      await prepared.promise
+    })
+    return { entered, prepared }
+  }
+
+  it.each(['account', 'peer'])(
+    'cancels a pending local selection removed through its %s without blocking a later choice',
+    async (removal) => {
+      const { startupClient, storage, account, selected, release, transport, receiveDisconnect } =
+        await delayedStartup()
+      await startupClient.clearActiveAccount()
+      release.resolve()
+      selected.mockClear()
+      const { entered, prepared } = holdNextConnection(transport)
+      const selection = startupClient.setActiveAccount(account)
+      await entered.promise
+      try {
+        if (removal === 'account') {
+          await startupClient.removeAccount(account.accountIdentifier)
+        } else {
+          await receiveDisconnect()
+        }
+        prepared.resolve()
+        await selection
+        await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+        await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+        await expect(startupClient.getAccounts()).resolves.toEqual([])
+        expect(selected).not.toHaveBeenCalledWith(account, undefined)
+
+        await startupClient.setActiveAccount(account)
+        await expect(startupClient.getActiveAccount()).resolves.toEqual(account)
+        await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(
+          account.accountIdentifier
+        )
+      } finally {
+        prepared.resolve()
+        await selection
+      }
+    }
+  )
+
+  it.each(['account', 'peer'])(
+    'preserves a pending replacement when its previous active %s is removed',
+    async (removal) => {
+      const { startupClient, storage, account, release, transport, receiveDisconnect } =
+        await delayedStartup()
+      release.resolve()
+      await startupClient.setActiveAccount(account)
+      const newer = { ...account, accountIdentifier: 'replacement', senderId: 'replacement-peer' }
+      await storage.set(StorageKey.ACCOUNTS, [account, newer])
+      const { entered, prepared } = holdNextConnection(transport)
+      const selection = startupClient.setActiveAccount(newer)
+      await entered.promise
+      try {
+        if (removal === 'account') {
+          await startupClient.removeAccount(account.accountIdentifier)
+        } else {
+          await receiveDisconnect()
+        }
+        await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
+        await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+        prepared.resolve()
+        await selection
+        await expect(startupClient.getActiveAccount()).resolves.toEqual(newer)
+        await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(newer.accountIdentifier)
+      } finally {
+        prepared.resolve()
+        await selection
+      }
+    }
+  )
+
+  it.each(['account', 'peer'])(
+    'does not clear a replacement committed while the previous %s removal is delayed',
+    async (removal) => {
+      const { startupClient, storage, account, release, transport, receiveDisconnect } =
+        await delayedStartup()
+      release.resolve()
+      await startupClient.setActiveAccount(account)
+      const newer = { ...account, accountIdentifier: 'replacement', senderId: 'replacement-peer' }
+      await storage.set(StorageKey.ACCOUNTS, [account, newer])
+      const { entered, prepared } = holdNextConnection(transport)
+      const deleting = new ExposedPromise<void>()
+      const deleted = new ExposedPromise<void>()
+      const set = storage.set.bind(storage)
+      jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+        if (key === StorageKey.ACCOUNTS) {
+          deleting.resolve()
+          await deleted.promise
+        }
+        await set(key, value)
+      })
+      const selection = startupClient.setActiveAccount(newer)
+      await entered.promise
+      const removing =
+        removal === 'account'
+          ? startupClient.removeAccount(account.accountIdentifier)
+          : receiveDisconnect()
+      await deleting.promise
+      try {
+        prepared.resolve()
+        await selection
+        deleted.resolve()
+        await removing
+        await expect(startupClient.getActiveAccount()).resolves.toEqual(newer)
+        await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(newer.accountIdentifier)
+        await expect(startupClient.getAccounts()).resolves.toEqual([newer])
+      } finally {
+        prepared.resolve()
+        deleted.resolve()
+        await Promise.all([selection, removing])
+      }
+    }
+  )
+
+  it.each(['account', 'peer'])(
+    'retains a different committed account when its pending replacement %s is removed',
+    async (removal) => {
+      const { startupClient, storage, account, release, transport, receiveDisconnect } =
+        await delayedStartup()
+      release.resolve()
+      const retained = { ...account, accountIdentifier: 'retained', senderId: 'retained-peer' }
+      await startupClient.setActiveAccount(retained)
+      const { entered, prepared } = holdNextConnection(transport)
+      const selection = startupClient.setActiveAccount(account)
+      await entered.promise
+      try {
+        if (removal === 'account') {
+          await startupClient.removeAccount(account.accountIdentifier)
+        } else {
+          await receiveDisconnect()
+        }
+        prepared.resolve()
+        await selection
+        await expect(startupClient.getActiveAccount()).resolves.toEqual(retained)
+        await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(
+          retained.accountIdentifier
+        )
+      } finally {
+        prepared.resolve()
+        await selection
+      }
+    }
+  )
+
+  it.each(['account', 'peer'])(
+    'preserves a replacement committed during its previous %s pointer lookup',
+    async (removal) => {
+      const { startupClient, storage, account, release, transport, receiveDisconnect } =
+        await delayedStartup()
+      release.resolve()
+      await startupClient.setActiveAccount(account)
+      const newer = { ...account, accountIdentifier: 'replacement', senderId: 'replacement-peer' }
+      await storage.set(StorageKey.ACCOUNTS, [account, newer])
+      const { entered, prepared } = holdNextConnection(transport)
+      const lookupEntered = new ExposedPromise<void>()
+      const lookupFinished = new ExposedPromise<void>()
+      const get = storage.get.bind(storage)
+      let holdPointer = true
+      jest.spyOn(storage, 'get').mockImplementation(async (key) => {
+        const value = await get(key)
+        if (key === StorageKey.ACTIVE_ACCOUNT && holdPointer) {
+          holdPointer = false
+          lookupEntered.resolve()
+          await lookupFinished.promise
+        }
+        return value
+      })
+      const selection = startupClient.setActiveAccount(newer)
+      await entered.promise
+      const removing =
+        removal === 'account'
+          ? startupClient.removeAccount(account.accountIdentifier)
+          : receiveDisconnect()
+      await lookupEntered.promise
+      try {
+        prepared.resolve()
+        await selection
+        lookupFinished.resolve()
+        await removing
+        await expect(startupClient.getActiveAccount()).resolves.toEqual(newer)
+        await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(newer.accountIdentifier)
+        await expect(startupClient.getAccounts()).resolves.toEqual([newer])
+      } finally {
+        prepared.resolve()
+        lookupFinished.resolve()
+        await Promise.all([selection, removing])
+      }
+    }
+  )
+
+  it('keeps a pending local selection when an unrelated account is removed', async () => {
+    const { startupClient, storage, account, release, transport } = await delayedStartup()
+    await startupClient.clearActiveAccount()
+    release.resolve()
+    const unrelated = { ...account, accountIdentifier: 'unrelated', senderId: 'unrelated-peer' }
+    await storage.set(StorageKey.ACCOUNTS, [account, unrelated])
+    const { entered, prepared } = holdNextConnection(transport)
+    const selection = startupClient.setActiveAccount(account)
+    await entered.promise
+    try {
+      await startupClient.removeAccount(unrelated.accountIdentifier)
+      prepared.resolve()
+      await selection
+      await expect(startupClient.getActiveAccount()).resolves.toEqual(account)
+      await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(account.accountIdentifier)
+      await expect(startupClient.getAccounts()).resolves.toEqual([account])
+    } finally {
+      prepared.resolve()
+      await selection
+    }
+  })
+
+  it.each(['account', 'peer'])(
+    'keeps a newer account selection when an older %s removal completes',
+    async (removal) => {
+      const { startupClient, storage, account, release, receiveDisconnect } = await delayedStartup()
+      release.resolve()
+      await startupClient.getActiveAccount()
+      const newer = { ...account, accountIdentifier: 'newer', senderId: 'newer-peer' }
+      await storage.set(StorageKey.ACCOUNTS, [account, newer])
+      const entered = new ExposedPromise<void>()
+      const removed = new ExposedPromise<void>()
+      const set = storage.set.bind(storage)
+      jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+        if (key === StorageKey.ACCOUNTS) {
+          entered.resolve()
+          await removed.promise
+        }
+        await set(key, value)
+      })
+      const removing =
+        removal === 'account'
+          ? startupClient.removeAccount(account.accountIdentifier)
+          : receiveDisconnect()
+      await entered.promise
+      try {
+        await startupClient.setActiveAccount(newer)
+        removed.resolve()
+        await removing
+        await expect(startupClient.getActiveAccount()).resolves.toEqual(newer)
+        await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(newer.accountIdentifier)
+        await expect(startupClient.getAccounts()).resolves.toEqual([newer])
+      } finally {
+        removed.resolve()
+        await removing
+      }
+    }
+  )
+
+  it('clears a stored selection when its peer disconnects during pending startup', async () => {
+    const { startupClient, storage, release, receiveDisconnect } = await delayedStartup()
+    const read = startupClient.getActiveAccount()
+    try {
+      await receiveDisconnect()
+      await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+      await expect(startupClient.getAccounts()).resolves.toEqual([])
+      await expect(read).resolves.toBeUndefined()
+    } finally {
+      release.resolve()
+    }
+  })
+
+  it('settles an existing account read when account-list recovery repairs pending startup', async () => {
+    const { startupClient, storage, release } = await delayedStartup()
+    const settled = jest.fn()
+    const read = startupClient.getActiveAccount().then(settled)
+    try {
+      await storage.set(StorageKey.ACCOUNTS, [])
+      if (!storageChangedCallback) {
+        throw new Error('Expected the storage change subscription')
+      }
+      await storageChangedCallback({
+        eventType: 'entryModified',
+        key: StorageKey.ACCOUNTS,
+        oldValue: '[{}]',
+        newValue: '[]'
+      })
+      expect(settled).toHaveBeenCalledWith(undefined)
+      await read
+      await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    } finally {
+      release.resolve()
+    }
+  })
+
+  it('settles an existing account read when a delayed startup lookup requires invalid-state reset', async () => {
+    const lookup = new ExposedPromise<void>()
+    const entered = new ExposedPromise<void>()
+    const reset = new ExposedPromise<void>()
+    class FailingStartupStorage extends LocalStorage {
+      private firstLookup = true
+      public get<K extends StorageKey>(key: K): Promise<StorageKeyReturnType[K]> {
+        if (key === StorageKey.ACTIVE_ACCOUNT && this.firstLookup) {
+          this.firstLookup = false
+          entered.resolve()
+          return lookup.promise.then(() => super.get(key))
+        }
+        return super.get(key)
+      }
+    }
+    const storage = new FailingStartupStorage()
+    const resettingClient = new DAppClient({
+      name: 'Failed startup lookup',
+      storage,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: { handler: () => reset.resolve() }
+      }
+    })
+    await entered.promise
+    const settled = jest.fn()
+    const read = resettingClient.getActiveAccount().then(settled)
+    lookup.reject(new Error('Storage read failed'))
+    await reset.promise
+    expect(settled).toHaveBeenCalledWith(undefined)
+    await read
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(resettingClient.getAccounts()).resolves.toEqual([])
+  })
 
   it('does not restore a disconnected account when an older startup connection completes', async () => {
     const { startupClient, storage, selected, release, startup, account } = await delayedStartup()
