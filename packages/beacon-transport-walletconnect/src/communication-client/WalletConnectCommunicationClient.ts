@@ -1429,30 +1429,37 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
 
     const session = this.getSession()
+    const signClient = this.signClient
 
-    if (notify && this.messageIds.length) {
-      const errorResponse: any = {
-        type: BeaconMessageType.Disconnect,
-        id: this.messageIds.pop(),
-        errorType: BeaconErrorType.ABORTED_ERROR
+    try {
+      if (notify && this.messageIds.length) {
+        const id = this.messageIds.pop()
+        this.messageIds = [] // reset before notification yields
+        if (typeof id === 'string') {
+          const errorResponse = {
+            type: BeaconMessageType.Disconnect,
+            id,
+            errorType: BeaconErrorType.ABORTED_ERROR
+          } satisfies Optional<DisconnectMessage, IgnoredResponseInputProperties> &
+            Pick<ErrorResponseInput, 'errorType'>
+
+          await this.notifyListeners(this.getTopicFromSession(session), errorResponse)
+        }
       }
-
-      this.notifyListeners(this.getTopicFromSession(session), errorResponse)
-      this.messageIds = [] // reset
-    }
-
-    if (this.signClient) {
-      await this.withTimeout(
-        this.signClient.disconnect({
-          topic: session.topic,
-          reason: {
-            code: 0, // TODO: Use constants
-            message: 'Force new connection'
-          }
-        }),
-        WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
-        'WalletConnect active session disconnect timed out.'
-      )
+    } finally {
+      if (signClient) {
+        await this.withTimeout(
+          signClient.disconnect({
+            topic: session.topic,
+            reason: {
+              code: 0, // TODO: Use constants
+              message: 'Force new connection'
+            }
+          }),
+          WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
+          'WalletConnect active session disconnect timed out.'
+        )
+      }
     }
   }
 
