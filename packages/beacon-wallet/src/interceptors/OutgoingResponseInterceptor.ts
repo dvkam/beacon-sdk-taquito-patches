@@ -6,7 +6,6 @@ import {
 } from '@ecadlabs/beacon-core'
 import {
   ErrorResponse,
-  BeaconMessage,
   BeaconResponseInputMessage,
   BeaconMessageType,
   PermissionResponse,
@@ -18,118 +17,95 @@ import {
   AppMetadata,
   BeaconRequestMessage,
   BeaconErrorType,
-  BeaconMessageWrapper,
-  BlockchainResponseV3,
-  PermissionResponseV3,
   BeaconMessageEnvelopeV3,
+  type BlockchainMessage,
   ProofOfEventChallengeResponse,
   SimulatedProofOfEventChallengeResponse
   // EncryptPayloadResponse
 } from '@ecadlabs/beacon-types'
 import { getAddressFromPublicKey, CONTRACT_PREFIX, isValidAddress } from '@ecadlabs/beacon-utils'
+import type {
+  WalletResponseInputMessage,
+  WalletResponseOutputMessage
+} from '../types/WalletResponseMessage'
 
 interface OutgoingResponseInterceptorOptions {
   senderId: string
   request: BeaconRequestMessage | BeaconMessageEnvelopeV3
-  message: BeaconResponseInputMessage
+  message: WalletResponseInputMessage
   ownAppMetadata: AppMetadata
   permissionManager: PermissionManager
   appMetadataManager: AppMetadataManager
-  interceptorCallback(message: BeaconMessage): void
+  interceptorCallback: (message: WalletResponseOutputMessage) => unknown
 }
+
+interface OutgoingResponseInterceptorOptionsV2 extends OutgoingResponseInterceptorOptions {
+  message: BeaconResponseInputMessage
+}
+
+const isObject = (value: unknown): value is object =>
+  value !== null && (typeof value === 'object' || typeof value === 'function')
+
+const isEnvelopeShape = (value: unknown): value is BeaconMessageEnvelopeV3 => {
+  if (!isObject(value) || !('message' in value)) {
+    return false
+  }
+
+  const message = value.message
+
+  return (
+    'id' in value &&
+    typeof value.id === 'string' &&
+    'version' in value &&
+    typeof value.version === 'string' &&
+    'senderId' in value &&
+    typeof value.senderId === 'string' &&
+    isObject(message) &&
+    'type' in message
+  )
+}
+
+const isFlatChainShape = (
+  value: unknown
+): value is Extract<WalletResponseInputMessage, BlockchainMessage> =>
+  isObject(value) &&
+  'id' in value &&
+  typeof value.id === 'string' &&
+  'blockchainIdentifier' in value &&
+  typeof value.blockchainIdentifier === 'string' &&
+  'blockchainData' in value &&
+  'type' in value
 
 const logger = new Logger('OutgoingResponseInterceptor')
 
 /**
  * @internalapi
  *
- * The OutgoingResponseInterceptor is used in the WalletClient to intercept an outgoing response and enrich it with data.
+ * The OutgoingResponseInterceptor enriches V2 responses and forwards the existing V3 response forms.
  */
 export class OutgoingResponseInterceptor {
   public static async intercept(config: OutgoingResponseInterceptorOptions): Promise<void> {
     if (config.request.version === '2') {
-      OutgoingResponseInterceptor.handleV2Message(config)
+      const message = config.message
+      if (isEnvelopeShape(message) || isFlatChainShape(message)) {
+        throw new Error('A V3 response shape cannot be sent for a V2 request')
+      }
+
+      return OutgoingResponseInterceptor.handleV2Message({ ...config, message })
     } else if (config.request.version === '3') {
-      OutgoingResponseInterceptor.handleV3Message(config)
+      return OutgoingResponseInterceptor.handleV3Message(config)
     }
   }
 
   private static async handleV3Message(config: OutgoingResponseInterceptorOptions) {
-    const {
-      // senderId,
-      // request,
-      message: msg,
-      // ownAppMetadata,
-      // permissionManager,
-      appMetadataManager,
-      interceptorCallback
-    }: OutgoingResponseInterceptorOptions = config
+    const { message, appMetadataManager, interceptorCallback } = config
+    const payload = 'message' in message ? message.message : undefined
+    logger.log('LOGGING OUTGOING V3', payload, appMetadataManager)
 
-    const wrappedMessage:
-      | BeaconMessageWrapper<PermissionResponseV3>
-      | BeaconMessageWrapper<BlockchainResponseV3> = msg as any
-
-    const v3Message: PermissionResponseV3 | BlockchainResponseV3 = wrappedMessage.message
-
-    logger.log('LOGGING OUTGOING V3', v3Message, appMetadataManager)
-
-    interceptorCallback(msg as any)
-
-    // switch (v3Message.type) {
-    //   case BeaconMessageType.PermissionResponse:
-    //     {
-    //       const response: PermissionResponse = {
-    //         senderId,
-    //         version: BEACON_VERSION,
-    //         appMetadata: ownAppMetadata,
-    //         ...msg
-    //       }
-
-    //       const publicKey = response.publicKey
-
-    //       const address: string = await getAddressFromPublicKey(publicKey)
-    //       const appMetadata = await appMetadataManager.getAppMetadata(request.senderId)
-    //       if (!appMetadata) {
-    //         throw new Error('AppMetadata not found')
-    //       }
-
-    //       const permission: PermissionInfo = {
-    //         accountIdentifier: await getAccountIdentifier(address, response.network),
-    //         senderId: request.senderId,
-    //         appMetadata,
-    //         website: '',
-    //         address,
-    //         publicKey,
-    //         network: response.network,
-    //         scopes: response.scopes,
-    //         connectedAt: new Date().getTime()
-    //       }
-
-    //       permissionManager.addPermission(permission).catch(console.error)
-
-    //       interceptorCallback(response)
-    //     }
-    //     break
-    //   case BeaconMessageType.BlockchainResponse:
-    //     {
-    //       // const appMetadata: AppMetadata = await IncomingRequestInterceptor.getAppMetadata(
-    //       //   appMetadataManager,
-    //       //   msg.senderId
-    //       // )
-    //       const request: any /* BeaconMessageWrapper<BlockchainRequestV3<string>> */ = {
-    //         ...wrappedMessage
-    //       }
-    //       interceptorCallback(request)
-    //     }
-    //     break
-
-    //   default:
-    //     logger.log('intercept', 'Message not handled')
-    //     assertNever(v3Message)
-    // }
+    await interceptorCallback(message)
   }
 
-  private static async handleV2Message(config: OutgoingResponseInterceptorOptions) {
+  private static async handleV2Message(config: OutgoingResponseInterceptorOptionsV2) {
     const {
       senderId,
       request,
@@ -138,7 +114,7 @@ export class OutgoingResponseInterceptor {
       permissionManager,
       appMetadataManager,
       interceptorCallback
-    }: OutgoingResponseInterceptorOptions = config
+    }: OutgoingResponseInterceptorOptionsV2 = config
 
     switch (message.type) {
       case BeaconMessageType.Error: {
@@ -163,7 +139,7 @@ export class OutgoingResponseInterceptor {
             )
           }
         }
-        interceptorCallback(response)
+        await interceptorCallback(response)
         break
       }
       case BeaconMessageType.Acknowledge: {
@@ -173,7 +149,7 @@ export class OutgoingResponseInterceptor {
           senderId,
           id: message.id
         }
-        interceptorCallback(response)
+        await interceptorCallback(response)
         break
       }
       case BeaconMessageType.PermissionResponse: {
@@ -225,7 +201,7 @@ export class OutgoingResponseInterceptor {
 
         permissionManager.addPermission(permission).catch(console.error)
 
-        interceptorCallback(response)
+        await interceptorCallback(response)
         break
       }
       case BeaconMessageType.OperationResponse:
@@ -235,7 +211,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       case BeaconMessageType.SignPayloadResponse:
@@ -245,7 +221,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       // TODO: ENCRYPTION
@@ -266,7 +242,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       case BeaconMessageType.ProofOfEventChallengeResponse:
@@ -276,7 +252,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       case BeaconMessageType.SimulatedProofOfEventChallengeResponse:
@@ -286,7 +262,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       default:

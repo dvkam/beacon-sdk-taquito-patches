@@ -21,11 +21,9 @@ import {
   PeerInfo,
   DisconnectMessage,
   TransportType,
-  BeaconResponseInputMessage,
   AppMetadata,
   PermissionInfo,
   TransportStatus,
-  BeaconMessage,
   BeaconMessageEnvelopeV3,
   StorageKey,
   PushToken,
@@ -41,6 +39,10 @@ import { OutgoingResponseInterceptor } from '../interceptors/OutgoingResponseInt
 import { WalletClientOptions } from './WalletClientOptions'
 
 import type { WalletRequestOutputMessage } from '../types/WalletRequestOutputMessage'
+import type {
+  WalletResponseInputMessage,
+  WalletResponseOutputMessage
+} from '../types/WalletResponseMessage'
 import { isV3Envelope } from '../utils/message-guards'
 
 const logger = new Logger('WalletClient')
@@ -294,9 +296,9 @@ export class WalletClient extends Client {
   /**
    * This method sends a response for a specific request back to the DApp
    *
-   * @param message The BeaconResponseMessage that will be sent back to the DApp
+   * @param message The response value to send back to the DApp
    */
-  public async respond(message: BeaconResponseInputMessage): Promise<void> {
+  public async respond(message: WalletResponseInputMessage): Promise<void> {
     logger.log('RESPONSE', message)
     const request = this.pendingRequests.find(
       (pendingRequest) => pendingRequest[0].id === message.id
@@ -316,7 +318,7 @@ export class WalletClient extends Client {
       ownAppMetadata: await this.getOwnAppMetadata(),
       permissionManager: this.permissionManager,
       appMetadataManager: this.appMetadataManager,
-      interceptorCallback: async (response: BeaconMessage): Promise<void> => {
+      interceptorCallback: async (response: WalletResponseOutputMessage): Promise<void> => {
         await this.respondToMessage(response, request[1])
       }
     })
@@ -467,19 +469,19 @@ export class WalletClient extends Client {
       ownAppMetadata: await this.getOwnAppMetadata(),
       permissionManager: this.permissionManager,
       appMetadataManager: this.appMetadataManager,
-      interceptorCallback: async (response: BeaconMessage): Promise<void> => {
+      interceptorCallback: async (response: WalletResponseOutputMessage): Promise<void> => {
         await this.respondToMessage(response, connectionContext)
       }
     })
   }
 
   /**
-   * An internal method to send a BeaconMessage to the DApp
+   * An internal method to send a response value to the DApp
    *
    * @param response Send a message back to the DApp
    */
   private async respondToMessage(
-    response: BeaconMessage,
+    response: WalletResponseOutputMessage,
     connectionContext: ConnectionContext
   ): Promise<void> {
     const serializedMessage: string = await new Serializer().serialize(response)
