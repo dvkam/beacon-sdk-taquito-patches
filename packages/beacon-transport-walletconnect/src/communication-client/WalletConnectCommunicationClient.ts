@@ -28,6 +28,7 @@ import {
   OperationRequest,
   OperationResponseInput,
   Optional,
+  PeerInfoType,
   PermissionRequest,
   PermissionResponseInput,
   PermissionScope,
@@ -356,7 +357,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }, 30000)
   }
 
-  async sendMessage(_message: string, _peer?: any): Promise<void> {
+  public async sendMessage(_message: string, _peer?: PeerInfoType): Promise<void> {
     const serializer = new Serializer()
     const message = (await serializer.deserialize(_message)) as any
 

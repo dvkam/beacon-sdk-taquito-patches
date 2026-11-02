@@ -3,6 +3,7 @@ import {
   Origin,
   Storage,
   TransportStatus,
+  ExtendedWalletConnectPairingRequest,
   ExtendedWalletConnectPairingResponse,
   StorageKey,
   WalletConnectPairingRequest,
@@ -150,7 +151,7 @@ export class WalletConnectTransport<
     await this.client.unsubscribeFromEncryptedMessages()
   }
 
-  public getPairingRequestInfo(): Promise<any> {
+  public getPairingRequestInfo(): Promise<ExtendedWalletConnectPairingRequest> {
     return this.client.getPairingRequestInfo()
   }
 
