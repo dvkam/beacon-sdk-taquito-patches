@@ -907,14 +907,14 @@ export class DAppClient extends Client {
       await this.retirePendingPeer(connectionInfo, message.senderId)
 
       if (relevantTransport) {
-        const peers: ExtendedPeerInfo[] = [
+        const peers = [
           ...(await relevantTransport.getPeers()),
           ...((connectionInfo.origin === Origin.WALLETCONNECT
             ? await this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)
             : undefined) ?? [])
         ]
-        const peer: ExtendedPeerInfo | undefined = peers.find(
-          (peerEl) => peerEl.senderId === message.senderId
+        const peer = peers.find(
+          (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
         )
 
         if (peer) {

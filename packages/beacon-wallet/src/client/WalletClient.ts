@@ -16,7 +16,6 @@ import {
   BeaconRequestMessage,
   BeaconMessageType,
   AcknowledgeResponseInput,
-  ExtendedP2PPairingResponse,
   ExtendedPeerInfo,
   PeerInfo,
   DisconnectMessage,
@@ -471,7 +470,7 @@ export class WalletClient extends Client {
   }
 
   public async removePeer(
-    peer: ExtendedP2PPairingResponse,
+    peer: PeerInfo,
     sendDisconnectToPeer: boolean = false
   ): Promise<void> {
     const removePeerResult = (await this.transport).removePeer(peer)
@@ -486,7 +485,7 @@ export class WalletClient extends Client {
   }
 
   public async removeAllPeers(sendDisconnectToPeers: boolean = false): Promise<void> {
-    const peers: ExtendedP2PPairingResponse[] = await (await this.transport).getPeers()
+    const peers = await (await this.transport).getPeers()
     const removePeerResult = (await this.transport).removeAllPeers()
 
     await this.removePermissionsForPeers(peers)
@@ -500,12 +499,18 @@ export class WalletClient extends Client {
     return removePeerResult
   }
 
-  private async removePermissionsForPeers(
-    peersToRemove: ExtendedP2PPairingResponse[]
-  ): Promise<void> {
+  private async removePermissionsForPeers(peersToRemove: PeerInfo[]): Promise<void> {
     const permissions = await this.permissionManager.getPermissions()
 
-    const peerIdsToRemove = peersToRemove.map((peer) => peer.senderId)
+    const peerIdsToRemove: string[] = []
+    for (const peer of peersToRemove) {
+      if ('senderId' in peer) {
+        const senderId = peer.senderId
+        if (typeof senderId === 'string') {
+          peerIdsToRemove.push(senderId)
+        }
+      }
+    }
     // Remove all permissions with origin of the specified peer
     const permissionsToRemove = permissions.filter((permission) =>
       peerIdsToRemove.includes(permission.appMetadata.senderId)
@@ -565,8 +570,15 @@ export class WalletClient extends Client {
 
   private async disconnect(senderId: string) {
     const transport = await this.transport
-    const peers: ExtendedPeerInfo[] = await transport.getPeers()
-    const peer: ExtendedPeerInfo | undefined = peers.find((peerEl) => peerEl.senderId === senderId)
+    const peers = await transport.getPeers()
+    const peer = peers.find((peerEl) => {
+      if (!('senderId' in peerEl)) {
+        return false
+      }
+      const storedSenderId = peerEl.senderId
+
+      return typeof storedSenderId === 'string' && storedSenderId === senderId
+    })
 
     if (!peer) {
       return
@@ -574,7 +586,7 @@ export class WalletClient extends Client {
 
     let removePeerError: unknown
     try {
-      await this.removePeer(peer as any)
+      await this.removePeer(peer)
     } catch (error) {
       removePeerError = error
     }

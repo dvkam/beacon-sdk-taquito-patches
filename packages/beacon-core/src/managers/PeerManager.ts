@@ -1,5 +1,5 @@
 import { Storage, StorageKey, StorageKeyReturnType } from '@ecadlabs/beacon-types'
-import { StorageManager, ArrayElem } from './StorageManager'
+import { StorageManager } from './StorageManager'
 
 /**
  * @internalapi
@@ -32,7 +32,7 @@ export class PeerManager<
     return this.storageManager.getOne((peer) => peer.publicKey === publicKey)
   }
 
-  public async addPeer(peerInfo: ArrayElem<StorageKeyReturnType[T]>): Promise<void> {
+  public async addPeer(peerInfo: StorageKeyReturnType[T][number]): Promise<void> {
     return this.storageManager.addOne(peerInfo, (peer) => peer.publicKey === peerInfo.publicKey)
   }
 
