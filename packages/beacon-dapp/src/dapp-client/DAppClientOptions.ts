@@ -134,6 +134,11 @@ export interface DAppClientOptions {
   featuredWallets?: string[]
 
   /**
+   * @deprecated Ignored. Built-in telemetry has been removed.
+   */
+  enableMetrics?: boolean
+
+  /**
    * Automatically switch between apps on Mobile Devices (Enabled by Default)
    */
   enableAppSwitching?: boolean
