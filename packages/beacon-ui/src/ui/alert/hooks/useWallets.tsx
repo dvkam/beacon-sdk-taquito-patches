@@ -99,7 +99,7 @@ const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
           image: e.iconUrl ?? '',
           description: 'Browser Extension',
           type: 'extension' as const,
-          link: (e as any).link ?? ''
+          link: 'link' in e && typeof e.link === 'string' ? e.link : ''
         }))
     ]
 
