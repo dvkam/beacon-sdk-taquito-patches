@@ -1,7 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import QRCode from '../../../src/ui/alert/components/pairing-alert/components/qr-code'
 import { MergedWallet } from '../../../src/utils/wallets'
-import { AlertState } from '../../../src/ui/common'
 
 vi.mock('../../../src/components/qr', () => ({
   default: (props: { isWalletConnect: boolean; code: string }) => (
@@ -46,7 +45,6 @@ describe('Pairing alert QRCode', () => {
         isWCWorking
         isMobile={false}
         defaultPairing={p2pPairing.promise}
-        handleUpdateState={vi.fn<(...args: [AlertState]) => void>()}
         handleIsLoading={handleIsLoading}
       />
     )
@@ -69,7 +67,6 @@ describe('Pairing alert QRCode', () => {
         isWCWorking={false}
         isMobile={false}
         defaultPairing={Promise.resolve('p2p-code')}
-        handleUpdateState={vi.fn<(...args: [AlertState]) => void>()}
         handleIsLoading={handleIsLoading}
       />
     )
