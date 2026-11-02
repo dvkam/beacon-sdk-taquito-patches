@@ -357,7 +357,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }, 30000)
   }
 
-  public async sendMessage(_message: string, _peer?: PeerInfoType): Promise<void> {
+  public sendMessage(_message: string, _peer?: PeerInfoType): Promise<void>
+  public async sendMessage(_message: string): Promise<void> {
     const serializer = new Serializer()
     const message = (await serializer.deserialize(_message)) as any
 
