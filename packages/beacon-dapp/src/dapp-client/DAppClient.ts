@@ -79,7 +79,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import {
   Client,
-  Transport,
+  type ClientTransport,
   AppMetadataManager,
   Serializer,
   LocalStorage,
@@ -824,7 +824,7 @@ export class DAppClient extends Client {
     }
   }
 
-  private async retireTabTransport(transport: Transport): Promise<void> {
+  private async retireTabTransport(transport: ClientTransport): Promise<void> {
     await this.initialization.cleanup(async () => {
       await this.cleanup([transport])
       if (transport instanceof DappWalletConnectTransport) {
@@ -874,8 +874,8 @@ export class DAppClient extends Client {
   }
 
   protected async registerTransportListener(
-    transport: Transport,
-    listener: Parameters<Transport['addListener']>[0]
+    transport: ClientTransport,
+    listener: Parameters<ClientTransport['addListener']>[0]
   ): Promise<void> {
     if (transport instanceof WalletConnectTransport) {
       await transport.addListener(listener, (message, connectionInfo, isCurrent) =>
@@ -914,7 +914,7 @@ export class DAppClient extends Client {
     const handleDisconnect = async (): Promise<void> => {
       this.analytics.track('event', 'DAppClient', 'Disconnect received from Wallet')
 
-      const relevantTransport =
+      const relevantTransport: ClientTransport | undefined =
         connectionInfo.origin === Origin.P2P
           ? this.p2pTransport
           : connectionInfo.origin === Origin.WALLETCONNECT
@@ -1456,7 +1456,7 @@ export class DAppClient extends Client {
     }
   }
 
-  public async init(transport?: Transport<PeerInfoType>): Promise<TransportType> {
+  public async init(transport?: ClientTransport): Promise<TransportType> {
     this.assertNotDestroyed()
     if (this._transport.promiseResult?.type === TransportType.WALLETCONNECT) {
       await this.waitForTabConnection()
@@ -1492,7 +1492,7 @@ export class DAppClient extends Client {
   }
 
   private async initializeTransport(
-    transport: Transport<PeerInfoType> | undefined,
+    transport: ClientTransport | undefined,
     transition: AbortSignal,
     attempt: InitializationAttempt
   ): Promise<void> {
@@ -3404,7 +3404,7 @@ export class DAppClient extends Client {
   /**
    * A "setter" for when the transport needs to be changed.
    */
-  protected async setTransport(transport?: Transport<any>): Promise<void> {
+  protected async setTransport(transport?: ClientTransport): Promise<void> {
     if (!transport) {
       this._initPromise = undefined
     }

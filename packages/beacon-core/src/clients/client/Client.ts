@@ -16,7 +16,8 @@ import {
 import { BeaconClient } from '../beacon-client/BeaconClient'
 import { AccountManager } from '../../managers/AccountManager'
 import { getSenderId } from '../../utils/get-sender-id'
-import { Transport } from '../../transports/Transport'
+import type { Transport } from '../../transports/Transport'
+import type { ClientTransport } from '../../transports/ClientTransport'
 import { Serializer } from '../../Serializer'
 import { ClientOptions } from './ClientOptions'
 
@@ -79,8 +80,8 @@ export abstract class Client extends BeaconClient {
 
   private readonly transportListenerRegistrations: Map<TransportType, Promise<void>> = new Map()
 
-  protected _transport: ExposedPromise<Transport<any>> = new ExposedPromise()
-  protected get transport(): Promise<Transport<any>> {
+  protected _transport: ExposedPromise<ClientTransport> = new ExposedPromise()
+  protected get transport(): Promise<ClientTransport> {
     return this._transport.promise
   }
 
@@ -204,7 +205,7 @@ export abstract class Client extends BeaconClient {
    *
    * @param transport A transport that can be provided by the user
    */
-  public async init(transport: Transport<any>): Promise<TransportType> {
+  public async init(transport: ClientTransport): Promise<TransportType> {
     if (this._transport.isResolved()) {
       return (await this.transport).type
     }
@@ -246,7 +247,11 @@ export abstract class Client extends BeaconClient {
       await this.cleanup()
       await transport.disconnect()
       if (transport.type === TransportType.WALLETCONNECT) {
-        await (transport as any).doClientCleanup() // any because I cannot import the type definition
+        const cleanup = 'doClientCleanup' in transport ? transport.doClientCleanup : undefined
+        if (typeof cleanup !== 'function') {
+          throw new TypeError('WalletConnect transport does not expose cleanup')
+        }
+        await cleanup.call(transport)
       }
     }
     await super.destroy()
@@ -255,7 +260,7 @@ export abstract class Client extends BeaconClient {
   /**
    * A "setter" for when the transport needs to be changed.
    */
-  protected async setTransport(transport?: Transport<any>): Promise<void> {
+  protected async setTransport(transport?: ClientTransport): Promise<void> {
     if (transport) {
       if (this._transport.isSettled()) {
         // If the promise has already been resolved we need to create a new one.
@@ -337,7 +342,7 @@ export abstract class Client extends BeaconClient {
     }
   }
 
-  protected async sendDisconnectToPeer(peer: PeerInfo, transport?: Transport<any>): Promise<void> {
+  protected async sendDisconnectToPeer(peer: PeerInfo, transport?: ClientTransport): Promise<void> {
     const request: DisconnectMessage = {
       id: await generateGUID(),
       version: peer.version,
