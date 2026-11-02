@@ -52,7 +52,6 @@ import {
   BlockchainResponseV3,
   PermissionRequestV3,
   PermissionResponseV3,
-  BeaconBaseMessage,
   AcknowledgeResponse,
   ExtendedWalletConnectPairingResponse,
   ProofOfEventChallengeRequest,
@@ -139,6 +138,21 @@ import {
   BeaconEventType,
   InvalidAccountDeactivatedReason
 } from '../events'
+import {
+  anyPendingResponse,
+  createPendingRequest,
+  v2Response,
+  v2ResponseForRequest,
+  v3PermissionResponse,
+  v3BlockchainResponse,
+  responseType,
+  responseAppMetadata,
+  type PendingMessage,
+  type PendingRequest,
+  type RequestFailure,
+  type RequestResult,
+  type ResponseSelector
+} from './pending-responses'
 import { DAppClientOptions } from './DAppClientOptions'
 
 const logger = new Logger('DAppClient')
@@ -259,16 +273,7 @@ export class DAppClient extends Client {
   /**
    * A map of requests that are currently "open", meaning we have sent them to a wallet and are still awaiting a response.
    */
-  private readonly openRequests = new Map<
-    string,
-    ExposedPromise<
-      {
-        message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
-        connectionInfo: ConnectionContext
-      },
-      ErrorResponse
-    >
-  >()
+  private readonly openRequests = new Map<string, PendingRequest>()
 
   private readonly acknowledgedRequests = new Set<string>()
   private readonly openRequestTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
@@ -456,62 +461,34 @@ export class DAppClient extends Client {
       })
 
     this.handleResponse = async (
-      message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>,
+      message: PendingMessage,
       connectionInfo: ConnectionContext
     ): Promise<void> => {
+      const requestId = message.id
       const isV3WrappedMessage = message.version === '3' && 'message' in message
 
       const typedMessage = isV3WrappedMessage ? message.message : (message as BeaconMessage)
 
-      let appMetadata: AppMetadata | undefined = isV3WrappedMessage
-        ? (typedMessage as unknown as PermissionResponseV3).blockchainData?.appMetadata
-        : (typedMessage as PermissionResponse).appMetadata
-
-      if (!appMetadata && isV3WrappedMessage) {
-        const storedMetadata = await Promise.all([
-          this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
-          this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
-          this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
-        ])
-
-        for (const peers of storedMetadata) {
-          const peer = peers.find((candidate) => candidate.senderId === message.senderId)
-          if (!peer) {
-            continue
-          }
-
-          const wallet = await this.getWalletInfo()
-
-          appMetadata = {
-            name: peer.name,
-            senderId: peer.senderId,
-            icon: wallet.icon
-          }
-
-          break
-        }
-      }
-
-      if (this.openRequestsOtherTabs.has(message.id)) {
+      if (this.openRequestsOtherTabs.has(requestId)) {
         this.multiTabChannel.postMessage({
           type: 'RESPONSE',
           data: {
             message,
             connectionInfo
           },
-          id: message.id
+          id: requestId
         })
 
         if (typedMessage.type === BeaconMessageType.Acknowledge) {
-          this.clearOpenRequestTimeout(message.id)
+          this.clearOpenRequestTimeout(requestId)
         } else {
-          this.clearOpenRequest(message.id)
+          this.clearOpenRequest(requestId)
         }
 
         return
       }
 
-      const openRequest = this.openRequests.get(message.id)
+      const openRequest = this.openRequests.get(requestId)
 
       logger.log('### openRequest ###', openRequest)
       logger.log('handleResponse', 'Received message', message, connectionInfo)
@@ -549,11 +526,11 @@ export class DAppClient extends Client {
       }
 
       if (openRequest && typedMessage.type === BeaconMessageType.Acknowledge) {
-        if (!this.acknowledgedRequests.has(message.id)) {
-          this.acknowledgedRequests.add(message.id)
-          this.clearOpenRequestTimeout(message.id)
+        if (!this.acknowledgedRequests.has(requestId)) {
+          this.acknowledgedRequests.add(requestId)
+          this.clearOpenRequestTimeout(requestId)
           this.analytics.track('event', 'DAppClient', 'Acknowledge received from Wallet')
-          logger.log('handleResponse', `acknowledge message received for ${message.id}`)
+          logger.log('handleResponse', `acknowledge message received for ${requestId}`)
 
           this.events
             .emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
@@ -564,17 +541,37 @@ export class DAppClient extends Client {
             .catch((emitError) => logger.error('handleResponse', emitError))
         }
       } else if (openRequest) {
-        if (typedMessage.type === BeaconMessageType.PermissionResponse && appMetadata) {
-          await this.appMetadataManager.addAppMetadata(appMetadata)
-        }
-
         if (typedMessage.type === BeaconMessageType.Error) {
           openRequest.reject(typedMessage as ErrorResponse)
         } else {
-          openRequest.resolve({ message, connectionInfo })
+          await openRequest.resolve({ message, connectionInfo }, async (selected) => {
+            if (responseType(selected) !== BeaconMessageType.PermissionResponse) {
+              return
+            }
+            let appMetadata = responseAppMetadata(selected)
+            if (!appMetadata && selected.version === '3' && 'message' in selected) {
+              const storedMetadata = await Promise.all([
+                this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
+                this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
+                this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
+              ])
+              for (const peers of storedMetadata) {
+                const peer = peers.find((candidate) => candidate.senderId === selected.senderId)
+                if (!peer) {
+                  continue
+                }
+                const wallet = await this.getWalletInfo()
+                appMetadata = { name: peer.name, senderId: peer.senderId, icon: wallet.icon }
+                break
+              }
+            }
+            if (appMetadata) {
+              await this.appMetadataManager.addAppMetadata(appMetadata)
+            }
+          })
         }
-        this.clearOpenRequest(message.id)
-        this.acknowledgedRequests.delete(message.id)
+        this.clearOpenRequest(requestId)
+        this.acknowledgedRequests.delete(requestId)
       } else {
         if (typedMessage.type === BeaconMessageType.Disconnect) {
           await handleDisconnect()
@@ -582,7 +579,7 @@ export class DAppClient extends Client {
           await this.onNewAccount(typedMessage as ChangeAccountRequest, connectionInfo)
         } else {
           logger.warn('handleResponse', 'received response for unknown or closed request', {
-            id: message.id,
+            id: requestId,
             type: typedMessage.type,
             connectionInfo
           })
@@ -596,7 +593,11 @@ export class DAppClient extends Client {
           transport instanceof WalletConnectTransport &&
           !this.openRequests.has(SESSION_UPDATE_REQUEST_ID)
         ) {
-          this.openRequests.set(SESSION_UPDATE_REQUEST_ID, new ExposedPromise())
+          this.addOpenRequest(
+            SESSION_UPDATE_REQUEST_ID,
+            new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>(),
+            anyPendingResponse
+          )
         }
       }
     }
@@ -732,8 +733,8 @@ export class DAppClient extends Client {
 
     this.openRequestsOtherTabs.add(message.id)
     const requestPromise = isV3
-      ? this.makeRequestV3(message.data, message.id)
-      : this.makeRequest(message.data, false, message.id)
+      ? this.makeRequestV3(message.data, v3BlockchainResponse(message.data.blockchainIdentifier), message.id)
+      : this.makeRequest(message.data, v2ResponseForRequest(message.type), false, message.id)
 
     requestPromise.catch((requestError) => {
       const errorResponse = this.buildDelegatedRequestError(message.id, requestError)
@@ -1876,7 +1877,7 @@ export class DAppClient extends Client {
       resolved = await this.makeRequestV3<
         PermissionRequestV3,
         BeaconMessageWrapper<PermissionResponseV3>
-      >(request)
+      >(request, v3PermissionResponse(request.blockchainIdentifier))
     } catch (requestError) {
       await this.runRequestErrorSideEffects(request, requestError, logId)
       throw requestError
@@ -1969,8 +1970,8 @@ export class DAppClient extends Client {
     const logId = `makeRequestV3 ${Date.now()}`
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
-      ? this.makeRequestV3<BlockchainRequestV3, BeaconMessageWrapper<BlockchainResponseV3>>(request)
-      : this.makeRequestBC<any, any>(request)
+      ? this.makeRequestV3<BlockchainRequestV3, BeaconMessageWrapper<BlockchainResponseV3>>(request, v3BlockchainResponse(request.blockchainIdentifier))
+      : this.makeRequestBC<BlockchainRequestV3, BeaconMessageWrapper<BlockchainResponseV3>>(request, v3BlockchainResponse(request.blockchainIdentifier))
 
     let resolved
     try {
@@ -2061,8 +2062,8 @@ export class DAppClient extends Client {
 
     const res =
       (await this.checkMakeRequest()) || !(await this.getActiveAccount())
-        ? this.makeRequest<PermissionRequest, PermissionResponse>(request, undefined, undefined)
-        : this.makeRequestBC<PermissionRequest, PermissionResponse>(request)
+        ? this.makeRequest<PermissionRequest, PermissionResponse>(request, v2Response(BeaconMessageType.PermissionResponse))
+        : this.makeRequestBC<PermissionRequest, PermissionResponse>(request, v2Response(BeaconMessageType.PermissionResponse))
 
     let resolved
     try {
@@ -2159,8 +2160,8 @@ export class DAppClient extends Client {
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
-      ? this.makeRequest<ProofOfEventChallengeRequest, ProofOfEventChallengeResponse>(request)
-      : this.makeRequestBC<ProofOfEventChallengeRequest, ProofOfEventChallengeResponse>(request)
+      ? this.makeRequest<ProofOfEventChallengeRequest, ProofOfEventChallengeResponse>(request, v2Response(BeaconMessageType.ProofOfEventChallengeResponse))
+      : this.makeRequestBC<ProofOfEventChallengeRequest, ProofOfEventChallengeResponse>(request, v2Response(BeaconMessageType.ProofOfEventChallengeResponse))
 
     let resolved
     try {
@@ -2232,11 +2233,11 @@ export class DAppClient extends Client {
       ? this.makeRequest<
           SimulatedProofOfEventChallengeRequest,
           SimulatedProofOfEventChallengeResponse
-        >(request)
+        >(request, v2Response(BeaconMessageType.SimulatedProofOfEventChallengeResponse))
       : this.makeRequestBC<
           SimulatedProofOfEventChallengeRequest,
           SimulatedProofOfEventChallengeResponse
-        >(request)
+        >(request, v2Response(BeaconMessageType.SimulatedProofOfEventChallengeResponse))
 
     let resolved
     try {
@@ -2331,8 +2332,8 @@ export class DAppClient extends Client {
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
-      ? this.makeRequest<SignPayloadRequest, SignPayloadResponse>(request)
-      : this.makeRequestBC<SignPayloadRequest, SignPayloadResponse>(request)
+      ? this.makeRequest<SignPayloadRequest, SignPayloadResponse>(request, v2Response(BeaconMessageType.SignPayloadResponse))
+      : this.makeRequestBC<SignPayloadRequest, SignPayloadResponse>(request, v2Response(BeaconMessageType.SignPayloadResponse))
 
     let resolved
     try {
@@ -2449,8 +2450,8 @@ export class DAppClient extends Client {
     logger.time(true, logId)
 
     const res = (await this.checkMakeRequest())
-      ? this.makeRequest<OperationRequest, OperationResponse>(request)
-      : this.makeRequestBC<OperationRequest, OperationResponse>(request)
+      ? this.makeRequest<OperationRequest, OperationResponse>(request, v2Response(BeaconMessageType.OperationResponse))
+      : this.makeRequestBC<OperationRequest, OperationResponse>(request, v2Response(BeaconMessageType.OperationResponse))
 
     let resolved
     try {
@@ -2511,8 +2512,8 @@ export class DAppClient extends Client {
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
-      ? this.makeRequest<BroadcastRequest, BroadcastResponse>(request)
-      : this.makeRequestBC<BroadcastRequest, BroadcastResponse>(request)
+      ? this.makeRequest<BroadcastRequest, BroadcastResponse>(request, v2Response(BeaconMessageType.BroadcastResponse))
+      : this.makeRequestBC<BroadcastRequest, BroadcastResponse>(request, v2Response(BeaconMessageType.BroadcastResponse))
 
     let resolved
     try {
@@ -2976,6 +2977,7 @@ export class DAppClient extends Client {
 
   private makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
     requestInput: Optional<T, IgnoredRequestInputProperties>,
+    selectResponse: ResponseSelector<U>,
     skipResponse?: undefined | false,
     otherTabMessageId?: string
   ): Promise<{
@@ -2984,11 +2986,13 @@ export class DAppClient extends Client {
   }>
   private makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
     requestInput: Optional<T, IgnoredRequestInputProperties>,
+    selectResponse: ResponseSelector<U>,
     skipResponse: true,
     otherTabMessageId?: string
   ): Promise<undefined>
   private async makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
     requestInput: Optional<T, IgnoredRequestInputProperties>,
+    selectResponse: ResponseSelector<U>,
     skipResponse?: boolean,
     otherTabMessageId?: string
   ) {
@@ -3024,18 +3028,12 @@ export class DAppClient extends Client {
       ...requestInput
     }
 
-    let exposed
+    const exposed = skipResponse
+      ? undefined
+      : new ExposedPromise<RequestResult<U>, RequestFailure>()
 
-    if (!skipResponse) {
-      exposed = new ExposedPromise<
-        {
-          message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
-          connectionInfo: ConnectionContext
-        },
-        ErrorResponse
-      >()
-
-      this.addOpenRequest(request.id, exposed)
+    if (exposed) {
+      this.addOpenRequest(request.id, exposed, selectResponse)
     }
 
     try {
@@ -3091,8 +3089,7 @@ export class DAppClient extends Client {
       throw sendError
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return exposed?.promise as any // TODO: fix type
+    return exposed?.promise
   }
 
   /**
@@ -3108,6 +3105,7 @@ export class DAppClient extends Client {
     U extends BeaconMessageWrapper<BlockchainMessage>
   >(
     requestInput: T,
+    selectResponse: ResponseSelector<U>,
     otherTabMessageId?: string
   ): Promise<{
     message: U
@@ -3137,15 +3135,9 @@ export class DAppClient extends Client {
       message: requestInput
     }
 
-    const exposed = new ExposedPromise<
-      {
-        message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
-        connectionInfo: ConnectionContext
-      },
-      ErrorResponse
-    >()
+    const exposed = new ExposedPromise<RequestResult<U>, RequestFailure>()
 
-    this.addOpenRequest(request.id, exposed)
+    this.addOpenRequest(request.id, exposed, selectResponse)
 
     try {
       const payload = await new Serializer().serialize(request)
@@ -3197,12 +3189,15 @@ export class DAppClient extends Client {
       throw sendError
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return exposed.promise as any // TODO: fix type
+    return exposed.promise
   }
 
-  private async makeRequestBC<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
-    request: Optional<T, IgnoredRequestInputProperties>
+  private async makeRequestBC<
+    T extends BeaconRequestInputMessage | BlockchainRequestV3,
+    U extends PendingMessage
+  >(
+    request: Optional<T, Extract<IgnoredRequestInputProperties, keyof T>>,
+    selectResponse: ResponseSelector<U>
   ): Promise<
     | {
         message: U
@@ -3252,15 +3247,9 @@ export class DAppClient extends Client {
       })
       .catch((emitError) => console.warn(emitError))
 
-    const exposed = new ExposedPromise<
-      {
-        message: U
-        connectionInfo: ConnectionContext
-      },
-      ErrorResponse
-    >()
+    const exposed = new ExposedPromise<RequestResult<U>, RequestFailure>()
 
-    this.addOpenRequest(id, exposed as any)
+    this.addOpenRequest(id, exposed, selectResponse)
 
     return exposed.promise
   }
@@ -3455,33 +3444,20 @@ export class DAppClient extends Client {
    * @param id The ID of the message
    * @param promise A promise that resolves once the response for that specific message is received
    */
-  private addOpenRequest(
+  private addOpenRequest<U extends PendingMessage>(
     id: string,
-    promise: ExposedPromise<
-      {
-        message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
-        connectionInfo: ConnectionContext
-      },
-      ErrorResponse
-    >
+    promise: ExposedPromise<RequestResult<U>, RequestFailure>,
+    selectResponse: ResponseSelector<U>
   ): void {
     logger.log('addOpenRequest', this.name, `adding request ${id} and waiting for answer`)
     this.clearOpenRequestTimeout(id)
     this.openRequests.delete(id)
-    this.openRequests.set(id, promise)
-    this.addOpenRequestTimeout(id, promise)
+    const pending = createPendingRequest(id, promise, selectResponse)
+    this.openRequests.set(id, pending)
+    this.addOpenRequestTimeout(id, pending)
   }
 
-  private addOpenRequestTimeout(
-    id: string,
-    promise: ExposedPromise<
-      {
-        message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
-        connectionInfo: ConnectionContext
-      },
-      ErrorResponse
-    >
-  ): void {
+  private addOpenRequestTimeout(id: string, promise: PendingRequest): void {
     if (id === SESSION_UPDATE_REQUEST_ID) {
       return
     }

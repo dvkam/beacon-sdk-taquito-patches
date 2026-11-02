@@ -1,5 +1,6 @@
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
+import { anyPendingResponse, createPendingRequest, v2Response, v3BlockchainResponse, type RequestResult, type PendingMessage, type RequestFailure } from '../../src/dapp-client/pending-responses'
 import {
   BeaconMessageType,
   BeaconErrorType,
@@ -238,12 +239,6 @@ describe('DAppClient — basic unit tests', () => {
     expect(result).toBe('foo=bar')
   })
 
-  it('addOpenRequest stores given promise in openRequests map', () => {
-    const p = new ExposedPromise<{ foo: string }, any>()
-    ;(client as any).addOpenRequest('myId', p)
-    expect((client as any).openRequests.get('myId')).toBe(p)
-  })
-
   it('addBlockchain / removeBlockchain manage internal map', async () => {
     // define a minimal fake chain
     const fakeChain = {
@@ -303,7 +298,7 @@ describe('DAppClient — basic unit tests', () => {
 
     ;(client as any).openRequests.set(
       'request-id',
-      new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+      createPendingRequest('request-id', new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>(), anyPendingResponse)
     )
 
     client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
@@ -335,7 +330,7 @@ describe('DAppClient — basic unit tests', () => {
 
     ;(client as any).openRequests.set(
       'wrapper-request-id',
-      new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+      createPendingRequest('wrapper-request-id', new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>(), anyPendingResponse)
     )
 
     client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
@@ -781,13 +776,13 @@ describe('DAppClient — basic unit tests', () => {
       removeListener: jest.fn().mockResolvedValue(undefined),
       addListener: jest.fn().mockResolvedValue(undefined)
     }
-    const pendingRequest = new ExposedPromise<unknown, any>()
+    const pendingRequest = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
     const pendingRejection = pendingRequest.promise.catch((error) => error)
 
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
     await (client as any).storage.set(StorageKey.ACCOUNTS, [])
     await (client as any).setTransport(transport)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    ;(client as any).openRequests.set('pending-after-disconnect', createPendingRequest('pending-after-disconnect', pendingRequest, anyPendingResponse))
 
     await client.disconnect()
 
@@ -1350,13 +1345,13 @@ describe('DAppClient — basic unit tests', () => {
       removeListener: jest.fn().mockResolvedValue(undefined),
       addListener: jest.fn().mockResolvedValue(undefined)
     }
-    const pendingRequest = new ExposedPromise<unknown, any>()
+    const pendingRequest = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
     const pendingRejection = pendingRequest.promise.catch((error) => error)
 
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
     await (client as any).storage.set(StorageKey.ACCOUNTS, [])
     await (client as any).setTransport(transport)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    ;(client as any).openRequests.set('pending-after-disconnect', createPendingRequest('pending-after-disconnect', pendingRequest, anyPendingResponse))
 
     await expect(client.disconnect()).resolves.toBeUndefined()
 
@@ -1372,11 +1367,11 @@ describe('DAppClient — basic unit tests', () => {
 
   it('disconnect is a no-op after transport has already been cleared', async () => {
     const staleAccount = createStoredAccount()
-    const pendingRequest = new ExposedPromise<unknown, any>()
+    const pendingRequest = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
     const pendingRejection = pendingRequest.promise.catch((error) => error)
 
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    ;(client as any).openRequests.set('pending-after-disconnect', createPendingRequest('pending-after-disconnect', pendingRequest, anyPendingResponse))
     await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
 
     await expect(client.disconnect()).resolves.toBeUndefined()
@@ -1453,8 +1448,8 @@ describe('DAppClient — basic unit tests', () => {
   it('cleans up v3 wrapped responses by the outer request id', async () => {
     await seedPeerStorage()
 
-    const request = new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
-    ;(client as any).openRequests.set('wrapper-request-id', request)
+    const request = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
+    ;(client as any).openRequests.set('wrapper-request-id', createPendingRequest('wrapper-request-id', request, anyPendingResponse))
 
     await (client as any).handleResponse(
       {
@@ -1491,12 +1486,12 @@ describe('DAppClient — basic unit tests', () => {
     const channelClosedHandler = jest.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
-    const operationRequest = new ExposedPromise<unknown, unknown>()
+    const operationRequest = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
     const rejection = jest.fn()
     void operationRequest.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).addOpenRequest('ghost-request-id', operationRequest)
+      ;(timeoutClient as any).addOpenRequest('ghost-request-id', operationRequest, anyPendingResponse)
 
       jest.advanceTimersByTime(10)
       await Promise.resolve()
@@ -1533,7 +1528,7 @@ describe('DAppClient — basic unit tests', () => {
       ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
       ;(timeoutClient as any).addOpenRequest(
         'delegated-request-id',
-        new ExposedPromise<unknown, unknown>()
+        new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>(), anyPendingResponse
       )
 
       expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(true)
@@ -1584,13 +1579,13 @@ describe('DAppClient — basic unit tests', () => {
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
     const postMessage = jest.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
 
-    const operationRequest = new ExposedPromise<unknown, unknown>()
+    const operationRequest = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
     const rejection = jest.fn()
     void operationRequest.promise.catch(rejection)
 
     try {
       ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-acknowledged-request-id')
-      ;(timeoutClient as any).addOpenRequest('delegated-acknowledged-request-id', operationRequest)
+      ;(timeoutClient as any).addOpenRequest('delegated-acknowledged-request-id', operationRequest, anyPendingResponse)
 
       await (timeoutClient as any).handleResponse(
         {
@@ -1728,7 +1723,7 @@ describe('DAppClient — basic unit tests', () => {
         },
         operationDetails: [],
         sourceAddress: 'tz1-address'
-      })
+      }, v2Response(BeaconMessageType.OperationResponse))
     ).rejects.toBe(sendError)
 
     expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
@@ -2301,12 +2296,7 @@ describe('DAppClient — basic unit tests', () => {
     jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
 
     await expect(
-      (timeoutClient as any).makeRequestV3({
-        type: BeaconMessageType.SignPayloadRequest,
-        signingType: 'raw',
-        payload: 'payload',
-        sourceAddress: 'tz1-address'
-      })
+      (timeoutClient as any).makeRequestV3({type: BeaconMessageType.BlockchainRequest, blockchainIdentifier: 'chain-test', blockchainData: { opaque: true }}, v3BlockchainResponse('chain-test'))
     ).rejects.toBe(sendError)
 
     expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
@@ -2323,12 +2313,12 @@ describe('DAppClient — basic unit tests', () => {
     })
     timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
 
-    const operationRequest = new ExposedPromise<unknown, unknown>()
+    const operationRequest = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
     void operationRequest.promise.catch(() => undefined)
 
     try {
       ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
-      ;(timeoutClient as any).addOpenRequest('delegated-request-id', operationRequest)
+      ;(timeoutClient as any).addOpenRequest('delegated-request-id', operationRequest, anyPendingResponse)
 
       jest.advanceTimersByTime(10)
       await Promise.resolve()
@@ -2353,12 +2343,12 @@ describe('DAppClient — basic unit tests', () => {
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
     jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
 
-    const operationRequest = new ExposedPromise<unknown, unknown>()
+    const operationRequest = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
     const rejection = jest.fn()
     void operationRequest.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).addOpenRequest('acknowledged-request-id', operationRequest)
+      ;(timeoutClient as any).addOpenRequest('acknowledged-request-id', operationRequest, anyPendingResponse)
 
       await (timeoutClient as any).handleResponse(
         {
@@ -2398,12 +2388,12 @@ describe('DAppClient — basic unit tests', () => {
     const channelClosedHandler = jest.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
-    const sessionUpdate = new ExposedPromise<unknown, unknown>()
+    const sessionUpdate = new ExposedPromise<RequestResult<PendingMessage>, RequestFailure>()
     const rejection = jest.fn()
     void sessionUpdate.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).addOpenRequest('session_update', sessionUpdate)
+      ;(timeoutClient as any).addOpenRequest('session_update', sessionUpdate, anyPendingResponse)
 
       jest.advanceTimersByTime(10)
       await Promise.resolve()
