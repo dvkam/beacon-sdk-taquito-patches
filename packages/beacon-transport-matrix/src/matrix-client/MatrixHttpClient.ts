@@ -1,6 +1,5 @@
 import { Logger } from '@ecadlabs/beacon-core'
 import { MatrixRequest, MatrixRequestParams } from './models/api/MatrixRequest'
-import { MatrixSyncRequestParams } from './models/api/MatrixSync'
 
 const logger = new Logger('MatrixHttpClient')
 
@@ -116,7 +115,7 @@ export class MatrixHttpClient {
     }
   }
 
-  private buildUrl(base: string, endpoint: string, params?: MatrixSyncRequestParams): string {
+  private buildUrl(base: string, endpoint: string, params?: object): string {
     const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
     let url = `${base}${path}`
     if (params) {
