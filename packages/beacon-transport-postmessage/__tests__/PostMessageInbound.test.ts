@@ -1,5 +1,11 @@
-import { getSenderId, windowRef } from '@ecadlabs/beacon-core'
-import { KeyPair, openCryptobox } from '@ecadlabs/beacon-utils'
+import { getSenderId, Logger, windowRef } from '@ecadlabs/beacon-core'
+import {
+  ExposedPromise,
+  KeyPair,
+  openCryptobox,
+  secretbox_NONCEBYTES,
+  secretbox_MACBYTES
+} from '@ecadlabs/beacon-utils'
 import { ExtensionMessageTarget, Origin } from '@ecadlabs/beacon-types'
 import { PostMessageClient } from '../src/PostMessageClient'
 
@@ -16,9 +22,7 @@ jest.mock('@ecadlabs/beacon-core', () => ({
 
 jest.mock('@ecadlabs/beacon-utils', () => ({
   ...jest.requireActual('@ecadlabs/beacon-utils'),
-  openCryptobox: jest.fn(),
-  secretbox_NONCEBYTES: 8,
-  secretbox_MACBYTES: 16
+  openCryptobox: jest.fn()
 }))
 
 class TestClient extends PostMessageClient {
@@ -36,7 +40,8 @@ const keyPair: KeyPair = {
   publicKey: new Uint8Array(32),
   secretKey: new Uint8Array(64)
 }
-const pairingPayload = 'aa'.repeat(24)
+const minimumPairingPayloadBytes = secretbox_NONCEBYTES + secretbox_MACBYTES
+const pairingPayload = 'aa'.repeat(minimumPairingPayloadBytes)
 const pairingResponse = {
   id: 'pairing-id',
   name: 'Wallet',
@@ -44,39 +49,49 @@ const pairingResponse = {
   version: '2'
 }
 
-const encryptedEvent = () => ({
+const encryptedEvent = (includeTargetId = true) => ({
   source: windowRef,
   origin: windowRef.location.origin,
   data: {
     message: {
       target: ExtensionMessageTarget.PAGE,
-      targetId: 'sdk-instance',
+      ...(includeTargetId ? { targetId: 'sdk-instance' } : {}),
       encryptedPayload: 'ciphertext'
     },
     sender: { id: 'extension-id' }
   }
 })
 
-const openingEvent = () => ({
+const openingEvent = (includeTargetId = true) => ({
   source: windowRef,
   origin: windowRef.location.origin,
   data: {
     message: {
       target: ExtensionMessageTarget.PAGE,
-      targetId: 'sdk-instance',
+      ...(includeTargetId ? { targetId: 'sdk-instance' } : {}),
       payload: pairingPayload
     },
     sender: { id: 'extension-id' }
   }
 })
 
-const registeredListener = (): ((event: unknown) => unknown) => {
-  const calls = jest.mocked(windowRef.addEventListener).mock.calls
-  const registered = calls[calls.length - 1]
-  if (!registered) {
+const dispatchMessage = async (event: unknown): Promise<void> => {
+  const listeners = jest
+    .mocked(windowRef.addEventListener)
+    .mock.calls.filter(([name]) => name === 'message')
+    .map(([, listener]) => listener)
+  if (listeners.length === 0) {
     throw new Error('Expected the public API to register a message listener')
   }
-  return registered[1]
+
+  const operations = listeners.map((listener) => {
+    try {
+      return Promise.resolve(listener(event))
+    } catch (error) {
+      return Promise.reject(error)
+    }
+  })
+  await Promise.all(operations)
 }
 
 describe('PostMessageClient inbound envelopes', () => {
@@ -92,20 +107,21 @@ describe('PostMessageClient inbound envelopes', () => {
     { sender: { id: 'extension-id' }, expectedId: 'extension-id' },
     { sender: {}, expectedId: '' }
   ])('forwards encrypted messages with sender $expectedId', async ({ sender, expectedId }) => {
-    let delivered!: () => void
-    const notification = new Promise<void>((resolve) => {
-      delivered = resolve
-    })
-    const callback = jest.fn(() => delivered())
+    const notification = new ExposedPromise<void>()
+    const callback = jest.fn(() => notification.resolve())
     await client.listenForEncryptedMessage('peer-public-key', callback)
+    const openingCallback = jest.fn()
+    await client.listenForChannelOpening(openingCallback)
     const event = {
       ...encryptedEvent(),
       data: { ...encryptedEvent().data, sender }
     }
 
-    await registeredListener()(event)
-    await notification
+    await dispatchMessage(event)
+    await notification.promise
 
+    expect(openCryptobox).not.toHaveBeenCalled()
+    expect(openingCallback).not.toHaveBeenCalled()
     expect(client.decrypt).toHaveBeenCalledWith('peer-public-key', 'ciphertext')
     expect(callback).toHaveBeenCalledWith('plaintext', {
       origin: Origin.EXTENSION,
@@ -185,24 +201,47 @@ describe('PostMessageClient inbound envelopes', () => {
         ...encryptedEvent(),
         data: { ...encryptedEvent().data, sender: { id: 42 } }
       })
+    },
+    ...[
+      { name: 'undefined message', message: undefined },
+      { name: 'null message', message: null },
+      { name: 'array message', message: [] },
+      {
+        name: 'missing encrypted payload property',
+        message: { target: ExtensionMessageTarget.PAGE }
+      }
+    ].map(({ name, message }) => ({
+      name,
+      make: () => ({ ...encryptedEvent(), data: { ...encryptedEvent().data, message } })
+    })),
+    {
+      name: 'null sender',
+      make: () => ({ ...encryptedEvent(), data: { ...encryptedEvent().data, sender: null } })
     }
   ])('ignores encrypted input with $name before decryption', async ({ make }) => {
     const callback = jest.fn()
+    const openingCallback = jest.fn()
     await client.listenForEncryptedMessage('peer-public-key', callback)
+    await client.listenForChannelOpening(openingCallback)
 
-    await expect(
-      Promise.resolve().then(() => registeredListener()(make()))
-    ).resolves.toBeUndefined()
+    await expect(Promise.resolve().then(() => dispatchMessage(make()))).resolves.toBeUndefined()
 
     expect(client.decrypt).not.toHaveBeenCalled()
+    expect(openCryptobox).not.toHaveBeenCalled()
     expect(callback).not.toHaveBeenCalled()
+    expect(openingCallback).not.toHaveBeenCalled()
   })
 
-  it('delivers a valid channel opening with its extension identity', async () => {
+  it('delivers a channel opening at the production minimum with its extension identity', async () => {
     const callback = jest.fn()
     await client.listenForChannelOpening(callback)
+    const encryptedCallback = jest.fn()
+    await client.listenForEncryptedMessage('peer-public-key', encryptedCallback)
 
-    await registeredListener()(openingEvent())
+    await dispatchMessage(openingEvent())
+
+    expect(client.decrypt).not.toHaveBeenCalled()
+    expect(encryptedCallback).not.toHaveBeenCalled()
 
     expect(openCryptobox).toHaveBeenCalledWith(
       Buffer.from(pairingPayload, 'hex'),
@@ -286,17 +325,113 @@ describe('PostMessageClient inbound envelopes', () => {
         ...openingEvent(),
         data: { ...openingEvent().data, sender: { id: 42 } }
       })
+    },
+    ...[
+      { name: 'undefined message', message: undefined },
+      { name: 'null message', message: null },
+      { name: 'array message', message: [] },
+      { name: 'missing payload property', message: { target: ExtensionMessageTarget.PAGE } }
+    ].map(({ name, message }) => ({
+      name,
+      make: () => ({ ...openingEvent(), data: { ...openingEvent().data, message } })
+    })),
+    {
+      name: 'null sender',
+      make: () => ({ ...openingEvent(), data: { ...openingEvent().data, sender: null } })
     }
   ])('ignores channel opening input with $name before cryptography', async ({ make }) => {
     const callback = jest.fn()
+    const encryptedCallback = jest.fn()
     await client.listenForChannelOpening(callback)
+    await client.listenForEncryptedMessage('peer-public-key', encryptedCallback)
 
-    await expect(
-      Promise.resolve().then(() => registeredListener()(make()))
-    ).resolves.toBeUndefined()
+    await expect(Promise.resolve().then(() => dispatchMessage(make()))).resolves.toBeUndefined()
+
+    expect(openCryptobox).not.toHaveBeenCalled()
+    expect(client.decrypt).not.toHaveBeenCalled()
+    expect(callback).not.toHaveBeenCalled()
+    expect(encryptedCallback).not.toHaveBeenCalled()
+  })
+
+  it('delivers encrypted messages without a targetId', async () => {
+    const notification = new ExposedPromise<void>()
+    const callback = jest.fn(() => notification.resolve())
+    const openingCallback = jest.fn()
+    await client.listenForEncryptedMessage('peer-public-key', callback)
+    await client.listenForChannelOpening(openingCallback)
+    const event = encryptedEvent(false)
+
+    expect(event.data.message).not.toHaveProperty('targetId')
+    await dispatchMessage(event)
+    await notification.promise
+
+    expect(callback).toHaveBeenCalledWith('plaintext', {
+      origin: Origin.EXTENSION,
+      id: 'extension-id'
+    })
+    expect(openCryptobox).not.toHaveBeenCalled()
+    expect(openingCallback).not.toHaveBeenCalled()
+  })
+
+  it('delivers channel openings without a targetId', async () => {
+    const callback = jest.fn()
+    const encryptedCallback = jest.fn()
+    await client.listenForChannelOpening(callback)
+    await client.listenForEncryptedMessage('peer-public-key', encryptedCallback)
+    const event = openingEvent(false)
+
+    expect(event.data.message).not.toHaveProperty('targetId')
+    await dispatchMessage(event)
+
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...pairingResponse,
+        extensionId: 'extension-id'
+      })
+    )
+    expect(client.decrypt).not.toHaveBeenCalled()
+    expect(encryptedCallback).not.toHaveBeenCalled()
+  })
+
+  it('rejects a pairing payload one byte below the production length precheck', async () => {
+    const callback = jest.fn()
+    await client.listenForChannelOpening(callback)
+    const event = openingEvent()
+    event.data.message.payload = 'aa'.repeat(minimumPairingPayloadBytes - 1)
+
+    await dispatchMessage(event)
 
     expect(openCryptobox).not.toHaveBeenCalled()
     expect(callback).not.toHaveBeenCalled()
+  })
+
+  it('logs a rejected encrypted callback and still delivers to another peer', async () => {
+    const failure = new Error('consumer rejected the message')
+    const logged = new ExposedPromise<void>()
+    const delivered = new ExposedPromise<void>()
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => logged.resolve())
+    const rejectedCallback = jest.fn(async () => {
+      throw failure
+    })
+    const healthyCallback = jest.fn(() => delivered.resolve())
+    await client.listenForEncryptedMessage('rejecting-peer', rejectedCallback)
+    await client.listenForEncryptedMessage('healthy-peer', healthyCallback)
+    await client.listenForChannelOpening(jest.fn())
+
+    try {
+      await dispatchMessage(encryptedEvent())
+      await Promise.all([logged.promise, delivered.promise])
+
+      expect(error).toHaveBeenCalledWith('subscribeToMessages', failure)
+      expect(rejectedCallback).toHaveBeenCalledTimes(1)
+      expect(healthyCallback).toHaveBeenCalledWith('plaintext', {
+        origin: Origin.EXTENSION,
+        id: 'extension-id'
+      })
+      expect(openCryptobox).not.toHaveBeenCalled()
+    } finally {
+      error.mockRestore()
+    }
   })
 
   it.each([
@@ -331,8 +466,8 @@ describe('PostMessageClient inbound envelopes', () => {
     await client.listenForChannelOpening(callback)
     const event = openingEvent()
 
-    const operation = registeredListener()(event)
-    event.data.message.payload = 'bb'.repeat(24)
+    const operation = dispatchMessage(event)
+    event.data.message.payload = 'bb'.repeat(minimumPairingPayloadBytes)
     event.data.sender.id = 'changed-after-dispatch'
     await operation
 
