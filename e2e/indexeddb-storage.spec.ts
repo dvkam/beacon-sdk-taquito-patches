@@ -74,3 +74,78 @@ test('rejects fillStore when opening the target database fails', async ({ page }
   })
   expect(errorName).toBe('AbortError')
 })
+
+test('preserves arbitrary structured records and every mixed bulk value', async ({ page }) => {
+  const values = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('mixed-values-test', 1)
+      request.onupgradeneeded = () => request.result.createObjectStore('records')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction('records', 'readwrite')
+      const store = transaction.objectStore('records')
+      store.put('text', 'a')
+      store.put({ nested: ['record', 42] }, 'b')
+      store.put(42, 'c')
+      transaction.oncomplete = () => resolve()
+      transaction.onabort = () => reject(transaction.error)
+    })
+    db.close()
+    const storage = new beacon.IndexedDBStorage('mixed-values-test', ['records'])
+    const deadline = Date.now() + 10_000
+    for (;;) {
+      try {
+        await storage.get('readiness', 'records')
+        break
+      } catch (error) {
+        if (Date.now() >= deadline) throw error
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    return {
+      record: await storage.get('b', 'records'),
+      all: await storage.getAll('records')
+    }
+  })
+  expect(values).toEqual({
+    record: { nested: ['record', 42] },
+    all: ['text', { nested: ['record', 42] }, 42]
+  })
+})
+
+test('keeps SDK-key normalization and missing-key behavior', async ({ page }) => {
+  const values = await page.evaluate(async () => {
+    const storage = new beacon.IndexedDBStorage('normalized-values-test')
+    const deadline = Date.now() + 10_000
+    for (;;) {
+      try {
+        await storage.get('readiness')
+        break
+      } catch (error) {
+        if (Date.now() >= deadline) throw error
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    await storage.set(beacon.StorageKey.APP_METADATA_LIST, [{ senderId: 'sender', name: 'App' }])
+    await storage.set(beacon.StorageKey.MULTI_NODE_SETUP_DONE, false)
+    await storage.set(beacon.StorageKey.ACTIVE_ACCOUNT, 'undefined')
+    const metadata = await storage.get(beacon.StorageKey.APP_METADATA_LIST)
+    await storage.delete(beacon.StorageKey.APP_METADATA_LIST)
+    return {
+      metadata,
+      empty: await storage.get(beacon.StorageKey.APP_METADATA_LIST),
+      enabled: await storage.get(beacon.StorageKey.MULTI_NODE_SETUP_DONE),
+      active: (await storage.get(beacon.StorageKey.ACTIVE_ACCOUNT)) ?? null,
+      missing: (await storage.get('missing')) ?? null
+    }
+  })
+  expect(values).toEqual({
+    metadata: [{ senderId: 'sender', name: 'App' }],
+    empty: [],
+    enabled: false,
+    active: null,
+    missing: null
+  })
+})
