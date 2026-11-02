@@ -50,7 +50,8 @@
     "readmes:sync": "node scripts/sync-package-readmes.mjs",
     "typedoc": "typedoc",
     "publish:packages": "node scripts/publish-workspaces.mjs",
-    "build:ui": "cd packages/beacon-ui && npm run tsc && cd ../.. && npm run webpack:sdk"
+    "build:ui": "cd packages/beacon-ui && npm run tsc && cd ../.. && npm run webpack:sdk",
+    "test:node-consumers": "node scripts/test-node-consumers.mjs"
   },
   "author": "ECAD Labs",
   "dependencies": {
