@@ -17,6 +17,7 @@ import {
   Storage,
   P2PPairingRequest,
   StorageKey,
+  StorageKeyReturnType,
   ExtendedP2PPairingResponse,
   P2PPairingResponse,
   NodeDistributions,
@@ -63,6 +64,17 @@ interface BeaconInfoResponse {
   timestamp: number
 }
 
+interface MatrixSessionIdentity {
+  readonly id: symbol
+  readonly ready: ExposedPromise<MatrixClient>
+}
+
+interface MatrixJoinSession extends MatrixSessionIdentity {
+  readonly matrixClient: MatrixClient
+}
+
+type PeerRoomIds = StorageKeyReturnType[StorageKey.MATRIX_PEER_ROOM_IDS]
+
 const sleep = (time: number) => new Promise((resolve) => setTimeout(resolve, time))
 
 const isMatrixError = (error: unknown): error is { errcode: string } =>
@@ -80,6 +92,8 @@ export class P2PCommunicationClient extends CommunicationClient {
   private matrixClient: MatrixClient | undefined
 
   private session = Symbol('Matrix session')
+
+  private sessionStateWrite: Promise<void> = Promise.resolve()
 
   private initialReplay = {
     pending: 0,
@@ -366,15 +380,69 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
   }
 
+  private captureSession(): MatrixSessionIdentity {
+    return { id: this.session, ready: this.client }
+  }
+
+  private isCurrentSession(session: MatrixSessionIdentity): boolean {
+    return session.id === this.session && session.ready === this.client
+  }
+
+  private writeSessionState(
+    session: MatrixSessionIdentity,
+    operation: () => Promise<void>
+  ): Promise<void> {
+    const commit = async (): Promise<void> => {
+      if (this.isCurrentSession(session)) {
+        await operation()
+      }
+    }
+    this.sessionStateWrite = this.sessionStateWrite.then(commit, commit)
+
+    return this.sessionStateWrite
+  }
+
+  private mutatePeerRooms(
+    session: MatrixSessionIdentity,
+    update: (rooms: Readonly<PeerRoomIds>) => PeerRoomIds
+  ): Promise<void> {
+    return this.writeSessionState(session, async () => {
+      const rooms = await this.storage.get(StorageKey.MATRIX_PEER_ROOM_IDS)
+      if (!this.isCurrentSession(session)) {
+        return
+      }
+      const updated = update(rooms)
+      if (this.isCurrentSession(session)) {
+        await this.storage.set(StorageKey.MATRIX_PEER_ROOM_IDS, updated)
+      }
+    })
+  }
+
   public async tryJoinRooms(roomId: string, retry: number = 1): Promise<void> {
+    const session = this.captureSession()
+    const matrixClient = await session.ready.promise
+    await this.joinRoomsForSession(roomId, retry, { ...session, matrixClient })
+  }
+
+  private async joinRoomsForSession(
+    roomId: string,
+    retry: number,
+    session: MatrixJoinSession
+  ): Promise<void> {
+    if (!this.isCurrentSession(session)) {
+      return
+    }
     try {
-      await (await this.client.promise).joinRooms(roomId)
-    } catch (error) {
-      if (retry <= 10 && (error as any).errcode === 'M_FORBIDDEN') {
-        // If we join the room too fast after receiving the invite, the server can accidentally reject our join. This seems to be a problem only when using a federated multi-node setup. Usually waiting for a couple milliseconds solves the issue, but to handle lag, we will keep retrying for 2 seconds.
-        logger.log(`Retrying to join...`, error)
+      await session.matrixClient.joinRooms(roomId)
+    } catch (error: unknown) {
+      if (!this.isCurrentSession(session)) {
+        return
+      }
+      if (retry <= 10 && isMatrixError(error) && error.errcode === 'M_FORBIDDEN') {
+        // Federated nodes can briefly reject a join immediately after an invite.
+        logger.log('Retrying to join...', error)
         setTimeout(() => {
-          this.tryJoinRooms(roomId, retry + 1).catch((retryError) => {
+          this.joinRoomsForSession(roomId, retry + 1, session).catch((retryError) => {
             logger.error('tryJoinRooms', retryError)
           })
         }, 200)
@@ -385,7 +453,8 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async start(): Promise<void> {
-    const session = this.session
+    const owner = this.captureSession()
+    const session = owner.id
     logger.log('start', 'starting client')
 
     logger.log('start', `connecting to server`)
@@ -420,18 +489,20 @@ export class P2PCommunicationClient extends CommunicationClient {
     client.subscribe(MatrixClientEventType.MESSAGE, this.initialListener)
 
     client.subscribe(MatrixClientEventType.INVITE, async (event) => {
-      let member
-      if (event.content.members.length === 1) {
-        // If there is only one member we know it's a new room
-        // TODO: Use the "sender" of the event instead
-        member = event.content.members[0]
+      if (!this.isCurrentSession(owner)) {
+        return
       }
-
-      await this.tryJoinRooms(event.content.roomId)
-
+      const { roomId, members } = event.content
+      const member = members.length === 1 ? members[0] : undefined
+      await this.tryJoinRooms(roomId)
+      if (!this.isCurrentSession(owner)) {
+        return
+      }
       if (member) {
         await this.updateRelayServer(member)
-        await this.updatePeerRoom(member, event.content.roomId)
+        if (this.isCurrentSession(owner)) {
+          await this.updatePeerRoom(member, roomId)
+        }
       }
     })
 
@@ -533,20 +604,23 @@ export class P2PCommunicationClient extends CommunicationClient {
   private async resetSession(session: symbol): Promise<void> {
     logger.log('reset', 'resetting connection')
 
-    if (session !== this.session) {
+    const owner = this.captureSession()
+    if (session !== owner.id) {
       return
     }
-    await this.storage.delete(StorageKey.MATRIX_PEER_ROOM_IDS).catch((error) => logger.log(error))
-    if (session !== this.session) {
-      return
-    }
-    await this.storage.delete(StorageKey.MATRIX_PRESERVED_STATE).catch((error) => logger.log(error))
-    if (session !== this.session) {
-      return
-    }
-    await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((error) => logger.log(error))
-
-    if (session !== this.session) {
+    await this.writeSessionState(owner, async () => {
+      for (const key of [
+        StorageKey.MATRIX_PEER_ROOM_IDS,
+        StorageKey.MATRIX_PRESERVED_STATE,
+        StorageKey.MATRIX_SELECTED_NODE
+      ]) {
+        if (!this.isCurrentSession(owner)) {
+          return
+        }
+        await this.storage.delete(key).catch((error) => logger.log(error))
+      }
+    })
+    if (!this.isCurrentSession(owner)) {
       return
     }
     this.matrixClient = undefined
@@ -572,38 +646,39 @@ export class P2PCommunicationClient extends CommunicationClient {
       `start listening for encrypted messages from publicKey ${senderPublicKey}`
     )
     const replay = this.initialReplay
+    const session = this.captureSession()
     replay.pending++
     let matrixClient: MatrixClient | undefined
     try {
       matrixClient = await this.client.promise
-      if (replay !== this.initialReplay) {
+      if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
         return
       }
       if (!this.keyPair) {
         throw new Error('Missing key pair')
       }
       const sharedKey = await this.createCryptoBoxServer(senderPublicKey, this.keyPair)
-      if (replay !== this.initialReplay) {
+      if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
         return
       }
 
       const callbackFunction = async (
         event: MatrixClientEvent<MatrixClientEventType.MESSAGE>
       ): Promise<void> => {
-        if (replay !== this.initialReplay) {
+        if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
           return
         }
         if (this.isTextMessage(event.content) && (await this.isSender(event, senderPublicKey))) {
-          if (replay !== this.initialReplay) {
+          if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
             return
           }
           let payload
           await this.updateRelayServer(event.content.message.sender)
-          if (replay !== this.initialReplay) {
+          if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
             return
           }
           await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
-          if (replay !== this.initialReplay) {
+          if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
             return
           }
           try {
@@ -619,7 +694,7 @@ export class P2PCommunicationClient extends CommunicationClient {
               // Some messages are encrypted for other recipients.
               return
             }
-            if (replay !== this.initialReplay) {
+            if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
               return
             }
             if (replay.buffered.has(event)) {
@@ -636,7 +711,9 @@ export class P2PCommunicationClient extends CommunicationClient {
               `received a message from ${senderPublicKey}`,
               decryptedMessage
             )
-            await messageCallback(decryptedMessage)
+            if (this.isCurrentSession(session)) {
+              await messageCallback(decryptedMessage)
+            }
           }
         }
       }
@@ -721,94 +798,99 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async updatePeerRoom(sender: string, roomId: string): Promise<void> {
-    logger.log(`updatePeerRoom`, sender, roomId)
-
-    // Sender is in the format "@pubkeyhash:relayserver.tld"
+    const session = this.captureSession()
+    logger.log('updatePeerRoom', sender, roomId)
     const split = sender.split(':')
     if (split.length < 2 || !split[0].startsWith('@')) {
-      throw new Error('Invalid sender')
+      return Promise.reject(new Error('Invalid sender'))
     }
 
-    const roomIds = await this.storage.get(StorageKey.MATRIX_PEER_ROOM_IDS)
+    return this.mutatePeerRooms(session, (roomIds) => {
+      const room = roomIds[sender]
+      logger.debug('updatePeerRoom', 'current room', room, 'new room', roomId)
+      if (room && room[1]) {
+        logger.log('updatePeerRoom', `adding room "${room[1]}" to ignored array`)
+        this.ignoredRooms.push(room[1])
+      }
 
-    const room = roomIds[sender]
-
-    if (room === roomId) {
-      logger.debug(`updatePeerRoom`, `rooms are the same, not updating`)
-    }
-
-    logger.debug(`updatePeerRoom`, `current room`, room, 'new room', roomId)
-
-    if (room && room[1]) {
-      // If we have a room already, let's ignore it. We need to do this, otherwise it will be loaded from the matrix cache.
-      logger.log(`updatePeerRoom`, `adding room "${room[1]}" to ignored array`)
-
-      this.ignoredRooms.push(room[1])
-    }
-
-    roomIds[sender] = roomId
-
-    await this.storage.set(StorageKey.MATRIX_PEER_ROOM_IDS, roomIds)
-
-    // TODO: We also need to delete the room from the sync state
-    // If we need to delete a room, we can assume the local state is not up to date anymore, so we can reset the state
+      return { ...roomIds, [sender]: roomId }
+    })
   }
 
   public async deleteRoomIdFromRooms(roomId: string): Promise<void> {
-    const roomIds = await this.storage.get(StorageKey.MATRIX_PEER_ROOM_IDS)
-    const newRoomIds = Object.entries(roomIds)
-      .filter((entry) => entry[1] !== roomId)
-      .reduce(
-        (pv, cv) => ({ ...pv, [cv[0]]: cv[1] }),
-        {} as {
-          [key: string]: string | undefined
+    const session = this.captureSession()
+    await this.mutatePeerRooms(session, (roomIds) => {
+      const remaining: PeerRoomIds = {}
+      for (const [sender, knownRoom] of Object.entries(roomIds)) {
+        if (knownRoom !== roomId) {
+          remaining[sender] = knownRoom
         }
-      )
-    await this.storage.set(StorageKey.MATRIX_PEER_ROOM_IDS, newRoomIds)
+      }
 
-    // TODO: We also need to delete the room from the sync state
-    // If we need to delete a room, we can assume the local state is not up to date anymore, so we can reset the state
-
-    this.ignoredRooms.push(roomId)
+      return remaining
+    })
+    if (this.isCurrentSession(session)) {
+      this.ignoredRooms.push(roomId)
+    }
   }
 
   public async listenForChannelOpening(
     messageCallback: (pairingResponse: ExtendedP2PPairingResponse) => void
   ): Promise<void> {
-    logger.debug(`listenForChannelOpening`)
-    ;(await this.client.promise).subscribe(MatrixClientEventType.MESSAGE, async (event) => {
-      if (this.isTextMessage(event.content) && (await this.isChannelOpenMessage(event.content))) {
-        logger.log(
-          `listenForChannelOpening`,
-          `channel opening received, trying to decrypt`,
-          JSON.stringify(event)
-        )
-
-        await this.updateRelayServer(event.content.message.sender)
-        await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
-
-        const splits = event.content.message.content.split(':')
-        const payload = Buffer.from(splits[splits.length - 1], 'hex')
-
-        if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
-          try {
-            const pairingResponse: P2PPairingResponse = JSON.parse(
-              await openCryptobox(payload, this.keyPair!.publicKey, this.keyPair!.secretKey)
-            )
-
-            logger.log(
-              `listenForChannelOpening`,
-              `channel opening received and decrypted`,
-              JSON.stringify(pairingResponse)
-            )
-
-            messageCallback({
-              ...pairingResponse,
-              senderId: await getSenderId(pairingResponse.publicKey)
-            })
-          } catch (decryptionError) {
-            /* NO-OP. We try to decode every message, but some might not be addressed to us. */
+    logger.debug('listenForChannelOpening')
+    const session = this.captureSession()
+    const client = await session.ready.promise
+    if (!this.isCurrentSession(session)) {
+      return
+    }
+    client.subscribe(MatrixClientEventType.MESSAGE, async (event) => {
+      if (!this.isCurrentSession(session) || !this.isTextMessage(event.content)) {
+        return
+      }
+      const content = { ...event.content, message: { ...event.content.message } }
+      if (!(await this.isChannelOpenMessage(content)) || !this.isCurrentSession(session)) {
+        return
+      }
+      logger.log(
+        'listenForChannelOpening',
+        'channel opening received, trying to decrypt',
+        JSON.stringify(event)
+      )
+      if (!this.isCurrentSession(session)) {
+        return
+      }
+      await this.updateRelayServer(content.message.sender)
+      if (!this.isCurrentSession(session)) {
+        return
+      }
+      await this.updatePeerRoom(content.message.sender, content.roomId)
+      if (!this.isCurrentSession(session)) {
+        return
+      }
+      const splits = content.message.content.split(':')
+      const payload = Buffer.from(splits[splits.length - 1], 'hex')
+      if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
+        try {
+          const keyPair = this.keyPair
+          if (!keyPair) {
+            return
           }
+          const plaintext = await openCryptobox(payload, keyPair.publicKey, keyPair.secretKey)
+          if (!this.isCurrentSession(session)) {
+            return
+          }
+          const pairingResponse: P2PPairingResponse = JSON.parse(plaintext)
+          logger.log(
+            'listenForChannelOpening',
+            'channel opening received and decrypted',
+            JSON.stringify(pairingResponse)
+          )
+          const senderId = await getSenderId(pairingResponse.publicKey)
+          if (this.isCurrentSession(session)) {
+            messageCallback({ ...pairingResponse, senderId })
+          }
+        } catch {
+          // Some channel messages are encrypted for other recipients.
         }
       }
     })
@@ -894,30 +976,34 @@ export class P2PCommunicationClient extends CommunicationClient {
     )
   }
 
-  public async updateRelayServer(sender: string) {
-    logger.log(`updateRelayServer`, sender)
-
-    // Sender is in the format "@pubkeyhash:relayserver.tld"
+  public async updateRelayServer(sender: string): Promise<void> {
+    const session = this.captureSession()
+    logger.log('updateRelayServer', sender)
     const split = sender.split(':')
     if (split.length < 2 || !split[0].startsWith('@')) {
-      throw new Error('Invalid sender')
+      return Promise.reject(new Error('Invalid sender'))
     }
     const senderHash = split.shift()
     const relayServer = split.join(':')
-    const manager = localStorage.getItem('beacon:communication-peers-dapp')
-      ? new PeerManager(this.storage, StorageKey.TRANSPORT_P2P_PEERS_DAPP)
-      : new PeerManager(this.storage, StorageKey.TRANSPORT_P2P_PEERS_WALLET)
-    const peers = await manager.getPeers()
-    const promiseArray = peers.map(async (peer) => {
-      const hash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
-      if (hash === senderHash) {
-        if (peer.relayServer !== relayServer) {
-          peer.relayServer = relayServer
-          await manager.addPeer(peer as ExtendedP2PPairingResponse)
+
+    return this.writeSessionState(session, async () => {
+      const manager = new PeerManager(
+        this.storage,
+        localStorage.getItem('beacon:communication-peers-dapp')
+          ? StorageKey.TRANSPORT_P2P_PEERS_DAPP
+          : StorageKey.TRANSPORT_P2P_PEERS_WALLET
+      )
+      const peers = await manager.getPeers()
+      for (const peer of peers) {
+        const peerHash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
+        if (!this.isCurrentSession(session)) {
+          return
+        }
+        if (peerHash === senderHash && peer.relayServer !== relayServer) {
+          await manager.addPeer({ ...peer, relayServer })
         }
       }
     })
-    await Promise.all(promiseArray)
   }
 
   public async isChannelOpenMessage(
@@ -956,6 +1042,7 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   private async getRelevantRoom(recipient: string): Promise<string> {
+    const session = this.captureSession()
     const roomIds = await this.storage.get(StorageKey.MATRIX_PEER_ROOM_IDS)
     let roomId = roomIds[recipient]
 
@@ -963,8 +1050,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       logger.log(`getRelevantRoom`, `No room found for peer ${recipient}, checking joined ones.`)
       const room = await this.getRelevantJoinedRoom(recipient)
       roomId = room.id
-      roomIds[recipient] = room.id
-      await this.storage.set(StorageKey.MATRIX_PEER_ROOM_IDS, roomIds)
+      await this.mutatePeerRooms(session, (current) => ({ ...current, [recipient]: room.id }))
     }
 
     logger.log(`getRelevantRoom`, `Using room ${roomId}`)
