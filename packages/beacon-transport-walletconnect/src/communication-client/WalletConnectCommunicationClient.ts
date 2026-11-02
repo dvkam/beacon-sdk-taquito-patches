@@ -81,6 +81,18 @@ type BeaconInputMessage =
   | Optional<DisconnectMessage, IgnoredResponseInputProperties>
   | Optional<ChangeAccountRequest, IgnoredResponseInputProperties>
 
+const getErrorDiagnostic = (error: unknown): unknown => {
+  if (
+    error !== null &&
+    (typeof error === 'object' || typeof error === 'function') &&
+    'message' in error
+  ) {
+    return error.message
+  }
+
+  return error
+}
+
 function getStringBetween(str: string | undefined, startChar: string, endChar: string): string {
   if (!str || !startChar || !endChar) {
     return ''
@@ -243,7 +255,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     this.refreshState()
   }
 
-  private onStorageErrorHandler(data: any) {
+  private onStorageErrorHandler(data: unknown) {
     logger.error('onStorageError', data)
   }
 
@@ -1654,18 +1666,18 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
               newExpiry: new Date(updatedSession.expiry * 1000)
             })
           }
-        } catch (extendErr: any) {
+        } catch (extendErr: unknown) {
           // Log but don't throw - session might still be valid for a while
           // This error may be harmless (e.g., "No matching key" from duplicate relay messages)
           logger.warn('Session extension failed, continuing anyway', {
-            error: extendErr.message,
+            error: getErrorDiagnostic(extendErr),
             remainingHours: (timeUntilExpiry / 3600).toFixed(1)
           })
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Catch any unexpected errors to ensure extension never blocks operations
-      logger.error('Unexpected error in checkAndExtendSession', err.message)
+      logger.error('Unexpected error in checkAndExtendSession', getErrorDiagnostic(err))
     }
   }
 
@@ -1703,8 +1715,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       logger.debug('Session validation passed: session is valid')
 
       return true
-    } catch (err: any) {
-      logger.warn('Session validation failed: ping failed', err.message)
+    } catch (err: unknown) {
+      logger.warn('Session validation failed: ping failed', getErrorDiagnostic(err))
 
       return false
     }
@@ -1728,8 +1740,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         )
       }
       logger.debug('Stale session cleaned up successfully', session.topic)
-    } catch (err: any) {
-      logger.warn('Error cleaning up stale session', err.message)
+    } catch (err: unknown) {
+      logger.warn('Error cleaning up stale session', getErrorDiagnostic(err))
       // Continue even if cleanup fails - session is stale
     }
   }
