@@ -32,6 +32,7 @@ import {
   PermissionRequest,
   PermissionResponseInput,
   PermissionScope,
+  SigningType,
   SignPayloadRequest,
   SignPayloadResponse,
   SignPayloadResponseInput,
@@ -81,6 +82,83 @@ type BeaconInputMessage =
   | BeaconResponseInputMessage
   | Optional<DisconnectMessage, IgnoredResponseInputProperties>
   | Optional<ChangeAccountRequest, IgnoredResponseInputProperties>
+
+type WalletConnectDispatch =
+  | { id: string; type: BeaconMessageType.PermissionRequest; network: Network }
+  | { id: string; type: BeaconMessageType.OperationRequest; operationDetails: unknown[] }
+  | {
+      id: string
+      type: BeaconMessageType.SignPayloadRequest
+      payload: string
+      signingType: SigningType
+    }
+
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+
+// Validate only this bridge's consumed fields; operation entries remain opaque to WalletConnect.
+const parseWalletConnectDispatch = (value: unknown): WalletConnectDispatch | undefined => {
+  if (!isObjectRecord(value)) {
+    return undefined
+  }
+  const type = value.type
+  if (
+    type !== BeaconMessageType.PermissionRequest &&
+    type !== BeaconMessageType.OperationRequest &&
+    type !== BeaconMessageType.SignPayloadRequest
+  ) {
+    return undefined
+  }
+  const id = value.id
+  if (typeof id !== 'string') {
+    throw new TypeError('WalletConnect request id must be a string')
+  }
+  switch (type) {
+    case BeaconMessageType.PermissionRequest: {
+      const input = value.network
+      if (!isObjectRecord(input)) {
+        throw new TypeError('WalletConnect permission network must be an object')
+      }
+      const rawType = input.type
+      const networkType = Object.values(NetworkType).find((candidate) => candidate === rawType)
+      const name = input.name
+      const rpcUrl = input.rpcUrl
+      if (
+        networkType === undefined ||
+        (name !== undefined && typeof name !== 'string') ||
+        (rpcUrl !== undefined && typeof rpcUrl !== 'string')
+      ) {
+        throw new TypeError('Invalid WalletConnect permission network')
+      }
+
+      return { ...value, id, type, network: { ...input, type: networkType, name, rpcUrl } }
+    }
+    case BeaconMessageType.OperationRequest: {
+      const input = value.operationDetails
+      if (!Array.isArray(input)) {
+        throw new TypeError('WalletConnect operations must be an array')
+      }
+      const operationDetails: unknown[] = input
+
+      return { ...value, id, type, operationDetails }
+    }
+    case BeaconMessageType.SignPayloadRequest: {
+      const payload = value.payload
+      const rawSigningType = value.signingType
+      const signingType = Object.values(SigningType).find((candidate) => candidate === rawSigningType)
+      if (typeof payload !== 'string' || signingType === undefined) {
+        throw new TypeError('Invalid WalletConnect signing payload')
+      }
+
+      return { ...value, id, type, payload, signingType }
+    }
+    default: {
+      const exhaustive: never = type
+
+      return exhaustive
+    }
+  }
+}
 
 const getErrorDetails = (error: unknown): { message: string | undefined; diagnostic: unknown } => {
   if (
@@ -359,7 +437,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   public async sendMessage(_message: string, _peer?: PeerInfoType): Promise<void> {
     const serializer = new Serializer()
-    const message = (await serializer.deserialize(_message)) as any
+    const message = parseWalletConnectDispatch(await serializer.deserialize(_message))
 
     if (!message) {
       return
@@ -367,18 +445,26 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
     this.messageIds.unshift(message.id)
 
-    switch (message.type) {
-      case BeaconMessageType.PermissionRequest:
-        this.requestPermissions(message)
-        break
-      case BeaconMessageType.OperationRequest:
-        this.sendOperations(message)
-        break
-      case BeaconMessageType.SignPayloadRequest:
-        this.signPayload(message)
-        break
-      default:
-        return
+    try {
+      switch (message.type) {
+        case BeaconMessageType.PermissionRequest:
+          await this.requestPermissions(message)
+          break
+        case BeaconMessageType.OperationRequest:
+          await this.sendOperations(message)
+          break
+        case BeaconMessageType.SignPayloadRequest:
+          await this.signPayload(message)
+          break
+        default:
+          return
+      }
+    } catch (error: unknown) {
+      const index = this.messageIds.indexOf(message.id)
+      if (index >= 0) {
+        this.messageIds.splice(index, 1)
+      }
+      throw error
     }
   }
 
@@ -471,7 +557,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     this.notifyListeners(this.getTopicFromSession(session), permissionResponse)
   }
 
-  async requestPermissions(message: PermissionRequest) {
+  public async requestPermissions(message: PermissionRequest | Pick<PermissionRequest, 'network'>) {
     logger.log('#### Requesting permissions')
 
     if (!this.getPermittedMethods().includes(PermissionScopeMethods.GET_ACCOUNTS)) {
@@ -496,7 +582,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * @description Once the session is establish, send payload to be approved and signed by the wallet.
    * @error MissingRequiredScope is thrown if permission to sign payload was not granted
    */
-  async signPayload(signPayloadRequest: SignPayloadRequest) {
+  public async signPayload(
+    signPayloadRequest: SignPayloadRequest | Pick<SignPayloadRequest, 'payload' | 'signingType'>
+  ) {
     const signClient = await this.getSignClient()
 
     if (!signClient) {
@@ -561,7 +649,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * @description Once the session is established, send Tezos operations to be approved, signed and inject by the wallet.
    * @error MissingRequiredScope is thrown if permission to send operation was not granted
    */
-  async sendOperations(operationRequest: OperationRequest) {
+  public async sendOperations(operationRequest: OperationRequest | { operationDetails: unknown[] }) {
     const signClient = await this.getSignClient()
 
     if (!signClient) {

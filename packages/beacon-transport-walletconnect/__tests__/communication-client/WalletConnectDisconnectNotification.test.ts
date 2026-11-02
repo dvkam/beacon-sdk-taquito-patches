@@ -109,10 +109,22 @@ it.each(['normal', 'failure', 'replacement'])(
       await instance.init()
       const serializer = new Serializer()
       let receive: (message: string) => void = () => {}
-      const received = new Promise<string>((resolve) => {
+      let fail: (error: unknown) => void = () => {}
+      const received = new Promise<string>((resolve, reject) => {
         receive = resolve
+        fail = reject
       })
-      await instance.listenForEncryptedMessage('wallet-key', receive)
+      await instance.listenForEncryptedMessage('wallet-key', (serialized) => {
+        serializer.deserialize(serialized).then((message) => {
+          if (
+            message !== null &&
+            typeof message === 'object' &&
+            'type' in message &&
+            message.type === BeaconMessageType.Disconnect
+          )
+            receive(serialized)
+        }, fail)
+      })
       const request = {
         id: 'pending-operation',
         version: '2',

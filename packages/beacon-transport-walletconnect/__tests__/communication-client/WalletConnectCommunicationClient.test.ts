@@ -488,7 +488,7 @@ describe('String message dispatching', () => {
   })
 
   it('sendMessage dispatches PermissionRequest', async () => {
-    const msg = { id: '1', type: BeaconMessageType.PermissionRequest, network: 'mainnet' }
+    const msg = { id: '1', type: BeaconMessageType.PermissionRequest, network: { type: NetworkType.MAINNET } }
     jest.spyOn(client, 'requestPermissions').mockImplementationOnce(() => Promise.resolve())
     await client.sendMessage(JSON.stringify(msg))
     expect(client.requestPermissions).toHaveBeenCalled()
