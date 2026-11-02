@@ -2,6 +2,7 @@ import {
   PostMessagePairingRequest,
   ExtendedPostMessagePairingResponse,
   Extension,
+  isExtension,
   StorageKey,
   TransportType,
   ExtensionMessage,
@@ -19,14 +20,6 @@ const logger = new Logger('PostMessageTransport')
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const isExtension = (sender: unknown): sender is Extension =>
-  isRecord(sender) &&
-  typeof sender.id === 'string' &&
-  typeof sender.name === 'string' &&
-  (sender.shortName === undefined || typeof sender.shortName === 'string') &&
-  (sender.iconUrl === undefined || typeof sender.iconUrl === 'string') &&
-  (sender.color === undefined || typeof sender.color === 'string')
 
 let listeningForExtensions: boolean = false
 let extensionsPromise: Promise<Extension[]> | undefined

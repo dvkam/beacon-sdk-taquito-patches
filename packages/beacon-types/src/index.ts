@@ -150,7 +150,7 @@ import { BeaconRequestMessage } from './types/beacon/BeaconRequestMessage'
 import { BeaconResponseMessage } from './types/beacon/BeaconResponseMessage'
 import { ColorMode } from './types/ColorMode'
 import { Optional } from './types/utils/Optional'
-import { Extension } from './types/Extension'
+import { Extension, isExtension } from './types/Extension'
 import { PermissionEntity } from './types/PermissionEntity'
 import { WalletInfo } from './types/WalletInfo'
 import { ChangeAccountRequest } from './types/beacon/messages/ChangeAccountRequest'
@@ -290,6 +290,7 @@ export {
   ExtensionMessageTarget,
   ExtensionMessage,
   Extension,
+  isExtension,
   EncryptedExtensionMessage,
   RequestPermissionInput,
   RequestProofOfEventChallengeInput,
