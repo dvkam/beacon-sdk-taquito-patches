@@ -124,4 +124,57 @@ describe('getAvailableExtensions', () => {
 
     await expect(extensionsPromise).resolves.toEqual([])
   })
+
+  it('caches only canonical optional metadata, matching transport discovery', async () => {
+    const { getAvailableExtensions, mockPostMessage, mockWindowRef, getMessageHandler } =
+      await loadExtensionsUtil()
+    const pending = getAvailableExtensions()
+    const handler = getMessageHandler()
+    if (!handler) {
+      throw new Error('Expected the public discovery listener to be registered')
+    }
+    let invalidId = 0
+    for (const field of ['shortName', 'iconUrl', 'color']) {
+      for (const value of [null, 7, {}]) {
+        handler({
+          source: mockWindowRef,
+          origin: mockWindowRef.location.origin,
+          data: {
+            payload: 'pong',
+            sender: { id: `invalid-${invalidId++}`, name: 'Invalid', [field]: value }
+          }
+        })
+      }
+    }
+    const valid = [
+      { id: 'minimal', name: 'Minimal' },
+      {
+        id: 'undefined',
+        name: 'Undefined',
+        shortName: undefined,
+        iconUrl: undefined,
+        color: undefined
+      },
+      {
+        id: 'full',
+        name: 'Full',
+        shortName: 'F',
+        iconUrl: 'https://wallet.example/icon.svg',
+        color: '#fff',
+        extra: { kept: true }
+      }
+    ]
+    for (const sender of valid) {
+      handler({
+        source: mockWindowRef,
+        origin: mockWindowRef.location.origin,
+        data: { payload: 'pong', sender }
+      })
+    }
+    jest.advanceTimersByTime(1000)
+    const available = await pending
+    expect(available).toEqual(valid)
+    valid.forEach((sender, index) => expect(available[index]).toBe(sender))
+    expect(mockPostMessage).toHaveBeenCalledTimes(valid.length + 1)
+  })
 })

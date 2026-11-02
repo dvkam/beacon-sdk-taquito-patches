@@ -1,5 +1,5 @@
 import { Logger, windowRef } from '@ecadlabs/beacon-core'
-import { Extension, ExtensionMessageTarget } from '@ecadlabs/beacon-types'
+import { Extension, ExtensionMessageTarget, isExtension } from '@ecadlabs/beacon-types'
 
 const logger = new Logger('BeaconUIExtensions')
 
@@ -19,14 +19,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
 
 const isWindowMessageEvent = (event: unknown): event is WindowMessageEvent => isRecord(event)
-
-const isExtension = (sender: unknown): sender is Extension => {
-  if (!isRecord(sender)) {
-    return false
-  }
-
-  return typeof sender.id === 'string' && typeof sender.name === 'string'
-}
 
 const addExtension = (extension: Extension): void => {
   if (!extensions) {
@@ -58,7 +50,11 @@ const listenForExtensions = (): void => {
       return
     }
 
-    logger.log('getAvailableExtensions', `extension "${data.sender.name}" is available`, data.sender)
+    logger.log(
+      'getAvailableExtensions',
+      `extension "${data.sender.name}" is available`,
+      data.sender
+    )
     addExtension(data.sender)
   }
 
