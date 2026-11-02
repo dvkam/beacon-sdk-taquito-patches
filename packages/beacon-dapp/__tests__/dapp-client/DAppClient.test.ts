@@ -46,7 +46,6 @@ jest.mock('@ecadlabs/beacon-ui', () => ({
   isDesktop: jest.fn().mockReturnValue(false),
   isMobileOS: jest.fn().mockReturnValue(false),
   isIOS: jest.fn().mockReturnValue(false),
-  currentOS: jest.fn().mockReturnValue('test'),
   closeToast: jest.fn()
 }))
 
@@ -135,14 +134,6 @@ jest.mock('@ecadlabs/beacon-core', () => {
       RESET_STATE: 'RESET_STATE',
       WC_ACK_NOTIFICATION: 'WC_ACK_NOTIFICATION',
       ON_RELAYER_ERROR: 'ON_RELAYER_ERROR'
-    },
-    IndexedDBStorage: class {
-      constructor() {}
-      set() {}
-      getAllKeys() {
-        return Promise.resolve([])
-      }
-      delete() {}
     },
     MultiTabChannel: class {
       constructor(_a: any, _b: any, _c: any) {}
