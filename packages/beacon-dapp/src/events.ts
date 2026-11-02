@@ -14,7 +14,7 @@ import {
   BeaconErrorType,
   ExtendedPostMessagePairingResponse,
   ExtendedP2PPairingResponse,
-  AccountInfo,
+  StoredAccountInfo,
   ErrorResponse,
   PermissionResponseOutput,
   OperationResponseOutput,
@@ -152,7 +152,7 @@ interface RequestSentInfo {
 export interface BeaconEventType {
   [BeaconEvent.PERMISSION_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: {
-    account: AccountInfo
+    account: StoredAccountInfo
     output: PermissionResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
@@ -161,7 +161,7 @@ export interface BeaconEventType {
   [BeaconEvent.PERMISSION_REQUEST_ERROR]: { errorResponse: ErrorResponse; walletInfo: WalletInfo }
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]: {
-    account: AccountInfo
+    account: StoredAccountInfo
     output: ProofOfEventChallengeResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
@@ -173,7 +173,7 @@ export interface BeaconEventType {
   }
   [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]: {
-    account: AccountInfo
+    account: StoredAccountInfo
     output: SimulatedProofOfEventChallengeResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
@@ -185,7 +185,7 @@ export interface BeaconEventType {
   }
   [BeaconEvent.OPERATION_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.OPERATION_REQUEST_SUCCESS]: {
-    account: AccountInfo
+    account: StoredAccountInfo
     output: OperationResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
@@ -228,7 +228,7 @@ export interface BeaconEventType {
   }
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: undefined
   [BeaconEvent.NO_PERMISSIONS]: undefined
-  [BeaconEvent.ACTIVE_ACCOUNT_SET]: AccountInfo
+  [BeaconEvent.ACTIVE_ACCOUNT_SET]: StoredAccountInfo
   [BeaconEvent.ACTIVE_TRANSPORT_SET]: Transport
   [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: undefined
   [BeaconEvent.GENERIC_ERROR]: string
@@ -681,6 +681,7 @@ const showOperationSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.OPERATION_REQUEST_SUCCESS]
 ): Promise<void> => {
   const { account, output, blockExplorer } = data
+  const network = account.network
 
   openToast({
     body: `{{wallet}}\u00A0 successfully submitted operation`,
@@ -691,16 +692,20 @@ const showOperationSuccessAlert = async (
       {
         text: shortenString(output.transactionHash),
         isBold: true,
-        actionText: `Open Blockexplorer`,
-        actionLogo: 'external',
-        actionCallback: async (): Promise<void> => {
-          const link: string = await blockExplorer.getTransactionLink(
-            output.transactionHash,
-            account.network
-          )
-          window.open(link, '_blank', 'noopener')
-          closeToast()
-        }
+        ...(network
+          ? {
+              actionText: `Open Blockexplorer`,
+              actionLogo: 'external',
+              actionCallback: async (): Promise<void> => {
+                const link: string = await blockExplorer.getTransactionLink(
+                  output.transactionHash,
+                  network
+                )
+                window.open(link, '_blank', 'noopener')
+                closeToast()
+              }
+            }
+          : {})
       }
     ]
   })

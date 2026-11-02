@@ -2,6 +2,7 @@ import bs58check from 'bs58check'
 import {
   ConnectionContext,
   AccountInfo,
+  StoredAccountInfo,
   TransportType,
   StorageKey,
   BeaconMessageType,
@@ -276,7 +277,7 @@ export class DAppClient extends Client {
    * The currently active account. For all requests that are associated to a specific request (operation request, signing request),
    * the active account is used to determine the network and destination wallet
    */
-  private _activeAccount: ExposedPromise<AccountInfo | undefined> = new ExposedPromise()
+  private _activeAccount: ExposedPromise<StoredAccountInfo | undefined> = new ExposedPromise()
 
   /**
    * The currently active peer. This is used to address a peer in case the active account is not set. (Eg. for permission requests)
@@ -305,7 +306,7 @@ export class DAppClient extends Client {
 
   private destroyed = false
 
-  private readonly activeAccountLoaded: Promise<AccountInfo | undefined>
+  private readonly activeAccountLoaded: Promise<StoredAccountInfo | undefined>
 
   private readonly storageValidated: Promise<void>
 
@@ -1330,7 +1331,7 @@ export class DAppClient extends Client {
   /**
    * Returns the active account
    */
-  public async getActiveAccount(): Promise<AccountInfo | undefined> {
+  public async getActiveAccount(): Promise<StoredAccountInfo | undefined> {
     this.assertNotDestroyed()
 
     return this._activeAccount.promise
@@ -1360,7 +1361,7 @@ export class DAppClient extends Client {
   }
 
   private async repairMissingActiveAccount(): Promise<void> {
-    this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(undefined)
+    this._activeAccount = ExposedPromise.resolve<StoredAccountInfo | undefined>(undefined)
     await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
     await this.setActivePeer(undefined)
   }
@@ -1378,7 +1379,7 @@ export class DAppClient extends Client {
     }
   }
 
-  private async isInvalidState(account: AccountInfo) {
+  private async isInvalidState(account: StoredAccountInfo) {
     const activeAccount = await this._activeAccount.promise
 
     return !activeAccount
@@ -1388,7 +1389,7 @@ export class DAppClient extends Client {
 
   private async resetInvalidState(emit: boolean = true) {
     await this.accountManager.removeAllAccounts()
-    this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(undefined)
+    this._activeAccount = ExposedPromise.resolve<StoredAccountInfo | undefined>(undefined)
     await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
     if (emit) {
       await this.events.emit(BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE)
@@ -1410,7 +1411,7 @@ export class DAppClient extends Client {
    *
    * @param account The account that will be set as the active account
    */
-  public async setActiveAccount(account?: AccountInfo): Promise<void> {
+  public async setActiveAccount(account?: StoredAccountInfo): Promise<void> {
     const activeAccountAlreadyCleared = !account && (await this.isActiveAccountAlreadyCleared())
 
     if (!activeAccountAlreadyCleared && !this.isGetActiveAccountHandled) {
@@ -1461,7 +1462,7 @@ export class DAppClient extends Client {
       // another ACTIVE_ACCOUNT_SET(undefined) for an already-empty account.
     } else if (this._activeAccount.isSettled()) {
       // If the promise has already been resolved we need to create a new one.
-      this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(account)
+      this._activeAccount = ExposedPromise.resolve<StoredAccountInfo | undefined>(account)
     } else {
       this._activeAccount.resolve(account)
     }
@@ -1667,7 +1668,7 @@ export class DAppClient extends Client {
    */
   public async removeAccount(accountIdentifier: string): Promise<void> {
     const removeAccountResult = super.removeAccount(accountIdentifier)
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
 
     if (activeAccount && activeAccount.accountIdentifier === accountIdentifier) {
       await this.setActiveAccount(undefined)
@@ -1767,7 +1768,7 @@ export class DAppClient extends Client {
       return true
     }
 
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
 
     if (!activeAccount) {
       throw await this.sendInternalError('No active account set!')
@@ -1941,7 +1942,7 @@ export class DAppClient extends Client {
 
     await blockchain.validateRequest(input)
 
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
     if (!activeAccount) {
       throw await this.sendInternalError('No active account!')
     }
@@ -2269,7 +2270,7 @@ export class DAppClient extends Client {
     if (!input.payload) {
       throw await this.sendInternalError('Payload must be provided')
     }
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
     if (!activeAccount) {
       throw await this.sendInternalError('No active account!')
     }
@@ -2417,7 +2418,7 @@ export class DAppClient extends Client {
     if (!input.operationDetails) {
       throw await this.sendInternalError('Operation details must be provided')
     }
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
 
     if (!activeAccount) {
       throw await this.sendInternalError('No active account!')
@@ -2612,7 +2613,7 @@ export class DAppClient extends Client {
     await this.accountManager.removeAccounts(accountIdentifiersToRemove)
 
     // Check if one of the accounts that was removed was the active account and if yes, set it to undefined
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
 
     if (activeAccount) {
       if (accountIdentifiersToRemove.includes(activeAccount.accountIdentifier)) {
@@ -2680,7 +2681,7 @@ export class DAppClient extends Client {
         const actionCallback = async (): Promise<void> => {
           const operationRequest: OperationRequestInput = request as OperationRequestInput
           // if the account we requested is not available, we remove it locally
-          let accountInfo: AccountInfo | undefined
+          let accountInfo: StoredAccountInfo | undefined
           if (operationRequest.sourceAddress && operationRequest.network) {
             const accountIdentifier = await getAccountIdentifier(
               operationRequest.sourceAddress,
@@ -2746,28 +2747,28 @@ export class DAppClient extends Client {
     request: BeaconRequestInputMessage,
     response:
       | {
-          account: AccountInfo
+          account: StoredAccountInfo
           output: PermissionResponseOutput
           blockExplorer: BlockExplorer
           connectionContext: ConnectionContext
           walletInfo: WalletInfo
         }
       | {
-          account: AccountInfo
+          account: StoredAccountInfo
           output: ProofOfEventChallengeResponse
           blockExplorer: BlockExplorer
           connectionContext: ConnectionContext
           walletInfo: WalletInfo
         }
       | {
-          account: AccountInfo
+          account: StoredAccountInfo
           output: SimulatedProofOfEventChallengeResponse
           blockExplorer: BlockExplorer
           connectionContext: ConnectionContext
           walletInfo: WalletInfo
         }
       | {
-          account: AccountInfo
+          account: StoredAccountInfo
           output: OperationResponseOutput
           blockExplorer: BlockExplorer
           connectionContext: ConnectionContext
@@ -2818,7 +2819,7 @@ export class DAppClient extends Client {
 
   private async getWalletInfo(
     peer?: PeerInfo,
-    account?: AccountInfo,
+    account?: StoredAccountInfo,
     readFromStorage: boolean = true
   ): Promise<WalletInfo> {
     const selectedAccount = account ? account : await this.getActiveAccount()
@@ -2905,7 +2906,7 @@ export class DAppClient extends Client {
     if (app) {
       let deeplink: string | undefined
       if (app.hasOwnProperty('links')) {
-        deeplink = (app as WebApp).links[selectedAccount?.network.type ?? this.network.type]
+        deeplink = (app as WebApp).links[selectedAccount?.network?.type ?? this.network.type]
       } else if (app.hasOwnProperty('deepLink')) {
         deeplink = (app as App).deepLink
       }
@@ -2921,7 +2922,7 @@ export class DAppClient extends Client {
     return walletInfo
   }
 
-  private async getPeer(account?: AccountInfo): Promise<PeerInfo | undefined> {
+  private async getPeer(account?: StoredAccountInfo): Promise<PeerInfo | undefined> {
     let peer: PeerInfo | undefined
 
     if (account) {

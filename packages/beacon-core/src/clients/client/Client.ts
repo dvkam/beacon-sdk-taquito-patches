@@ -4,7 +4,7 @@ import {
   TransportType,
   TransportStatus,
   BeaconBaseMessage,
-  AccountInfo,
+  StoredAccountInfo,
   PeerInfo,
   BeaconMessageType,
   DisconnectMessage,
@@ -138,7 +138,7 @@ export abstract class Client extends BeaconClient {
   /**
    * Return all locally known accounts
    */
-  public async getAccounts(): Promise<AccountInfo[]> {
+  public async getAccounts(): Promise<StoredAccountInfo[]> {
     return this.accountManager.getAccounts()
   }
 
@@ -146,7 +146,7 @@ export abstract class Client extends BeaconClient {
    * Return the account by ID
    * @param accountIdentifier The ID of an account
    */
-  public async getAccount(accountIdentifier: string): Promise<AccountInfo | undefined> {
+  public async getAccount(accountIdentifier: string): Promise<StoredAccountInfo | undefined> {
     return this.accountManager.getAccount(accountIdentifier)
   }
 

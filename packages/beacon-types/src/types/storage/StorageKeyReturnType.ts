@@ -1,6 +1,6 @@
 import {
   StorageKey,
-  AccountInfo,
+  StoredAccountInfo,
   AccountIdentifier,
   P2PPairingRequest,
   AppMetadata,
@@ -32,7 +32,7 @@ export interface StorageKeyReturnType {
         url?: string
       }
     | undefined
-  [StorageKey.ACCOUNTS]: AccountInfo[]
+  [StorageKey.ACCOUNTS]: StoredAccountInfo[]
   [StorageKey.ACTIVE_ACCOUNT]: AccountIdentifier | undefined
   [StorageKey.PUSH_TOKENS]: PushToken[]
   [StorageKey.BEACON_SDK_SECRET_SEED]: string | undefined

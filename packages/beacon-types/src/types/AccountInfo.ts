@@ -19,3 +19,16 @@ export interface AccountInfo extends PermissionEntity {
   walletType: 'implicit' | 'abstracted_account'
   verificationType?: 'proof_of_event'
 }
+
+/** A chain-owned V3 account as persisted by the DApp permission flow. */
+export interface BlockchainAccountInfo extends Omit<
+  AccountInfo,
+  'network' | 'scopes' | 'walletType'
+> {
+  network?: undefined
+  walletType?: undefined
+  scopes: string[]
+  chainData: unknown
+}
+
+export type StoredAccountInfo = AccountInfo | BlockchainAccountInfo

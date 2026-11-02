@@ -382,3 +382,5 @@ export { PushToken } from './types/PushToken'
 // TS helpers
 
 export { Optional }
+
+export type { BlockchainAccountInfo, StoredAccountInfo } from './types/AccountInfo'
