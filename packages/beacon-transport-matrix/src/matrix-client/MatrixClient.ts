@@ -4,6 +4,7 @@ import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { MatrixClientStore } from './MatrixClientStore'
 import { MatrixHttpClient } from './MatrixHttpClient'
 import { MatrixRoom, MatrixRoomStatus } from './models/MatrixRoom'
+import { MatrixMessageType } from './models/MatrixMessage'
 import { MatrixRoomService } from './services/MatrixRoomService'
 import { MatrixUserService } from './services/MatrixUserService'
 import { MatrixEventService } from './services/MatrixEventService'
@@ -288,7 +289,7 @@ export class MatrixClient {
         accessToken,
         roomId,
         {
-          msgtype: 'm.text',
+          msgtype: MatrixMessageType.TEXT,
           body: message
         },
         txnId

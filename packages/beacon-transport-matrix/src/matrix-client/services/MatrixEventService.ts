@@ -1,14 +1,13 @@
 import { MatrixHttpClient } from '../MatrixHttpClient'
 
-import { MatrixEventSendResponse } from '../models/api/MatrixEventSend'
+import { MatrixEventSendRequest, MatrixEventSendResponse } from '../models/api/MatrixEventSend'
 import { MatrixSyncResponse } from '../models/api/MatrixSync'
-import { MatrixStateEventMessageContent } from '../models/MatrixStateEvent'
 
 interface MatrixScheduledEvent {
   accessToken: string
   roomId: string
   type: MatrixEventType
-  content: any
+  content: MatrixEventSendRequest
   txnId: string
   onSuccess(response: MatrixEventSendResponse): void
   onError(error: unknown): void
@@ -61,7 +60,7 @@ export class MatrixEventService {
   public async sendMessage(
     accessToken: string,
     roomId: string,
-    content: MatrixStateEventMessageContent,
+    content: MatrixEventSendRequest,
     txnId: string
   ): Promise<MatrixEventSendResponse> {
     return new Promise((resolve, reject) =>
