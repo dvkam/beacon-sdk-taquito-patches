@@ -1646,11 +1646,11 @@ describe('DAppClient — basic unit tests', () => {
       senderId: '',
       version: '2'
     }
-    jest.spyOn(timeoutClient as any, 'makeRequest').mockRejectedValue(sendFailure)
+    const send = jest.spyOn(timeoutClient as any, 'makeRequest').mockRejectedValue(sendFailure)
 
     await (timeoutClient as any).prepareRequest({
       id: 'delegated-send-failure-id',
-      type: BeaconMessageType.OperationRequest,
+      protocol: '2',
       data: {
         type: BeaconMessageType.OperationRequest,
         network: {
@@ -1662,6 +1662,7 @@ describe('DAppClient — basic unit tests', () => {
     })
     await Promise.resolve()
 
+    expect(send).toHaveBeenCalled()
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'delegated-send-failure-id',

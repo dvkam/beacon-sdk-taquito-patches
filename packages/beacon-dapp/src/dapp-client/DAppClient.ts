@@ -154,6 +154,12 @@ import {
   type ResponseSelector
 } from './pending-responses'
 import { DAppClientOptions } from './DAppClientOptions'
+import {
+  parseBroadcastPacket,
+  delegatedErrorResponse,
+  type DelegatedRequest,
+  type DelegatedV2Request
+} from './broadcast-messages'
 
 const logger = new Logger('DAppClient')
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
@@ -234,6 +240,11 @@ interface PeerNotification {
  * @category DApp
  */
 export class DAppClient extends Client {
+  protected declare handleResponse: (
+    message: PendingMessage,
+    connectionInfo: ConnectionContext
+  ) => void | Promise<void>
+
   /**
    * The description of the app
    */
@@ -698,82 +709,77 @@ export class DAppClient extends Client {
     await tranport.connect()
   }
 
-  private async onBCMessageHandler(message: any) {
-    switch (message.type) {
-      case BeaconMessageType.PermissionRequest:
-      case BeaconMessageType.OperationRequest:
-      case BeaconMessageType.SignPayloadRequest:
-      case BeaconMessageType.BroadcastRequest:
-      case BeaconMessageType.ProofOfEventChallengeRequest:
-      case BeaconMessageType.SimulatedProofOfEventChallengeRequest:
-        this.prepareRequest(message)
-        break
-      case BeaconMessageType.BlockchainRequest:
-        this.prepareRequest(message, true)
-        break
-      case 'RESPONSE':
-        this.handleResponse(message.data.message, message.data.connectionInfo)
-        break
-      case 'DISCONNECT':
-        this._transport.isResolved() && this.disconnect()
-        break
-      default:
+  private async onBCMessageHandler(message: unknown): Promise<void> {
+    try {
+      const packet = parseBroadcastPacket(message)
+      if (!packet) {
         logger.error('onBCMessageHandler', 'message type not recognized', message)
+
+        return
+      }
+      switch (packet.type) {
+        case 'REQUEST':
+          await this.prepareRequest(packet.request)
+          break
+        case 'RESPONSE':
+          await this.handleResponse(packet.response.message, packet.response.connectionInfo)
+          break
+        case 'DISCONNECT':
+          if (this._transport.isResolved()) {
+            await this.disconnect()
+          }
+          break
+        default: {
+          const exhaustive: never = packet
+
+          return exhaustive
+        }
+      }
+    } catch (error: unknown) {
+      logger.error('onBCMessageHandler', error)
     }
   }
 
-  private async prepareRequest(message: any, isV3 = false) {
+  private async prepareRequest(message: DelegatedRequest): Promise<void> {
     if (!this.multiTabChannel.isLeader()) {
       return
     }
+    const { id, data, protocol } = message
+    try {
+      const transport = await this._transport.promise
+      const waitForResolution: unknown =
+        'waitForResolution' in transport ? transport.waitForResolution : undefined
+      if (typeof waitForResolution !== 'function') {
+        throw new Error('Delegated transport does not expose request readiness')
+      }
+      const readiness: unknown = waitForResolution.call(transport)
+      await readiness
+      this.openRequestsOtherTabs.add(id)
+      const requestPromise =
+        protocol === '3'
+          ? this.makeRequestV3(data, v3BlockchainResponse(data.blockchainIdentifier), id)
+          : this.makeRequest(data, v2ResponseForRequest(data.type), false, id)
+      requestPromise.catch((requestError: unknown) => this.failDelegatedRequest(id, requestError))
+    } catch (error: unknown) {
+      this.failDelegatedRequest(id, error)
+    }
+  }
 
-    // block until the transport is ready
-    const transport = (await this._transport.promise) as DappWalletConnectTransport
-    await transport.waitForResolution()
-
-    this.openRequestsOtherTabs.add(message.id)
-    const requestPromise = isV3
-      ? this.makeRequestV3(message.data, v3BlockchainResponse(message.data.blockchainIdentifier), message.id)
-      : this.makeRequest(message.data, v2ResponseForRequest(message.type), false, message.id)
-
-    requestPromise.catch((requestError) => {
-      const errorResponse = this.buildDelegatedRequestError(message.id, requestError)
-
+  private failDelegatedRequest(id: string, error: unknown): void {
+    this.clearOpenRequest(id)
+    logger.error('prepareRequest', error)
+    // The legacy void channel API only exposes synchronous posting failures here.
+    try {
       this.multiTabChannel.postMessage({
         type: 'RESPONSE',
         data: {
-          message: errorResponse,
-          connectionInfo: {
-            origin: Origin.WALLETCONNECT,
-            id: ''
-          }
+          message: delegatedErrorResponse(id, error),
+          connectionInfo: { origin: Origin.WALLETCONNECT, id: '' }
         },
-        id: message.id
-      })
-      this.clearOpenRequest(message.id)
-    })
-  }
-
-  private buildDelegatedRequestError(id: string, error: unknown): ErrorResponse {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'type' in error &&
-      'errorType' in error &&
-      error.type === BeaconMessageType.Error
-    ) {
-      return {
-        ...(error as ErrorResponse),
         id
-      }
-    }
-
-    return {
-      id,
-      type: BeaconMessageType.Error,
-      errorType: BeaconErrorType.UNKNOWN_ERROR,
-      senderId: '',
-      version: '2'
+      })
+    } catch (forwardError: unknown) {
+      logger.error('prepareRequest', 'Unable to forward delegated failure', forwardError)
     }
   }
 
@@ -2975,6 +2981,12 @@ export class DAppClient extends Client {
    * @param skipResponse If true, the function return as soon as the message is sent
    */
 
+  private makeRequest(
+    requestInput: DelegatedV2Request,
+    selectResponse: ResponseSelector<BeaconMessage>,
+    skipResponse: false,
+    otherTabMessageId: string
+  ): Promise<RequestResult<BeaconMessage>>
   private makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
     requestInput: Optional<T, IgnoredRequestInputProperties>,
     selectResponse: ResponseSelector<U>,
@@ -2991,7 +3003,7 @@ export class DAppClient extends Client {
     otherTabMessageId?: string
   ): Promise<undefined>
   private async makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
-    requestInput: Optional<T, IgnoredRequestInputProperties>,
+    requestInput: Optional<T, IgnoredRequestInputProperties> | DelegatedV2Request,
     selectResponse: ResponseSelector<U>,
     skipResponse?: boolean,
     otherTabMessageId?: string
@@ -3020,13 +3032,15 @@ export class DAppClient extends Client {
       throw await this.sendInternalError('BeaconID not defined')
     }
 
-    const request: Optional<T, IgnoredRequestInputProperties> &
-      Pick<U, IgnoredRequestInputProperties> = {
+    const headers = {
       id: messageId,
-      version: '2', // This is the old version
-      senderId: await getSenderId(await this.beaconId),
-      ...requestInput
+      version: '2',
+      senderId: await getSenderId(await this.beaconId)
     }
+    const request =
+      otherTabMessageId === undefined
+        ? { ...headers, ...requestInput }
+        : { ...requestInput, ...headers }
 
     const exposed = skipResponse
       ? undefined
