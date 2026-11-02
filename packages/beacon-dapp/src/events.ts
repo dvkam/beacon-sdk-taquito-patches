@@ -32,7 +32,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import {
   UnknownBeaconError,
-  Transport,
+  type ClientTransport,
   Logger,
   getError
   // EncryptPayloadResponseOutput,
@@ -146,6 +146,9 @@ interface RequestSentInfo {
   walletInfo: WalletInfo
 }
 
+/** A data-only snapshot of the selected transport's public connection state. */
+export type ActiveTransportInfo = Readonly<Pick<ClientTransport, 'type' | 'connectionStatus'>>
+
 /**
  * The type of the payload of the different BeaconEvents
  */
@@ -229,7 +232,7 @@ export interface BeaconEventType {
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: undefined
   [BeaconEvent.NO_PERMISSIONS]: undefined
   [BeaconEvent.ACTIVE_ACCOUNT_SET]: AccountInfo
-  [BeaconEvent.ACTIVE_TRANSPORT_SET]: Transport
+  [BeaconEvent.ACTIVE_TRANSPORT_SET]: ActiveTransportInfo | undefined
   [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: undefined
   [BeaconEvent.GENERIC_ERROR]: string
   [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: InvalidAccountDeactivatedEvent | undefined

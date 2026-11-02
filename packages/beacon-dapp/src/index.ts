@@ -16,6 +16,7 @@ import {
   BeaconEventHandler,
   defaultEventCallbacks,
   type BeaconEventType,
+  type ActiveTransportInfo,
   type InvalidAccountDeactivatedEvent,
   type InvalidAccountDeactivatedReason
 } from './events'
@@ -30,6 +31,7 @@ export type { DAppClientDisconnectOptions, DAppClientRemoveAllPeersOptions }
 export { BeaconEvent, BeaconEventHandler, defaultEventCallbacks }
 export type {
   BeaconEventType,
+  ActiveTransportInfo,
   InvalidAccountDeactivatedEvent,
   InvalidAccountDeactivatedReason
 }
