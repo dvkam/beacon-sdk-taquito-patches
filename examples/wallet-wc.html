@@ -432,6 +432,10 @@
 
           console.log('Calling signClient.update with namespaces:', namespaces)
 
+          // Make the selected account available before announcing the session update.
+          walletData.address = newAddress
+          walletData.publicKey = newPbk
+
           // 6) Call update(...) and wait for dApp to acknowledge
           const { acknowledged } = await signClient.update({
             topic,
@@ -439,9 +443,7 @@
           })
           await acknowledged() // wait until dApp acknowledges the update
 
-          // 7) Update our local mock walletData.address as well
-          walletData.address = newAddress
-          walletData.publicKey = newPbk
+          // 7) Refresh the session list
 
           setStatus('Session updated!')
           updateSessionList()
