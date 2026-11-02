@@ -1,11 +1,5 @@
 import { createLeaderElection, BroadcastChannel, LeaderElector } from 'broadcast-channel'
 
-interface Message {
-  type: string
-  id: string
-  data: any
-}
-
 const lifecycleObservers = new WeakMap<MultiTabChannel, () => void>()
 
 /** @internal Observes leader departure before election for the channel's owning facade. */
@@ -24,14 +18,12 @@ export function observeMultiTabChannel(
 }
 
 export class MultiTabChannel {
-  private readonly channel: BroadcastChannel
+  private readonly channel: BroadcastChannel<unknown>
   private readonly elector: LeaderElector
-  private readonly eventListeners = [
-    () => this.onBeforeUnloadHandler(),
-    (message: any) => this.onMessageHandler(message)
-  ]
-  private readonly onBCMessageHandler: Function
-  private readonly onElectedLeaderHandler: Function
+  private readonly beforeUnloadListener = () => this.onBeforeUnloadHandler()
+  private readonly messageListener = (message: unknown) => this.onMessageHandler(message)
+  private readonly onBCMessageHandler: (message: unknown) => unknown
+  private readonly onElectedLeaderHandler: () => unknown
   // Auxiliary variable needed for handling beforeUnload.
   // Closing a tab causes the elector to be killed immediately
   private wasLeader: boolean = false
@@ -39,10 +31,14 @@ export class MultiTabChannel {
   private initialization: Promise<void> | undefined
   private closed: boolean = false
 
-  constructor(name: string, onBCMessageHandler: Function, onElectedLeaderHandler: Function) {
+  constructor(
+    name: string,
+    onBCMessageHandler: (message: unknown) => unknown,
+    onElectedLeaderHandler: () => unknown
+  ) {
     this.onBCMessageHandler = onBCMessageHandler
     this.onElectedLeaderHandler = onElectedLeaderHandler
-    this.channel = new BroadcastChannel(name)
+    this.channel = new BroadcastChannel<unknown>(name)
     this.elector = createLeaderElection(this.channel)
   }
 
@@ -56,8 +52,8 @@ export class MultiTabChannel {
 
     // A follower must receive departure signals even if it never wins an election.
     if (!this.initialized) {
-      this.channel.onmessage = this.eventListeners[1]
-      window?.addEventListener('beforeunload', this.eventListeners[0])
+      this.channel.onmessage = this.messageListener
+      window?.addEventListener('beforeunload', this.beforeUnloadListener)
       this.initialized = true
     }
     this.wasLeader = this.wasLeader || this.isLeader()
@@ -107,16 +103,21 @@ export class MultiTabChannel {
   private retireListeners(): void {
     this.closed = true
     lifecycleObservers.delete(this)
-    window?.removeEventListener('beforeunload', this.eventListeners[0])
-    this.channel.removeEventListener('message', this.eventListeners[1])
+    window?.removeEventListener('beforeunload', this.beforeUnloadListener)
+    this.channel.removeEventListener('message', this.messageListener)
     this.channel.onmessage = null
   }
 
-  private async onMessageHandler(message: Message) {
+  private async onMessageHandler(message: unknown) {
     if (this.closed) {
       return
     }
-    if (message.type === 'LEADER_DEAD') {
+    if (
+      message !== null &&
+      (typeof message === 'object' || typeof message === 'function') &&
+      'type' in message &&
+      message.type === 'LEADER_DEAD'
+    ) {
       lifecycleObservers.get(this)?.()
       if (this.closed) {
         return
@@ -151,7 +152,7 @@ export class MultiTabChannel {
     return this.elector.hasLeader()
   }
 
-  postMessage(message: any): void {
+  public postMessage(message: unknown): void {
     this.channel.postMessage(message)
   }
 }
