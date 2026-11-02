@@ -8,5 +8,5 @@ import { BeaconMessageType } from '../BeaconMessageType'
 export interface ErrorResponse extends BeaconBaseMessage {
   type: BeaconMessageType.Error
   errorType: BeaconErrorType
-  errorData?: any
+  errorData?: unknown
 }

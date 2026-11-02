@@ -151,12 +151,31 @@ export class OutgoingResponseInterceptor {
         }
         if (message.errorType === BeaconErrorType.TRANSACTION_INVALID_ERROR && message.errorData) {
           const errorData = message.errorData
-          // Check if error data is in correct format
+          // Check only the RPC identifiers required for forwarding; preserve all other fields.
           if (
             Array.isArray(errorData) &&
-            errorData.every((item) => Boolean(item.kind) && Boolean(item.id))
+            errorData.every((item: unknown) => {
+              if (
+                typeof item !== 'object' ||
+                item === null ||
+                !('kind' in item) ||
+                !('id' in item)
+              ) {
+                return false
+              }
+
+              const kind = item.kind
+              const id = item.id
+
+              return (
+                typeof kind === 'string' &&
+                kind.length > 0 &&
+                typeof id === 'string' &&
+                id.length > 0
+              )
+            })
           ) {
-            response.errorData = message.errorData
+            response.errorData = errorData
           } else {
             logger.warn(
               'ErrorData provided is not in correct format. It needs to be an array of RPC errors. It will not be included in the message sent to the dApp'

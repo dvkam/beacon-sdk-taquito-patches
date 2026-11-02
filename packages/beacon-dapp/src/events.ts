@@ -45,15 +45,47 @@ const logger = new Logger('BeaconEvents')
 
 const SUCCESS_TIMER: number = 5 * 1000
 
-interface RPCError {
-  kind: string
-  id: string
-  contract_handle?: string
-  location?: number
-  with?: {
-    string?: string
-    int?: number
+const getContractErrorMessage = (
+  errorData: unknown,
+  errorMessages?: Record<string, Record<string | number, string>>
+): string | undefined => {
+  if (!Array.isArray(errorData)) {
+    return undefined
   }
+
+  const errors: unknown[] = errorData
+  const contractError = errors[0]
+  const detailError = errors[1]
+  if (
+    typeof contractError !== 'object' ||
+    contractError === null ||
+    !('contract_handle' in contractError) ||
+    typeof detailError !== 'object' ||
+    detailError === null ||
+    !('with' in detailError)
+  ) {
+    return undefined
+  }
+
+  const contractHandle = contractError.contract_handle
+  if (typeof contractHandle !== 'string' || contractHandle === '') {
+    return undefined
+  }
+
+  const detail = detailError.with
+  if (typeof detail !== 'object' || detail === null) {
+    return undefined
+  }
+
+  const code =
+    ('int' in detail ? detail.int : undefined) ?? ('string' in detail ? detail.string : undefined)
+  if ((typeof code !== 'string' && typeof code !== 'number') || code === '') {
+    return undefined
+  }
+
+  const message = errorMessages?.[contractHandle]?.[code]
+
+  return typeof message === 'string' ? message : undefined
 }
 /**
  * The different events that can be emitted by the beacon-sdk
@@ -432,28 +464,13 @@ const showErrorToast = async (
     response.errorResponse.errorType === BeaconErrorType.TRANSACTION_INVALID_ERROR &&
     response.errorResponse.errorData
   ) {
-    const err: RPCError[] = response.errorResponse.errorData
-    const errorMessages = response.errorMessages
-
-    let hasHumandReadableError = false
-
-    if (err[0]?.contract_handle && errorMessages && errorMessages?.[err[0].contract_handle]) {
-      const errCode = err[1]?.with?.int ?? err[1]?.with?.string
-      const contractErrors = errorMessages?.[err[0].contract_handle]
-      if (errCode && contractErrors?.[errCode]) {
-        actions.push({
-          text: contractErrors?.[errCode],
-          isBold: true
-        })
-        hasHumandReadableError = true
-      }
-    }
-
-    if (!hasHumandReadableError) {
-      actions.push({
-        text: error.description
-      })
-    }
+    const contractMessage = getContractErrorMessage(
+      response.errorResponse.errorData,
+      response.errorMessages
+    )
+    actions.push(
+      contractMessage ? { text: contractMessage, isBold: true } : { text: error.description }
+    )
 
     actions.push({
       text: '',
