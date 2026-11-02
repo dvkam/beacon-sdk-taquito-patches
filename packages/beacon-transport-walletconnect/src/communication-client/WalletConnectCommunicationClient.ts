@@ -81,17 +81,24 @@ type BeaconInputMessage =
   | Optional<DisconnectMessage, IgnoredResponseInputProperties>
   | Optional<ChangeAccountRequest, IgnoredResponseInputProperties>
 
-const getErrorDiagnostic = (error: unknown): unknown => {
+const getErrorDetails = (error: unknown): { message: string | undefined; diagnostic: unknown } => {
   if (
     error !== null &&
     (typeof error === 'object' || typeof error === 'function') &&
     'message' in error
   ) {
-    return error.message
+    const diagnostic = error.message
+
+    return {
+      message: typeof diagnostic === 'string' ? diagnostic : undefined,
+      diagnostic
+    }
   }
 
-  return error
+  return { message: undefined, diagnostic: error }
 }
+
+const getErrorDiagnostic = (error: unknown): unknown => getErrorDetails(error).diagnostic
 
 function getStringBetween(str: string | undefined, startChar: string, endChar: string): string {
   if (!str || !startChar || !endChar) {
@@ -466,8 +473,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     if (this.activeAccountOrPbk) {
       try {
         await this.openSession()
-      } catch (error: any) {
-        logger.error(error.message)
+      } catch (error: unknown) {
+        logger.error('requestPermissions', getErrorDiagnostic(error))
 
         return
       }
@@ -772,20 +779,17 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
         this.validateReceivedNamespace(permissionScopeParams, this.session.namespaces)
       })
-      .catch(async (error: any) => {
+      .catch(async (error: unknown) => {
         hasResponse = true
-        if (
-          !error.message ||
-          !error.message.length ||
-          error.message.toLowerCase().includes('expir')
-        ) {
+        const { message, diagnostic } = getErrorDetails(error)
+        if (!message || message.toLowerCase().includes('expir')) {
           const fun = this.eventHandlers.get(ClientEvents.CLOSE_ALERT)
           fun && fun(TransportType.WALLETCONNECT)
 
           return
         }
 
-        logger.error('Error happened!', [error.message])
+        logger.error('Error happened!', [diagnostic])
 
         if (this.activeListeners.size === 0) {
           logger.debug('No active listeners', [])
@@ -1177,17 +1181,14 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       logger.debug('Session is now', [session.pairingTopic, pairingTopic])
 
       this.validateReceivedNamespace(permissionScopeParams, this.session.namespaces)
-    } catch (error: any) {
-      if (
-        !error.message ||
-        !error.message.length ||
-        error.message.toLowerCase().includes('expir')
-      ) {
+    } catch (error: unknown) {
+      const { message } = getErrorDetails(error)
+      if (!message || message.toLowerCase().includes('expir')) {
         const fun = this.eventHandlers.get(ClientEvents.CLOSE_ALERT)
         fun && fun(TransportType.WALLETCONNECT)
       } else {
         logger.debug('Error happened!', [pairingTopic])
-        logger.error(error.message)
+        logger.error(message)
         if (this.activeListeners.size === 0) {
           logger.debug('No active listeners', [pairingTopic])
           const fun = this.eventHandlers.get(ClientEvents.WC_ACK_NOTIFICATION)
@@ -1370,8 +1371,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   async closeActiveSession(account: string, notify: boolean = true) {
     try {
       this.validateNetworkAndAccount(this.getActiveNetwork(), account)
-    } catch (error: any) {
-      logger.error(error.message)
+    } catch (error: unknown) {
+      logger.error('closeActiveSession', getErrorDiagnostic(error))
 
       return
     }
