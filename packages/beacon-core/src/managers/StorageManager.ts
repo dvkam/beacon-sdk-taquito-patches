@@ -1,14 +1,6 @@
 import { StorageKey, Storage, StorageKeyReturnType } from '@ecadlabs/beacon-types'
 
-/** Type workaround for https://github.com/Microsoft/TypeScript/issues/7294#issuecomment-465794460 */
 export type ArrayElem<A> = A extends (infer Elem)[] ? Elem : never
-
-/* eslint-disable prefer-arrow/prefer-arrow-functions */
-function fixArrayType<T>(array: T): ArrayElem<T>[] {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return array as any
-}
-/* eslint-enable prefer-arrow/prefer-arrow-functions */
 
 /**
  * @internalapi
@@ -39,25 +31,25 @@ export class StorageManager<
   }
 
   public async getOne(
-    predicate: (element: ArrayElem<StorageKeyReturnType[T]>) => boolean
-  ): Promise<ArrayElem<StorageKeyReturnType[T]> | undefined> {
+    predicate: (element: StorageKeyReturnType[T][number]) => boolean
+  ): Promise<StorageKeyReturnType[T][number] | undefined> {
     const entities = await this.storage.get(this.storageKey)
 
-    return fixArrayType(entities).find(predicate)
+    return entities.find(predicate)
   }
 
   public async addOne(
-    element: ArrayElem<StorageKeyReturnType[T]>,
-    predicate: (element: ArrayElem<StorageKeyReturnType[T]>) => boolean,
+    element: StorageKeyReturnType[T][number],
+    predicate: (candidate: StorageKeyReturnType[T][number]) => boolean,
     overwrite: boolean = true
   ): Promise<void> {
     const entities = await this.storage.get(this.storageKey)
 
-    if (!fixArrayType(entities).some(predicate)) {
-      fixArrayType(entities).push(element)
+    if (!entities.some(predicate)) {
+      entities[entities.length] = element
     } else if (overwrite) {
       for (let i = 0; i < entities.length; i++) {
-        if (predicate(fixArrayType(entities)[i])) {
+        if (predicate(entities[i])) {
           entities[i] = element
         }
       }
@@ -67,14 +59,18 @@ export class StorageManager<
   }
 
   public async remove(
-    predicate: (element: ArrayElem<StorageKeyReturnType[T]>) => boolean
+    predicate: (element: StorageKeyReturnType[T][number]) => boolean
   ): Promise<void> {
     const entities = await this.storage.get(this.storageKey)
 
-    const filteredEntities = fixArrayType(entities).filter((entity) => !predicate(entity))
+    const filteredEntities: StorageKeyReturnType[T] = []
+    entities.forEach((entity) => {
+      if (!predicate(entity)) {
+        filteredEntities[filteredEntities.length] = entity
+      }
+    })
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return this.storage.set(this.storageKey, filteredEntities as any)
+    return this.storage.set(this.storageKey, filteredEntities)
   }
 
   public async removeAll(): Promise<void> {
