@@ -8,7 +8,6 @@ export enum AlertState {
   TOP_WALLETS = 'top-wallets',
   WALLETS = 'wallets',
   INSTALL = 'install',
-  BUG_REPORT = 'bug-report',
   QR = 'qr'
 }
 
@@ -29,7 +28,6 @@ export interface AlertConfig {
   disclaimerText?: string
   analytics?: AnalyticsInterface
   featuredWallets?: string[]
-  openBugReport?: boolean
   substratePairing?: boolean
 }
 
@@ -79,13 +77,11 @@ export interface QRCodeProps {
   isMobile: boolean
   qrCode?: string
   defaultPairing: Promise<string>
-  handleUpdateState: (state: AlertState) => void
   handleIsLoading: (isLoading: boolean) => void
 }
 
 export interface WCInitErrorProps {
   title: string
-  handleUpdateState: (state: AlertState) => void
 }
 
 export interface InfoProps {
@@ -110,7 +106,6 @@ export interface InfoProps {
 export interface TopWalletsProps {
   wallets: MergedWallet[]
   onClickWallet: (id: string) => void
-  onClickLearnMore: () => void
   otherWallets?: { images: string[]; onClick: () => void }
   disabled?: boolean
   isMobile: boolean

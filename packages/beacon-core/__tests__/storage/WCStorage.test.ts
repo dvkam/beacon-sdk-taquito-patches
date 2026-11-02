@@ -2,13 +2,11 @@ import { WCStorage } from '../../src/storage/WCStorage'
 
 const mockIndexedDBGet = jest.fn()
 const mockIndexedDBClearStore = jest.fn()
-const mockIndexedDBFillStore = jest.fn()
 
 jest.mock('../../src/storage/IndexedDBStorage', () => ({
   IndexedDBStorage: jest.fn().mockImplementation(() => ({
     get: mockIndexedDBGet,
-    clearStore: mockIndexedDBClearStore,
-    fillStore: mockIndexedDBFillStore
+    clearStore: mockIndexedDBClearStore
   }))
 }))
 
@@ -36,7 +34,6 @@ describe('WCStorage', () => {
     localStorage.clear()
     mockIndexedDBGet.mockResolvedValue(undefined)
     mockIndexedDBClearStore.mockResolvedValue(undefined)
-    mockIndexedDBFillStore.mockResolvedValue(undefined)
   })
 
   afterEach(() => {

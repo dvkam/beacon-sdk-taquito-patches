@@ -33,7 +33,6 @@ jest.mock('../../../src/components/alert', () => (props: any) => {
     extraContent,
     onBackClick,
     closeOnBackdropClick, // remove it
-    openBugReport,
     substratePairing,
     ...rest
   } = props
@@ -46,11 +45,6 @@ jest.mock('../../../src/components/alert', () => (props: any) => {
 })
 
 // Other mocks
-jest.mock('../../../src/components/bug-report-form', () => (props: any) => (
-  <div data-testid="bug-report-form" onClick={props.onSubmit}>
-    BugReportForm
-  </div>
-))
 jest.mock('../../../src/components/info', () => (props: any) => (
   <div data-testid="info">
     <div>{props.title}</div>
@@ -338,46 +332,19 @@ describe('PairingAlert Component', () => {
     })
   })
 
-  // --- Help State Tests ---
-  describe('Bug report State', () => {
-    test('renders BugReportForm when metrics are enabled', async () => {
-      localStorage.setItem(StorageKey.ENABLE_METRICS, 'true')
-      const connectReturn = [...defaultUseConnect]
-      connectReturn[3] = 'bug-report'
-      ;(useConnect as jest.Mock).mockReturnValue(connectReturn)
-      await renderPairingAlert({ ...defaultProps, openBugReport: true })
-      expect(screen.getByTestId('bug-report-form')).toBeInTheDocument()
-    })
-
-    // NOTE: Originally this test expected a help-related update.
-    // The component calls handleUpdateState('bug-report') on clicking "here".
-    // Updating the expectation to match the component's behavior.
-    test('clicking on error "here" span calls handleUpdateState with "bug-report"', async () => {
+  describe('WalletConnect initialization errors', () => {
+    test('keeps local connection details without a retired reporting link', async () => {
       ;(platformUtils.isMobileOS as jest.Mock).mockReturnValue(true)
-      const updateStateMock = jest.fn()
       const connectReturn = [...defaultUseConnect]
       connectReturn[3] = 'install'
-      connectReturn[6] = false // force error branch
-      connectReturn[15] = updateStateMock
+      connectReturn[6] = false
       ;(useConnect as jest.Mock).mockReturnValue(connectReturn)
       localStorage.setItem(StorageKey.WC_INIT_ERROR, 'Network error details')
-      await renderPairingAlert({ ...defaultProps, openBugReport: true })
-      const hereElement = screen.getByText('here')
-      fireEvent.click(hereElement)
-      expect(updateStateMock).toHaveBeenCalledWith('bug-report')
-    })
 
-    test('clicking on BugReportForm calls onClose', async () => {
-      localStorage.setItem(StorageKey.ENABLE_METRICS, 'true')
-      const onCloseMock = jest.fn()
-      const newProps = { ...defaultProps, openBugReport: true, onClose: onCloseMock }
-      const connectReturn = [...defaultUseConnect]
-      connectReturn[3] = 'bug-report'
-      ;(useConnect as jest.Mock).mockReturnValue(connectReturn)
-      await renderPairingAlert(newProps)
-      const bugReport = screen.getByTestId('bug-report-form')
-      fireEvent.click(bugReport)
-      expect(onCloseMock).toHaveBeenCalled()
+      await renderPairingAlert(defaultProps)
+
+      expect(screen.getByText('Network error details')).toBeInTheDocument()
+      expect(screen.queryByText(/report it|Beacon team|report a bug/i)).not.toBeInTheDocument()
     })
   })
 

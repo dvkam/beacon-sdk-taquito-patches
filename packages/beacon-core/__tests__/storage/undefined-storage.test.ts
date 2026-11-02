@@ -55,18 +55,18 @@ describe('storage undefined writes', () => {
   it('returns defaults when LocalStorage boolean keys contain non-booleans', async () => {
     const storage = new LocalStorage()
 
-    localStorage.setItem(StorageKey.ENABLE_METRICS, '"true"')
+    localStorage.setItem(StorageKey.MULTI_NODE_SETUP_DONE, '"true"')
 
-    await expect(storage.get(StorageKey.ENABLE_METRICS)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.MULTI_NODE_SETUP_DONE)).resolves.toBeUndefined()
   })
 
   it('accepts raw and JSON-encoded strings for LocalStorage string keys', async () => {
     const storage = new LocalStorage()
 
-    localStorage.setItem(StorageKey.USER_ID, 'raw-user-id')
+    localStorage.setItem(StorageKey.MATRIX_SELECTED_NODE, 'raw-matrix-node')
     localStorage.setItem(StorageKey.BEACON_SDK_VERSION, '"4.8.3-ecad"')
 
-    await expect(storage.get(StorageKey.USER_ID)).resolves.toBe('raw-user-id')
+    await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBe('raw-matrix-node')
     await expect(storage.get(StorageKey.BEACON_SDK_VERSION)).resolves.toBe('4.8.3-ecad')
   })
 
