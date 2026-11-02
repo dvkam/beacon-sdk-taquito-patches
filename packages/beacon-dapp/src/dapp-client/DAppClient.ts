@@ -473,7 +473,7 @@ export class DAppClient extends Client {
         ])
 
         for (const peers of storedMetadata) {
-          const peer: any = peers.find((peer: any) => peer.senderId === message.senderId)
+          const peer = peers.find((candidate) => candidate.senderId === message.senderId)
           if (!peer) {
             continue
           }
@@ -2933,7 +2933,7 @@ export class DAppClient extends Client {
       peer = peers.find((peerEl) => peerEl.senderId === account.senderId)
       if (!peer) {
         // We could not find an exact match for a sender, so we most likely received it over a relay
-        peer = peers.find((peerEl) => (peerEl as any).id === account.origin.id)
+        peer = peers.find((peerEl) => peerEl.id === account.origin.id)
       }
     } else {
       peer = await this._activePeer.promise
@@ -3593,8 +3593,19 @@ export class DAppClient extends Client {
     connectionInfo: ConnectionContext
   ): Promise<AccountInfo> {
     // TODO: Migration code. Remove sometime after 1.0.0 release.
-    const tempPK: string | undefined =
-      message.publicKey || (message as any).pubkey || (message as any).pubKey
+    let tempPK = message.publicKey
+    if (!tempPK && 'pubkey' in message) {
+      const legacyKey = message.pubkey
+      if (typeof legacyKey === 'string') {
+        tempPK = legacyKey
+      }
+    }
+    if (!tempPK && 'pubKey' in message) {
+      const legacyKey = message.pubKey
+      if (typeof legacyKey === 'string') {
+        tempPK = legacyKey
+      }
+    }
 
     const publicKey = tempPK ? prefixPublicKey(tempPK) : undefined
 
