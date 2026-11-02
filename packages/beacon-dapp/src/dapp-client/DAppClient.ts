@@ -3737,6 +3737,8 @@ export class DAppClient extends Client {
       desktop: { app: desktop, type: 'desktop' },
       mobile: { app: mobile, type: 'mobile' },
       web: { app: browser, type: 'web' }
+    } satisfies {
+      [Kind in NonNullable<WalletInfo['type']>]: { app: AppBase | undefined; type: Kind }
     }
 
     const defaultType = (): {
@@ -3773,7 +3775,7 @@ export class DAppClient extends Client {
         name: app?.name ?? walletInfo.name,
         icon: app?.logo ?? walletInfo.icon,
         deeplink,
-        type: type as any
+        type
       }
     }
 
