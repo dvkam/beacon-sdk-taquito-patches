@@ -42,6 +42,13 @@ export interface BeaconBaseMessage {
   type: unknown
 }
 
+/** The minimal V3 payload, distinct from the V2 message header. */
+export type BeaconBaseMessageV3 = BeaconBaseMessage
+
+/** A V3 envelope whose payload remains opaque unless a specific type is supplied. */
+export type BeaconMessageEnvelopeV3<T extends BeaconBaseMessageV3 = BeaconBaseMessageV3> =
+  BeaconMessageWrapper<T>
+
 export interface BlockchainMessage<T extends string = string> {
   blockchainIdentifier: T
   type: unknown
