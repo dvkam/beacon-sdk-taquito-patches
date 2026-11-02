@@ -1,6 +1,6 @@
-import { Network, NetworkType } from '@ecadlabs/beacon-types'
+import { type BlockExplorerInterface, Network, NetworkType } from '@ecadlabs/beacon-types'
 
-export abstract class BlockExplorer {
+export abstract class BlockExplorer implements BlockExplorerInterface {
   constructor(public readonly rpcUrls: { [key in NetworkType]?: string }) {}
 
   protected async getLinkForNetwork(network: Network): Promise<string> {
