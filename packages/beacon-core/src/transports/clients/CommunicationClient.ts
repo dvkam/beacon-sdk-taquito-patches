@@ -29,7 +29,12 @@ export abstract class CommunicationClient {
    * Get the public key
    */
   public async getPublicKey(): Promise<string> {
-    return toHex(this.keyPair?.publicKey)
+    const keyPair = this.keyPair
+    if (!keyPair) {
+      throw new TypeError('Missing key pair')
+    }
+
+    return toHex(keyPair.publicKey)
   }
 
   /**

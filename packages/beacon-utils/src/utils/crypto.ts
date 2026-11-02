@@ -21,14 +21,18 @@ const POE_CHALLENGE_PREFIX = 110
 
 /* eslint-disable prefer-arrow/prefer-arrow-functions */
 
+type HexInput = string | ArrayLike<number> | ArrayBufferLike
+
+// Buffer.from accepts each input through a separate overload.
+const hexBuffer: { from(value: HexInput): Buffer } = Buffer
+
 /**
- * Convert a value to hex
+ * Convert UTF-8 text, numeric array-like values, or raw buffers to hex
  *
  * @param value
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function toHex(value: any): string {
-  return Buffer.from(value).toString('hex')
+export function toHex(value: HexInput): string {
+  return hexBuffer.from(value).toString('hex')
 }
 
 /**
