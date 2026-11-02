@@ -2,9 +2,10 @@
 
 The ECAD package line no longer collects performance telemetry or submits bug reports to the retired Papers backend. Pairing, request and connection-error screens no longer offer the built-in report form. Connection error details and normal wallet controls remain available.
 
+The `enableMetrics?: boolean` option remains on `ClientOptions` and `DAppClientOptions` for source compatibility. It is deprecated and ignored. Setting it to `true` does not restore telemetry; applications can remove it from their configuration.
+
 Applications should remove the following obsolete configuration and API usage:
 
-- `enableMetrics` in client options.
 - `openBugReport`, `AlertConfig.openBugReport` from the UI package.
 - `BeaconEvent.OPEN_BUG_REPORT` subscriptions and emissions.
 - `BACKEND_URL` from the core package.
