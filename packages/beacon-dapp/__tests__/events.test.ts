@@ -1,5 +1,5 @@
 import { openAlert, openToast } from '@ecadlabs/beacon-ui'
-import { BeaconEvent, defaultEventCallbacks } from '../src/events'
+import { BeaconEvent, BeaconEventType, defaultEventCallbacks } from '../src/events'
 import {
   AccountInfo,
   BeaconMessageType,
@@ -103,6 +103,72 @@ describe('default event callbacks', () => {
       } finally {
         open.mockRestore()
       }
+    }
+  )
+
+  it.each([false, true])(
+    'shows actual V2 or V3 permission information without an invented network: %s',
+    async (v3) => {
+      const common = {
+        accountIdentifier: 'chain-account',
+        senderId: 'wallet',
+        address: 'chain-address',
+        connectedAt: 1,
+        origin: { type: Origin.P2P, id: 'peer' }
+      }
+      const v2Account: AccountInfo = {
+        ...common,
+        network: { type: NetworkType.MAINNET },
+        walletType: 'implicit',
+        scopes: [PermissionScope.SIGN]
+      }
+      const chainAccount = { ...common, scopes: ['transfer'], chainData: null }
+      const event: BeaconEventType[BeaconEvent.PERMISSION_REQUEST_SUCCESS] = v3
+        ? {
+            protocol: '3',
+            account: chainAccount,
+            output: {
+              type: BeaconMessageType.PermissionResponse,
+              blockchainIdentifier: 'chain-test',
+              blockchainData: {
+                appMetadata: { senderId: 'wallet', name: 'Wallet' },
+                scopes: ['transfer']
+              }
+            },
+            blockExplorer: new TzktBlockExplorer(),
+            connectionContext: { id: 'peer', origin: Origin.P2P },
+            walletInfo: { name: 'Wallet' }
+          }
+        : {
+            account: v2Account,
+            output: {
+              id: 'request',
+              senderId: 'wallet',
+              version: '2',
+              type: BeaconMessageType.PermissionResponse,
+              walletType: 'implicit',
+              appMetadata: { senderId: 'wallet', name: 'Wallet' },
+              network: v2Account.network,
+              scopes: v2Account.scopes,
+              address: common.address,
+              accountInfo: v2Account
+            },
+            blockExplorer: new TzktBlockExplorer(),
+            connectionContext: { id: 'peer', origin: Origin.P2P },
+            walletInfo: { name: 'Wallet' }
+          }
+      await defaultEventCallbacks[BeaconEvent.PERMISSION_REQUEST_SUCCESS](event)
+      const toast = jest.mocked(openToast).mock.calls[0]?.[0]
+      expect(toast?.body).toBe('{{wallet}}\u00A0 has granted permission')
+      expect(toast?.actions).toEqual(
+        v3
+          ? [{ text: 'Address', actionText: 'chain...dress', isBold: true }]
+          : [
+              { text: 'Address', actionText: 'chain...dress', isBold: true },
+              { text: 'Network', actionText: 'mainnet' },
+              { text: 'Permissions', actionText: 'sign' }
+            ]
+      )
     }
   )
 })

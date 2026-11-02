@@ -3,6 +3,7 @@ import {
   ConnectionContext,
   AccountInfo,
   StoredAccountInfo,
+  BlockchainAccountInfo,
   TransportType,
   StorageKey,
   BeaconMessageType,
@@ -1887,22 +1888,35 @@ export class DAppClient extends Client {
 
     logger.log('RESPONSE V3', response, connectionInfo)
 
+    const chainData = response.message.blockchainData
+    const scopeValues: unknown = chainData.scopes
+    if (
+      !Array.isArray(scopeValues) ||
+      !scopeValues.every((scope: unknown): scope is string => typeof scope === 'string')
+    ) {
+      throw new Error('V3 permission scopes must be strings')
+    }
+    const scopes = scopeValues.slice()
     const partialAccountInfos = await blockchain.getAccountInfosFromPermissionResponse(
       response.message
     )
+    const partialAccount = partialAccountInfos[0]
+    if (!partialAccount) {
+      throw new Error(`Blockchain "${input.blockchainIdentifier}" did not return an account`)
+    }
 
-    const accountInfo: any = {
-      accountIdentifier: partialAccountInfos[0].accountId,
+    const accountInfo: BlockchainAccountInfo = {
+      accountIdentifier: partialAccount.accountId,
       senderId: response.senderId,
       origin: {
         type: connectionInfo.origin,
         id: connectionInfo.id
       },
-      address: partialAccountInfos[0].address, // Store all addresses
-      publicKey: partialAccountInfos[0].publicKey,
-      scopes: response.message.blockchainData.scopes as any,
+      address: partialAccount.address, // Store all addresses
+      publicKey: partialAccount.publicKey,
+      scopes,
       connectedAt: new Date().getTime(),
-      chainData: response.message.blockchainData
+      chainData
     }
 
     await this.accountManager.addAccount(accountInfo)
@@ -1917,13 +1931,10 @@ export class DAppClient extends Client {
       walletInfo: await this.getWalletInfo()
     })
 
-    await this.notifySuccess(request as any, {
+    await this.notifySuccess(request, {
+      protocol: '3',
       account: accountInfo,
-      output: {
-        address: partialAccountInfos[0].address,
-        network: { type: 'substrate' },
-        scopes: []
-      } as any,
+      output: response.message,
       blockExplorer: this.blockExplorer,
       connectionContext: connectionInfo,
       walletInfo: await this.getWalletInfo()
@@ -2740,6 +2751,10 @@ export class DAppClient extends Client {
    * @param response The response we received
    */
   private notifySuccess(
+    request: PermissionRequestV3,
+    response: Extract<BeaconEventType[BeaconEvent.PERMISSION_REQUEST_SUCCESS], { protocol: '3' }>
+  ): Promise<void>
+  private notifySuccess(
     request: BlockchainRequestV3,
     response: BeaconEventType[BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]
   ): Promise<void>
@@ -2793,7 +2808,7 @@ export class DAppClient extends Client {
         }
   ): Promise<void>
   private async notifySuccess(
-    request: BeaconRequestInputMessage | BlockchainRequestV3,
+    request: BeaconRequestInputMessage | BlockchainRequestV3 | PermissionRequestV3,
     response: BeaconEventType[BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]
   ): Promise<void> {
     this.events

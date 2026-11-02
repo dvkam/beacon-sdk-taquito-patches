@@ -15,6 +15,8 @@ import {
   ExtendedPostMessagePairingResponse,
   ExtendedP2PPairingResponse,
   StoredAccountInfo,
+  BlockchainAccountInfo,
+  PermissionResponseV3,
   ErrorResponse,
   PermissionResponseOutput,
   OperationResponseOutput,
@@ -151,13 +153,23 @@ interface RequestSentInfo {
  */
 export interface BeaconEventType {
   [BeaconEvent.PERMISSION_REQUEST_SENT]: RequestSentInfo
-  [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: {
-    account: StoredAccountInfo
-    output: PermissionResponseOutput
-    blockExplorer: BlockExplorer
-    connectionContext: ConnectionContext
-    walletInfo: WalletInfo
-  }
+  [BeaconEvent.PERMISSION_REQUEST_SUCCESS]:
+    | {
+        protocol?: '2'
+        account: StoredAccountInfo
+        output: PermissionResponseOutput
+        blockExplorer: BlockExplorer
+        connectionContext: ConnectionContext
+        walletInfo: WalletInfo
+      }
+    | {
+        protocol: '3'
+        account: BlockchainAccountInfo
+        output: PermissionResponseV3
+        blockExplorer: BlockExplorer
+        connectionContext: ConnectionContext
+        walletInfo: WalletInfo
+      }
   [BeaconEvent.PERMISSION_REQUEST_ERROR]: { errorResponse: ErrorResponse; walletInfo: WalletInfo }
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]: {
@@ -576,17 +588,18 @@ const showPairAlert = async (data: BeaconEventType[BeaconEvent.PAIR_INIT]): Prom
 const showPermissionSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.PERMISSION_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { output } = data
+  const address = data.protocol === '3' ? data.account.address : data.output.address
 
-  const actions: any[] = [
+  const actions: ToastAction[] = [
     {
       text: 'Address',
-      actionText: shortenString(output.address),
+      actionText: shortenString(address),
       isBold: true
     }
   ]
 
-  if ((output.network.type as any) !== 'substrate') {
+  if (data.protocol !== '3') {
+    const { output } = data
     actions.push({
       text: 'Network',
       actionText: `${output.network.type}`
