@@ -125,16 +125,17 @@ export class IndexedDBStorage extends Storage {
   /**
    * Retrieves a value by key from the specified object store.
    * If no store is specified, the default (first in the list) is used.
+   * SDK keys are normalized; arbitrary keys return raw values that callers must narrow.
    */
   public get<K extends StorageKey>(key: K, storeName?: string): Promise<StorageKeyReturnType[K]>
-  public get(key: string, storeName?: string): Promise<string | undefined>
-  public get(key: StorageKey | string, storeName: string = this.storeNames[0]): Promise<any> {
-    const storedValue = this.transaction(
+  public get(key: string, storeName?: string): Promise<unknown>
+  public get(key: StorageKey | string, storeName: string = this.storeNames[0]): Promise<unknown> {
+    const storedValue = this.transaction<unknown>(
       'readonly',
       storeName,
       (store) =>
-        new Promise((resolve, reject) => {
-          const getRequest = store.get(key)
+        new Promise<unknown>((resolve, reject) => {
+          const getRequest: IDBRequest<unknown> = store.get(key)
           getRequest.onsuccess = () => resolve(getRequest.result)
           getRequest.onerror = () => reject(getRequest.error)
         })
@@ -153,10 +154,14 @@ export class IndexedDBStorage extends Storage {
     value: StorageKeyReturnType[K],
     storeName?: string
   ): Promise<void>
-  public set(key: string, value: string, storeName?: string): Promise<void>
+  public set<K extends string>(
+    key: K,
+    value: K extends StorageKey ? never : string,
+    storeName?: string
+  ): Promise<void>
   public set(
     key: StorageKey | string,
-    value: any,
+    value: unknown,
     storeName: string = this.storeNames[0]
   ): Promise<void> {
     if (value === undefined) {
@@ -167,7 +172,7 @@ export class IndexedDBStorage extends Storage {
       'readwrite',
       storeName,
       (store) =>
-        new Promise((resolve, reject) => {
+        new Promise<void>((resolve, reject) => {
           const putRequest = store.put(value, key)
           putRequest.onsuccess = () => resolve()
           putRequest.onerror = () => reject(putRequest.error)
@@ -194,15 +199,15 @@ export class IndexedDBStorage extends Storage {
   }
 
   /**
-   * Retrieves all values from the specified object store.
+   * Retrieves all raw values, including structured records, from the specified object store.
    */
-  public getAll(storeName?: string): Promise<string[]> {
-    return this.transaction(
+  public getAll(storeName?: string): Promise<unknown[]> {
+    return this.transaction<unknown[]>(
       'readonly',
       storeName || this.storeNames[0],
       (store) =>
-        new Promise((resolve, reject) => {
-          const getAllRequest = store.getAll()
+        new Promise<unknown[]>((resolve, reject) => {
+          const getAllRequest: IDBRequest<unknown[]> = store.getAll()
           getAllRequest.onsuccess = () => resolve(getAllRequest.result)
           getAllRequest.onerror = () => reject(getAllRequest.error)
         })
@@ -290,7 +295,7 @@ export class IndexedDBStorage extends Storage {
 
     // Copy items from the source store to the target store, skipping any specified keys.
     await this.transaction('readonly', sourceStoreName, async (sourceStore) => {
-      const getAllRequest = sourceStore.getAll()
+      const getAllRequest: IDBRequest<unknown[]> = sourceStore.getAll()
       const getAllKeysRequest = sourceStore.getAllKeys()
 
       getAllRequest.onsuccess = async () => {
