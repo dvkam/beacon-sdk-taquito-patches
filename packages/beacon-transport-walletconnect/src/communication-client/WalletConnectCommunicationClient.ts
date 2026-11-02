@@ -685,22 +685,21 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       }
     }
 
-    const { uri, approval }: { uri: string; approval: () => Promise<SessionTypes.Struct> } =
-      await Promise.race([
-        signClient.connect(connectParams),
-        new Promise<any>((_, reject) =>
-          setTimeout(
-            () => reject(new Error('The connection timed out.')),
-            WALLETCONNECT_CONNECT_TIMEOUT_MS
-          )
+    const { uri, approval } = await Promise.race([
+      signClient.connect(connectParams),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('The connection timed out.')),
+          WALLETCONNECT_CONNECT_TIMEOUT_MS
         )
-      ]).catch((error) => {
-        logger.error(`Init error: ${error.message}`)
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(StorageKey.WC_INIT_ERROR, error.message)
-        }
-        throw new Error(error.message)
-      })
+      )
+    ]).catch((error) => {
+      logger.error(`Init error: ${error.message}`)
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(StorageKey.WC_INIT_ERROR, error.message)
+      }
+      throw new Error(error.message)
+    })
 
     // Extract topic from uri. Format is wc:topic@2...
     const topic = getStringBetween(uri, ':', '@')
@@ -1136,9 +1135,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
     try {
       logger.debug('connect', [pairingTopic])
-      const { approval }: { approval: () => Promise<SessionTypes.Struct> } = await Promise.race([
+      const { approval } = await Promise.race([
         signClient.connect(connectParams),
-        new Promise<any>((_, reject) =>
+        new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error('The connection timed out.')),
             WALLETCONNECT_CONNECT_TIMEOUT_MS
