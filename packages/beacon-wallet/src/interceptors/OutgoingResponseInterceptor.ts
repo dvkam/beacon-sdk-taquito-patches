@@ -21,7 +21,7 @@ import {
   BeaconMessageWrapper,
   BlockchainResponseV3,
   PermissionResponseV3,
-  BeaconBaseMessage,
+  BeaconMessageEnvelopeV3,
   ProofOfEventChallengeResponse,
   SimulatedProofOfEventChallengeResponse
   // EncryptPayloadResponse
@@ -30,7 +30,7 @@ import { getAddressFromPublicKey, CONTRACT_PREFIX, isValidAddress } from '@ecadl
 
 interface OutgoingResponseInterceptorOptions {
   senderId: string
-  request: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>
+  request: BeaconRequestMessage | BeaconMessageEnvelopeV3
   message: BeaconResponseInputMessage
   ownAppMetadata: AppMetadata
   permissionManager: PermissionManager
