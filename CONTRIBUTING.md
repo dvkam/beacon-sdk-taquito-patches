@@ -1,5 +1,16 @@
 # Contributing
 
+## Node.js support
+
+CI builds and tests the SDK on Node.js 22, 24 and 26 LTS. Dependency installs
+use npm 11.12.1.
+Use Node.js 24 for local development and release tooling. The minimum
+workspace version remains Node.js 22.12.0. Maintenance LTS releases remain
+supported; end-of-life and Current releases are outside the tested matrix.
+
+See [Node.js support](docs/node-support.md) for the package checks and the
+existing native ESM limitation.
+
 This repository is the ECAD-maintained Beacon SDK package line published under
 the `@ecadlabs/beacon-*` scope.
 
