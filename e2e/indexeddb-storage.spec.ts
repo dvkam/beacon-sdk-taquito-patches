@@ -74,3 +74,60 @@ test('rejects fillStore when opening the target database fails', async ({ page }
   })
   expect(errorName).toBe('AbortError')
 })
+
+test('logs the request error when copied records violate a target constraint', async ({ page }) => {
+  const errorMessage = await page.evaluate(async () => {
+    const openDatabase = (name: string, upgrade: (db: IDBDatabase) => void): Promise<IDBDatabase> =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open(name, 1)
+        request.onupgradeneeded = () => upgrade(request.result)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+    const source = await openDatabase('constraint-source-test', (db) => {
+      db.createObjectStore('records')
+    })
+    await new Promise<void>((resolve, reject) => {
+      const transaction = source.transaction('records', 'readwrite')
+      const store = transaction.objectStore('records')
+      store.put({ unique: 'duplicate' }, 'first')
+      store.put({ unique: 'duplicate' }, 'second')
+      transaction.oncomplete = () => resolve()
+      transaction.onabort = () => reject(transaction.error)
+    })
+    source.close()
+    const target = await openDatabase('constraint-target-test', (db) => {
+      db.createObjectStore('records').createIndex('unique', 'unique', { unique: true })
+    })
+    target.close()
+    const logged = new Promise<string>((resolve) => {
+      beacon.setLogger({
+        debug: () => undefined,
+        log: () => undefined,
+        warn: () => undefined,
+        error: (method, ...args) => {
+          const message = [method, ...args].map(String).join(' ')
+          if (message.includes('Transaction error:')) {
+            resolve(message)
+          }
+        },
+        time: () => undefined,
+        timeLog: () => undefined
+      })
+    })
+    const storage = new beacon.IndexedDBStorage('constraint-source-test', ['records'])
+    const deadline = Date.now() + 10_000
+    for (;;) {
+      try {
+        await storage.get('readiness', 'records')
+        break
+      } catch (error) {
+        if (Date.now() >= deadline) throw error
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    await storage.fillStore('constraint-target-test', 'records', [], 'records')
+    return logged
+  })
+  expect(errorMessage).toContain('ConstraintError')
+})

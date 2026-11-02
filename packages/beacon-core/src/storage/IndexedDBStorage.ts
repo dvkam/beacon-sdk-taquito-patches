@@ -313,8 +313,11 @@ export class IndexedDBStorage extends Storage {
               targetStore.put(items[index], key)
             })
 
-          targetTransaction.onerror = (event: any) => {
-            logger.error('Transaction error: ', event.target.error)
+          targetTransaction.onerror = (event) => {
+            const target = event.target
+            const error: unknown =
+              target !== null && 'error' in target ? target.error : targetTransaction.error
+            logger.error('Transaction error: ', error)
           }
         }
       }
