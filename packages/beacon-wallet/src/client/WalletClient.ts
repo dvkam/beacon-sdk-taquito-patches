@@ -280,8 +280,14 @@ export class WalletClient extends Client {
     try {
       await this.addListener(transport)
       await transport.connect()
-    } catch (err: any) {
-      logger.warn('_connect', err.message)
+    } catch (err: unknown) {
+      const diagnostic =
+        err !== null &&
+        (typeof err === 'object' || typeof err === 'function') &&
+        'message' in err
+          ? err.message
+          : err
+      logger.warn('_connect', diagnostic)
       await transport.disconnect()
       await this._connect(--attempts)
 
