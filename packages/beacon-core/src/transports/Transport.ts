@@ -8,9 +8,15 @@ import {
 } from '@ecadlabs/beacon-types'
 import { Logger } from '../utils/Logger'
 import { PeerManager } from '../managers/PeerManager'
-import { ArrayElem } from '../managers/StorageManager'
 import { CommunicationClient } from './clients/CommunicationClient'
 import { ClientEvents } from './clients/ClientEvents'
+
+type PeerStorageKey =
+  | StorageKey.TRANSPORT_P2P_PEERS_DAPP
+  | StorageKey.TRANSPORT_P2P_PEERS_WALLET
+  | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
+  | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
+  | StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP
 
 const logger = new Logger('Transport')
 
@@ -21,13 +27,8 @@ const logger = new Logger('Transport')
  */
 export abstract class Transport<
   T extends PeerInfo = PeerInfo,
-  K extends
-    | StorageKey.TRANSPORT_P2P_PEERS_DAPP
-    | StorageKey.TRANSPORT_P2P_PEERS_WALLET
-    | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
-    | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
-    | StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP = any,
-  S extends CommunicationClient = any
+  K extends PeerStorageKey = PeerStorageKey,
+  S extends CommunicationClient = CommunicationClient
 > {
   /**
    * The type of the transport
@@ -161,13 +162,17 @@ export abstract class Transport<
     return
   }
 
-  public async getPeers(): Promise<T[]> {
-    return this.peerManager.getPeers() as any // TODO: Fix type
+  public async getPeers(): Promise<StorageKeyReturnType[K]> {
+    return this.peerManager.getPeers()
   }
 
-  public async addPeer(newPeer: T, _sendPairingResponse: boolean = true): Promise<void> {
+  public addPeer(
+    newPeer: T & StorageKeyReturnType[K][number],
+    sendPairingResponse?: boolean
+  ): Promise<void>
+  public async addPeer(newPeer: T & StorageKeyReturnType[K][number]): Promise<void> {
     logger.log('addPeer', 'adding peer', newPeer)
-    await this.peerManager.addPeer(newPeer as ArrayElem<StorageKeyReturnType[K]>) // TODO: Fix type
+    await this.peerManager.addPeer(newPeer)
     await this.listen(newPeer.publicKey)
   }
 

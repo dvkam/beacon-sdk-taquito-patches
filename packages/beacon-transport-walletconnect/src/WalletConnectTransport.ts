@@ -5,6 +5,7 @@ import {
   TransportStatus,
   ExtendedWalletConnectPairingResponse,
   StorageKey,
+  StorageKeyReturnType,
   WalletConnectPairingRequest,
   NetworkType,
   TransportType
@@ -114,7 +115,7 @@ export class WalletConnectTransport<
     this.client.storage.notify(type)
   }
 
-  public async getPeers(): Promise<T[]> {
+  public async getPeers(): Promise<StorageKeyReturnType[K]> {
     const client = WalletConnectCommunicationClient.getInstance(this.wcOptions, this.isLeader)
     const session = client.currentSession()
     if (!session) {
@@ -130,7 +131,7 @@ export class WalletConnectTransport<
         name: session.peer.metadata.name,
         publicKey: session.peer.publicKey,
         version: 'first'
-      } as T
+      }
     ]
   }
 

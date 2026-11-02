@@ -527,10 +527,15 @@ export class DAppClient extends Client {
               : (this.postMessageTransport ?? (await this.transport))
 
         if (relevantTransport) {
-          const peers: ExtendedPeerInfo[] = await relevantTransport.getPeers()
-          const peer: ExtendedPeerInfo | undefined = peers.find(
-            (peerEl) => peerEl.senderId === message.senderId
-          )
+          const peers = await relevantTransport.getPeers()
+          const peer = peers.find((peerEl) => {
+            if (!('senderId' in peerEl)) {
+              return false
+            }
+            const senderId = peerEl.senderId
+
+            return typeof senderId === 'string' && senderId === message.senderId
+          })
 
           if (peer) {
             await relevantTransport.removePeer(peer)
