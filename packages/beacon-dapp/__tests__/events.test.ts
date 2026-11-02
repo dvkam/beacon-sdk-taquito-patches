@@ -1,4 +1,4 @@
-import { openAlert } from '@ecadlabs/beacon-ui'
+import { openAlert, openToast } from '@ecadlabs/beacon-ui'
 import { BeaconEvent, defaultEventCallbacks } from '../src/events'
 
 jest.mock('@ecadlabs/beacon-ui', () => ({
@@ -32,6 +32,15 @@ describe('default event callbacks', () => {
     expect(openAlert).toHaveBeenCalledWith({
       title: 'Error',
       body: 'Your session has expired. Please pair with your wallet again.'
+    })
+  })
+  it('keeps the awaiting-confirmation toast for WalletConnect proposal progress', async () => {
+    const walletInfo = { name: 'Wallet' }
+    await defaultEventCallbacks[BeaconEvent.WALLETCONNECT_SESSION_PENDING]({ walletInfo })
+    expect(openToast).toHaveBeenCalledWith({
+      body: 'Awaiting confirmation in\u00A0 {{wallet}}',
+      state: 'acknowledge',
+      walletInfo
     })
   })
 })

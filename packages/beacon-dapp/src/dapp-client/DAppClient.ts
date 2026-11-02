@@ -933,11 +933,9 @@ export class DAppClient extends Client {
 
     await this.events.emit(BeaconEvent.HIDE_UI, ['alert'])
     if (status === 'pending') {
-      this.events.emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
-        message: {} as any,
-        extraInfo: {} as any,
-        walletInfo
-      })
+      this.events
+        .emit(BeaconEvent.WALLETCONNECT_SESSION_PENDING, { walletInfo })
+        .catch((error: unknown) => logger.error('wcToastHandler', error))
     } else {
       // The WC transport reports session-proposal rejection through this event
       // when there are no active listeners yet (no peer paired). Reject the

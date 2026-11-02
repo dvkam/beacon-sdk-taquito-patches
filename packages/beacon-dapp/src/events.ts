@@ -83,6 +83,7 @@ export enum BeaconEvent {
   BROADCAST_REQUEST_SUCCESS = 'BROADCAST_REQUEST_SUCCESS',
   BROADCAST_REQUEST_ERROR = 'BROADCAST_REQUEST_ERROR',
   ACKNOWLEDGE_RECEIVED = 'ACKNOWLEDGE_RECEIVED',
+  WALLETCONNECT_SESSION_PENDING = 'WALLETCONNECT_SESSION_PENDING',
 
   LOCAL_RATE_LIMIT_REACHED = 'LOCAL_RATE_LIMIT_REACHED',
 
@@ -229,6 +230,7 @@ export interface BeaconEventType {
     extraInfo: ExtraInfo
     walletInfo: WalletInfo
   }
+  [BeaconEvent.WALLETCONNECT_SESSION_PENDING]: { walletInfo: WalletInfo }
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: undefined
   [BeaconEvent.NO_PERMISSIONS]: undefined
   [BeaconEvent.ACTIVE_ACCOUNT_SET]: AccountInfo
@@ -318,11 +320,7 @@ const showSentToast = async (data: RequestSentInfo): Promise<void> => {
   })
 }
 
-const showAcknowledgedToast = async (data: {
-  message: AcknowledgeResponse
-  extraInfo: ExtraInfo
-  walletInfo: WalletInfo
-}): Promise<void> => {
+const showAcknowledgedToast = async (data: { walletInfo: WalletInfo }): Promise<void> => {
   openToast({
     body: 'Awaiting confirmation in\u00A0 {{wallet}}',
     state: 'acknowledge',
@@ -864,6 +862,7 @@ export const defaultEventCallbacks: {
   [BeaconEvent.BROADCAST_REQUEST_SUCCESS]: showBroadcastSuccessAlert,
   [BeaconEvent.BROADCAST_REQUEST_ERROR]: showErrorToast,
   [BeaconEvent.ACKNOWLEDGE_RECEIVED]: showAcknowledgedToast,
+  [BeaconEvent.WALLETCONNECT_SESSION_PENDING]: showAcknowledgedToast,
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: showRateLimitReached,
   [BeaconEvent.NO_PERMISSIONS]: showNoPermissionAlert,
   [BeaconEvent.ACTIVE_ACCOUNT_SET]: emptyHandler(),
@@ -928,6 +927,7 @@ export class BeaconEventHandler {
     [BeaconEvent.BROADCAST_REQUEST_ERROR]: [defaultEventCallbacks.BROADCAST_REQUEST_ERROR],
     [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: [defaultEventCallbacks.BLOCKCHAIN_REQUEST_SUCCESS],
     [BeaconEvent.ACKNOWLEDGE_RECEIVED]: [defaultEventCallbacks.ACKNOWLEDGE_RECEIVED],
+    [BeaconEvent.WALLETCONNECT_SESSION_PENDING]: [defaultEventCallbacks.WALLETCONNECT_SESSION_PENDING],
     [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: [defaultEventCallbacks.LOCAL_RATE_LIMIT_REACHED],
     [BeaconEvent.NO_PERMISSIONS]: [defaultEventCallbacks.NO_PERMISSIONS],
     [BeaconEvent.ACTIVE_ACCOUNT_SET]: [defaultEventCallbacks.ACTIVE_ACCOUNT_SET],
