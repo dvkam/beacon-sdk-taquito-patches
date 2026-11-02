@@ -2,7 +2,7 @@ import { Storage, StorageKey } from '@ecadlabs/beacon-types'
 import { SDK_VERSION } from '../constants'
 import { migrate_0_7_0 } from './migrate-0.7.0'
 
-const migrations: [string, Function][] = [
+const migrations: [string, (storage: Storage) => void | Promise<void>][] = [
   ['0.6.0', () => undefined],
   ['0.7.0', migrate_0_7_0]
 ]

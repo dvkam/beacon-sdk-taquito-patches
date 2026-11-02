@@ -3,9 +3,8 @@ import {
   AccountIdentifier,
   Origin,
   Network,
-  P2PPairingRequest,
   StorageKey,
-  AccountInfo
+  Storage
 } from '@ecadlabs/beacon-types'
 
 export interface AccountInfoOld {
@@ -30,32 +29,33 @@ export interface P2PPairingRequestOld {
 
 export const migrate_0_7_0 = async (storage: Storage): Promise<void> => {
   // Migrate AccountInfo
-  const accountInfos: AccountInfo[] = await storage.get(StorageKey.ACCOUNTS)
+  const accountInfos = await storage.get(StorageKey.ACCOUNTS)
   accountInfos.forEach((accountInfo) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const accountInfoOld: AccountInfoOld = accountInfo as any
-
-    // pubKey is now publicKey
-    if (accountInfoOld.pubkey) {
-      accountInfo.publicKey = accountInfoOld.pubkey
-      delete (accountInfoOld as any).pubkey
+    // pubkey is now publicKey
+    if ('pubkey' in accountInfo) {
+      const legacyKey = accountInfo.pubkey
+      if (typeof legacyKey === 'string' && legacyKey) {
+        accountInfo.publicKey = legacyKey
+        const legacyAccount: { pubkey?: unknown } = accountInfo
+        delete legacyAccount.pubkey
+      }
     }
     // connectedAt is now a number
-    accountInfo.connectedAt = new Date(accountInfoOld.connectedAt).getTime()
+    accountInfo.connectedAt = new Date(accountInfo.connectedAt).getTime()
   })
   await storage.set(StorageKey.ACCOUNTS, accountInfos)
 
   // Migrate P2PPeers
-  const P2PPairingRequests: P2PPairingRequest[] = await storage.get(
-    StorageKey.TRANSPORT_P2P_PEERS_DAPP
-  )
+  const P2PPairingRequests = await storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
   P2PPairingRequests.forEach((p2pPairInfo) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const P2PPairingRequestOld: P2PPairingRequestOld = p2pPairInfo as any
     // pubKey is now publicKey
-    if (P2PPairingRequestOld.pubKey) {
-      p2pPairInfo.publicKey = P2PPairingRequestOld.pubKey
-      delete (P2PPairingRequestOld as any).pubKey
+    if ('pubKey' in p2pPairInfo) {
+      const legacyKey = p2pPairInfo.pubKey
+      if (typeof legacyKey === 'string' && legacyKey) {
+        p2pPairInfo.publicKey = legacyKey
+        const legacyPeer: { pubKey?: unknown } = p2pPairInfo
+        delete legacyPeer.pubKey
+      }
     }
   })
   await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, P2PPairingRequests)
