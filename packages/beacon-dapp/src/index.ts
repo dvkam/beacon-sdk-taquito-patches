@@ -19,6 +19,7 @@ import {
   type RequestSentInfo,
   type RequestResponseInfo,
   type AcknowledgeInfo,
+  type ActiveTransportInfo,
   type InvalidAccountDeactivatedEvent,
   type InvalidAccountDeactivatedReason
 } from './events'
@@ -36,6 +37,7 @@ export type {
   RequestSentInfo,
   RequestResponseInfo,
   AcknowledgeInfo,
+  ActiveTransportInfo,
   InvalidAccountDeactivatedEvent,
   InvalidAccountDeactivatedReason
 }

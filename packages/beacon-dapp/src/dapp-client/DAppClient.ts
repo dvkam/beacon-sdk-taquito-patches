@@ -3414,15 +3414,9 @@ export class DAppClient extends Client {
       this.startTabChannel()
     }
 
-    const event = transport ? { ...(transport as any) } : undefined
-
-    // remove keyPair, to prevent dApps from accidentaly leaking the privateKey
-    if (event) {
-      event.client = {
-        ...event.client,
-        keyPair: undefined
-      }
-    }
+    const event = transport
+      ? { type: transport.type, connectionStatus: transport.connectionStatus }
+      : undefined
 
     await this.events.emit(BeaconEvent.ACTIVE_TRANSPORT_SET, event)
 
