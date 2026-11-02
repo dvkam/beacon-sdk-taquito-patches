@@ -1,9 +1,22 @@
+import type { FC } from 'react'
+import type { MergedWallet } from '../../../../../../utils/wallets'
 import Info from '../../../../../../components/info'
-import { AlertState } from '../../../../../common'
+import { AlertState, type ConfigurableAlertProps, type PairingPayload } from '../../../../../common'
 import { isIOS } from '../../../../../../utils/platform'
 import suffixMap from './utils/suffix-map'
 
-const MobilePairing: React.FC<any> = ({
+interface MobilePairingProps {
+  wallet: MergedWallet
+  handleUpdateState: (state: AlertState) => void
+  handleDeepLinking: (wallet: MergedWallet) => Promise<void>
+  wcPayload: PairingPayload['walletConnectSyncCode']
+  p2pPayload: PairingPayload['p2pSyncCode']
+  handleUpdateQRCode: (code: string) => void
+  handleDisplayQRExtra: (display: boolean) => void
+  onClose: ConfigurableAlertProps['onClose']
+}
+
+const MobilePairing: FC<MobilePairingProps> = ({
   wallet,
   handleUpdateState,
   handleDeepLinking,
