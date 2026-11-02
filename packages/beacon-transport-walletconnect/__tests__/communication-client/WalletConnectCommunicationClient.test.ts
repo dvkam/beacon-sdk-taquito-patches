@@ -10,6 +10,12 @@ import {
 import SignClient from '@walletconnect/sign-client'
 import { WalletConnectCommunicationClient } from '../../src/communication-client/WalletConnectCommunicationClient'
 
+function mockRelayerEvents() {
+  return jest
+    .requireActual<typeof import('../helpers/relayer-events')>('../helpers/relayer-events')
+    .createRelayerEvents()
+}
+
 jest.mock('@ecadlabs/beacon-core', () => {
   const actual = jest.requireActual('@ecadlabs/beacon-core')
   return {
@@ -47,7 +53,7 @@ jest.mock('@walletconnect/sign-client', () => ({
         events: { removeAllListeners: jest.fn() },
         relayer: {
           transportClose: jest.fn(),
-          events: { removeAllListeners: jest.fn() },
+          ...mockRelayerEvents(),
           provider: { events: { removeAllListeners: jest.fn() } },
           subscriber: { events: { removeAllListeners: jest.fn() } }
         },
@@ -96,7 +102,7 @@ const createResolvedSignClient = () => ({
     events: { removeAllListeners: jest.fn() },
     relayer: {
       transportClose: jest.fn(),
-      events: { removeAllListeners: jest.fn() },
+      ...mockRelayerEvents(),
       provider: {
         events: { removeAllListeners: jest.fn() },
         connection: { events: { removeAllListeners: jest.fn() } }

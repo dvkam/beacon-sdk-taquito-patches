@@ -1,3 +1,4 @@
+import { createRelayerEvents } from '../helpers/relayer-events'
 import { Logger } from '@ecadlabs/beacon-core'
 import { NetworkType } from '@ecadlabs/beacon-types'
 import { SessionTypes } from '@walletconnect/types'
@@ -28,7 +29,7 @@ const mockRemote = {
   })),
   on: jest.fn(),
   core: {
-    relayer: {},
+    relayer: createRelayerEvents(),
     pairing: { events: { on: jest.fn() }, ping: jest.fn(async () => {}) }
   }
 }
@@ -65,6 +66,7 @@ describe('WalletConnect restored-session failure containment', () => {
   beforeEach(() => {
     jest.useFakeTimers()
     jest.clearAllMocks()
+    mockRemote.core.relayer.events.removeAllListeners()
     localStorage.clear()
     Object.defineProperty(restoredSession, 'expiry', {
       configurable: true,

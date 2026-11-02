@@ -1,3 +1,4 @@
+import { createRelayerEvents } from '../helpers/relayer-events'
 import { ClientEvents, Logger } from '@ecadlabs/beacon-core'
 import { BeaconMessageType, NetworkType, TransportType } from '@ecadlabs/beacon-types'
 import { SessionTypes } from '@walletconnect/types'
@@ -26,7 +27,7 @@ const mockRemote = {
   connect: jest.fn(async () => ({ uri: 'wc:new-topic@2?symKey=key', approval: mockApproval })),
   on: jest.fn(),
   core: {
-    relayer: {},
+    relayer: createRelayerEvents(),
     pairing: {
       events: { on: jest.fn() },
       ping: jest.fn(async () => {}),
@@ -71,6 +72,7 @@ describe('WalletConnect pairing failure containment', () => {
   beforeEach(() => {
     jest.useFakeTimers()
     jest.clearAllMocks()
+    mockRemote.core.relayer.events.removeAllListeners()
     localStorage.clear()
     session.expiry = Math.floor(Date.now() / 1000) + 172800
     Object.defineProperty(session.namespaces.tezos, 'accounts', {

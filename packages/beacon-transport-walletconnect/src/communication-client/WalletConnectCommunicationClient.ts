@@ -125,6 +125,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   private static instance: WalletConnectCommunicationClient
   public signClient: Client | undefined
+  private relayerErrorListener: { signClient: Client; remove: () => void } | undefined
   private signClientPromise: Promise<Client | undefined> | undefined
   private pairingRequestPromise: Promise<ExtendedWalletConnectPairingRequest> | undefined
   public storage: WCStorage = new WCStorage()
@@ -230,6 +231,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   private clearEvents(signClient?: Client) {
     const client = signClient ?? this.signClient
+    this.removeRelayerErrorListener(client)
     client?.removeAllListeners?.('session_event')
     client?.removeAllListeners?.('session_update')
     client?.removeAllListeners?.('session_delete')
@@ -276,13 +278,18 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   async closeSignClient() {
-    if (!this.signClient) {
+    const signClient = this.signClient
+    if (!signClient) {
       logger.error('No client active')
 
       return
     }
 
-    const signClient = this.signClient
+    return this.closeSignClientFor(signClient)
+  }
+
+  private async closeSignClientFor(signClient: Client): Promise<void> {
+    this.removeRelayerErrorListener(signClient)
 
     // The timeout only lets cleanup continue; transportClose may still finish later.
     try {
@@ -656,7 +663,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     this.disconnectionEvents.size && this.disconnectionEvents.clear()
 
     if (forceNewConnection) {
-      await this.closePairings()
+      await this.closePairings(this.signClient)
     }
 
     const signClient = await this.getSignClient()
@@ -822,29 +829,75 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   public async close() {
+    return this.closeFor(this.signClient)
+  }
+
+  private async closeFor(signClient: Client | undefined): Promise<void> {
     this.storage.backup()
-    await this.closePairings()
+    await this.closePairings(signClient)
+    if (this.signClient && this.signClient !== signClient) {
+      return
+    }
     this.unsubscribeFromEncryptedMessages()
     this.messageIds = []
   }
 
-  private subscribeToSessionEvents(signClient: Client): void {
-    // JWT validation error
-    const baseHandler = (signClient.core.relayer as any).onProviderErrorHandler
-    const handler = async (event: Error) => {
-      logger.error('subscribeToSessionEvents', event)
-
-      if (event.message?.includes('JWT validation error')) {
-        const fun = this.eventHandlers.get(ClientEvents.ON_RELAYER_ERROR)
-        fun && fun(TransportType.WALLETCONNECT)
-      }
-
-      await this.close()
-      this.clearState()
-      ;(signClient.core.relayer as any).onProviderErrorHandler = baseHandler
+  private removeRelayerErrorListener(signClient?: Client): void {
+    const listener = this.relayerErrorListener
+    if (!listener || (signClient && listener.signClient !== signClient)) {
+      return
     }
 
-    ;(signClient.core.relayer as any).onProviderErrorHandler = handler
+    this.relayerErrorListener = undefined
+    listener.remove()
+  }
+
+  private async handleRelayerError(signClient: Client, error: unknown): Promise<void> {
+    try {
+      logger.error('subscribeToSessionEvents', error)
+      const { message } = getErrorDetails(error)
+      if (message?.includes('JWT validation error')) {
+        const notification = this.eventHandlers.get(ClientEvents.ON_RELAYER_ERROR)
+        if (notification) {
+          try {
+            const result: unknown = notification(TransportType.WALLETCONNECT)
+            Promise.resolve(result).catch((failure: unknown) => {
+              logger.error('relayer error notification', getErrorDiagnostic(failure))
+            })
+          } catch (failure: unknown) {
+            logger.error('relayer error notification', getErrorDiagnostic(failure))
+          }
+        }
+      }
+
+      await this.closeFor(signClient)
+    } finally {
+      if (this.signClient === signClient) {
+        this.clearState()
+        await this.closeSignClientFor(signClient)
+      }
+    }
+  }
+
+  private subscribeToSessionEvents(signClient: Client): void {
+    this.removeRelayerErrorListener()
+    const relayer = signClient.core.relayer
+    // This public event survives provider replacement; leave WalletConnect's fatal handler intact.
+    const handler = (error: unknown): void => {
+      this.removeRelayerErrorListener(signClient)
+      if (this.signClient !== signClient) {
+        return
+      }
+
+      this.handleRelayerError(signClient, error).catch((failure: unknown) => {
+        logger.error('relayer error cleanup', failure)
+      })
+    }
+    this.relayerErrorListener = {
+      signClient,
+      remove: () => relayer.off('relayer_error', handler)
+    }
+    relayer.once('relayer_error', handler)
 
     signClient.on('session_event', (event) => {
       if (
@@ -1055,13 +1108,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     )
   }
 
-  private async closePairings() {
-    if (!this.signClient) {
+  private async closePairings(signClient: Client | undefined) {
+    if (!signClient) {
       return
     }
 
-    const closedSessions = await this.closeSessions()
-    const signClient = (await this.getSignClient())!
+    const closedSessions = await this.closeSessions(signClient)
 
     const pairings = signClient.pairing.getAll() ?? []
     pairings.length &&
@@ -1081,21 +1133,17 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         )
       ))
     if (closedSessions || pairings.length > 0 || this.isMobileOS()) {
-      await this.closeSignClient()
-      if (this.isMobileOS()) {
+      await this.closeSignClientFor(signClient)
+      if (this.isMobileOS() && !this.signClient) {
         await this.storage.resetState()
-        this.storage.notify('RESET')
+        if (!this.signClient) {
+          this.storage.notify('RESET')
+        }
       }
     }
   }
 
-  private async closeSessions(): Promise<boolean> {
-    if (!this.signClient) {
-      return false
-    }
-
-    const signClient = (await this.getSignClient())!
-
+  private async closeSessions(signClient: Client): Promise<boolean> {
     const sessions = signClient.session.getAll() ?? []
     if (sessions.length) {
       await Promise.allSettled(
@@ -1115,7 +1163,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       )
     }
 
-    this.clearState()
+    if (this.signClient === signClient) {
+      this.clearState()
+    }
 
     return sessions.length > 0
   }
