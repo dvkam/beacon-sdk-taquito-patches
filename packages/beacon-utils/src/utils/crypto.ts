@@ -22,12 +22,16 @@ const POE_CHALLENGE_PREFIX = 110
 /* eslint-disable prefer-arrow/prefer-arrow-functions */
 
 /**
- * Convert a value to hex
+ * Convert UTF-8 text, numeric array-like values, or raw buffers to hex
  *
  * @param value
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function toHex(value: any): string {
+export function toHex(value: string | ArrayLike<number> | ArrayBufferLike): string {
+  // Buffer.from has separate array/string and raw-buffer overloads.
+  if (typeof value === 'string' || 'length' in value) {
+    return Buffer.from(value).toString('hex')
+  }
+
   return Buffer.from(value).toString('hex')
 }
 
