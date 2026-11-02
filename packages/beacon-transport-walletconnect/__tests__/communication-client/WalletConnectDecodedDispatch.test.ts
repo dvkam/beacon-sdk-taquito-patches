@@ -287,3 +287,29 @@ it('preserves an earlier pending request when a later request fails initializati
     context.dispose()
   }
 })
+
+it('keeps its queued id when a public handler mutates the packet before rejecting', async () => {
+  const context = await setup()
+  try {
+    const failure = new Error('Public handler failed')
+    jest.spyOn(context.client, 'sendOperations').mockImplementationOnce(async (message) => {
+      if ('id' in message) message.id = 'changed-by-handler'
+      throw failure
+    })
+    const serializer = new Serializer()
+    await expect(
+      context.client.sendMessage(
+        await serializer.serialize(request(BeaconMessageType.OperationRequest, 'failed'))
+      )
+    ).rejects.toBe(failure)
+    const { response } = await subscribe(context.client, BeaconMessageType.OperationResponse)
+    await context.client.sendMessage(
+      await serializer.serialize(request(BeaconMessageType.OperationRequest))
+    )
+    expect(await response).toEqual(
+      expect.objectContaining({ id: 'valid', transactionHash: 'opHash' })
+    )
+  } finally {
+    context.dispose()
+  }
+})

@@ -443,7 +443,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       return
     }
 
-    this.messageIds.unshift(message.id)
+    const id = message.id
+    this.messageIds.unshift(id)
 
     try {
       switch (message.type) {
@@ -460,7 +461,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
           return
       }
     } catch (error: unknown) {
-      const index = this.messageIds.indexOf(message.id)
+      const index = this.messageIds.indexOf(id)
       if (index >= 0) {
         this.messageIds.splice(index, 1)
       }
