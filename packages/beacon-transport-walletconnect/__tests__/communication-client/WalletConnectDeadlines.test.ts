@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events'
 import { Logger } from '@ecadlabs/beacon-core'
 import { BeaconMessageType, NetworkType, StorageKey } from '@ecadlabs/beacon-types'
 import type Client from '@walletconnect/sign-client'
@@ -25,7 +26,7 @@ const mockRemote = {
   connect: jest.fn(() => new Promise<Awaited<ReturnType<Client['connect']>>>(() => {})),
   on: jest.fn(),
   core: {
-    relayer: {},
+    relayer: new EventEmitter(),
     pairing: { events: { on: jest.fn() }, getPairings: () => [{ topic: 'pairing-topic' }] }
   }
 }
