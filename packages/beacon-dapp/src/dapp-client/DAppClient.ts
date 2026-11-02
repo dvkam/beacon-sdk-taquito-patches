@@ -77,7 +77,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import {
   Client,
-  Transport,
+  type ClientTransport,
   AppMetadataManager,
   Serializer,
   LocalStorage,
@@ -519,7 +519,7 @@ export class DAppClient extends Client {
       const handleDisconnect = async (): Promise<void> => {
         this.analytics.track('event', 'DAppClient', 'Disconnect received from Wallet')
 
-        const relevantTransport =
+        const relevantTransport: ClientTransport | undefined =
           connectionInfo.origin === Origin.P2P
             ? this.p2pTransport
             : connectionInfo.origin === Origin.WALLETCONNECT
@@ -1047,7 +1047,7 @@ export class DAppClient extends Client {
   }
 
   public async init(
-    transport?: Transport<any>,
+    transport?: ClientTransport,
     substratePairing?: boolean
   ): Promise<TransportType> {
     this.assertNotDestroyed()
@@ -2557,7 +2557,7 @@ export class DAppClient extends Client {
   /**
    * A "setter" for when the transport needs to be changed.
    */
-  protected async setTransport(transport?: Transport<any>): Promise<void> {
+  protected async setTransport(transport?: ClientTransport): Promise<void> {
     if (!transport) {
       this._initPromise = undefined
     }
