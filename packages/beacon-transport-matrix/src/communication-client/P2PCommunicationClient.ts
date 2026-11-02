@@ -351,13 +351,24 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async tryJoinRooms(roomId: string, retry: number = 1): Promise<void> {
+    const replay = this.initialReplay
     try {
-      await (await this.client.promise).joinRooms(roomId)
+      const client = await this.client.promise
+      if (replay !== this.initialReplay) {
+        return
+      }
+      await client.joinRooms(roomId)
     } catch (error) {
-      if (retry <= 10 && (error as any).errcode === 'M_FORBIDDEN') {
+      if (replay !== this.initialReplay) {
+        return
+      }
+      if (retry <= 10 && isMatrixError(error) && error.errcode === 'M_FORBIDDEN') {
         // If we join the room too fast after receiving the invite, the server can accidentally reject our join. This seems to be a problem only when using a federated multi-node setup. Usually waiting for a couple milliseconds solves the issue, but to handle lag, we will keep retrying for 2 seconds.
         logger.log(`Retrying to join...`, error)
         setTimeout(() => {
+          if (replay !== this.initialReplay) {
+            return
+          }
           this.tryJoinRooms(roomId, retry + 1).catch((retryError) => {
             logger.error('tryJoinRooms', retryError)
           })
