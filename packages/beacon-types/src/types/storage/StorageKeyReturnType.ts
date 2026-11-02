@@ -18,10 +18,10 @@ import { PushToken } from '../PushToken'
  * @internalapi
  */
 export interface StorageKeyReturnType {
-  [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: P2PPairingRequest[]
-  [StorageKey.TRANSPORT_P2P_PEERS_WALLET]: ExtendedP2PPairingResponse[]
-  [StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP]: PostMessagePairingRequest[]
-  [StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET]: ExtendedPostMessagePairingResponse[]
+  [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: ExtendedP2PPairingResponse[]
+  [StorageKey.TRANSPORT_P2P_PEERS_WALLET]: P2PPairingRequest[]
+  [StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP]: ExtendedPostMessagePairingResponse[]
+  [StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET]: PostMessagePairingRequest[]
   [StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP]: ExtendedWalletConnectPairingResponse[]
   [StorageKey.LAST_SELECTED_WALLET]:
     | {
