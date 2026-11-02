@@ -23,7 +23,7 @@ interface IncomingRequestInterceptorOptions {
   message: BeaconRequestMessage | BeaconMessageEnvelopeV3
   connectionInfo: ConnectionContext
   appMetadataManager: AppMetadataManager
-  interceptorCallback(message: WalletRequestOutputMessage, connectionInfo: ConnectionContext): void
+  interceptorCallback: (message: WalletRequestOutputMessage, connectionInfo: ConnectionContext) => void
 }
 
 interface IncomingRequestInterceptorOptionsV2 extends IncomingRequestInterceptorOptions {
