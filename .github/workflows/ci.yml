@@ -63,7 +63,7 @@ jobs:
       - name: Run unit tests
         run: ./scripts/npm11.sh run test
 
-      - name: Test installed CommonJS packages
+      - name: Test installed Node packages
         run: ./scripts/npm11.sh run test:node-consumers
 
   end-to-end:

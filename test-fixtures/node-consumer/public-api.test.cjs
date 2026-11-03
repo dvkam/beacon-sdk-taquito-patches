@@ -4,7 +4,7 @@ const path = require('node:path')
 const { test } = require('node:test')
 const packages = require('./packages.json')
 
-test('every published CommonJS entry loads from the isolated installation without a DOM', () => {
+test('every installed package shares its exports between import and require without a DOM', async () => {
   assert.equal(typeof window, 'undefined')
   assert.equal(typeof document, 'undefined')
   for (const { name, version } of packages) {
@@ -23,7 +23,14 @@ test('every published CommonJS entry loads from the isolated installation withou
     const installed = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'))
     assert.equal(installed.name, name)
     assert.equal(installed.version, version)
-    assert.doesNotThrow(() => require(name), name)
+    const commonJS = require(name)
+    const imported = await import(name)
+    assert.equal(imported.default, commonJS, name)
+    for (const key of Object.keys(commonJS)) {
+      if (key === 'default' || key === '__esModule') continue
+      assert.ok(Object.hasOwn(imported, key), name + ' must export ' + key)
+      assert.equal(imported[key], commonJS[key], name + ' export ' + key)
+    }
   }
   assert.equal(typeof window, 'undefined')
   assert.equal(typeof document, 'undefined')
