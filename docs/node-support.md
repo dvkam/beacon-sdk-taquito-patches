@@ -16,7 +16,7 @@ Current releases are outside the tested support matrix.
 | Check | Node versions |
 | --- | --- |
 | Locked install, package and browser-bundle build, script and unit tests | 22, 24, 26 |
-| Installed CommonJS package checks | 22, 24, 26 |
+| Installed package checks with import and require | 22, 24, 26 |
 | Chromium smoke tests | 24 |
 | Release build and pre-publication checks | 24 |
 
@@ -30,21 +30,17 @@ Run the installed-package checks after building:
 ```
 
 The consumer runner packs each public workspace, installs those tarballs in
-an isolated directory and exercises the public CommonJS entry points. It
-also checks real crypto and serialization behavior without a DOM mock.
-Repository workspace links cannot stand in for installed package contents.
+an isolated directory and checks that `import` and `require` expose the same
+public exports. It also checks crypto and serialization without a DOM mock.
 
 The SDK remains a browser wallet integration. Successful package loading in
 Node does not provide DOM, extension messaging, browser storage or a complete
 server-side wallet client. Node's web-like globals do not supply those features.
 
-## Existing native ESM limitation
+## Importing from Node
 
-The published `import` export targets contain extensionless internal imports.
-Native Node ESM loading fails with `ERR_MODULE_NOT_FOUND` on Node 22, 24 and
-26. The CommonJS checks do not cover or claim native ESM compatibility.
-Repairing ESM output and checking its declaration consumers is separate
-packaging work. Browser bundlers can resolve imports differently from Node.
+Node's `import` and `require` load the same CommonJS build. This lets both
+forms share module state. Browser bundlers use the ESM build.
 
 ## Source compatibility
 
