@@ -23,15 +23,15 @@ const POE_CHALLENGE_PREFIX = 110
 
 type HexInput = string | ArrayLike<number> | ArrayBufferLike
 
-// Buffer.from accepts each input through a separate overload.
-const hexBuffer: { from(value: HexInput): Buffer } = Buffer
-
 /**
  * Convert UTF-8 text, numeric array-like values, or raw buffers to hex
  *
  * @param value
  */
 export function toHex(value: HexInput): string {
+  // Buffer.from accepts each input through a separate overload.
+  const hexBuffer: { from(input: HexInput): Buffer } = Buffer
+
   return hexBuffer.from(value).toString('hex')
 }
 
