@@ -1,3 +1,4 @@
+import type { BlockExplorerInterface } from '../BlockExplorerInterface'
 import { AccountInfo } from '../AccountInfo'
 import { AppMetadata } from '../beacon/AppMetadata'
 import { BeaconMessageType } from '../beacon/BeaconMessageType'
@@ -9,7 +10,7 @@ export interface ResponseInput {
   request: BlockchainMessage
   account: AccountInfo
   output: BeaconMessageWrapper<BeaconBaseMessage>
-  blockExplorer: any
+  blockExplorer: BlockExplorerInterface
   connectionContext: ConnectionContext
   walletInfo: WalletInfo
 }
