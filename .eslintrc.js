@@ -155,5 +155,12 @@ module.exports = {
     'valid-typeof': 'off',
     yoda: 'error',
     'no-implicit-coercion': 'error'
-  }
+  },
+  overrides: [
+    {
+      // Logger is the console adapter; application code uses LoggerInterface.
+      files: ['packages/beacon-core/src/utils/Logger.ts'],
+      rules: { 'no-console': 'off' }
+    }
+  ]
 }

@@ -183,6 +183,7 @@ import { TezosDalPublishCommitmentOperation } from './types/tezos/operations/Dal
 export * from './types/AnalyticsInterface'
 
 export * from './types/beaconV3/PermissionRequest'
+export type { BlockExplorerInterface } from './types/BlockExplorerInterface'
 
 export * from './types/ui'
 
