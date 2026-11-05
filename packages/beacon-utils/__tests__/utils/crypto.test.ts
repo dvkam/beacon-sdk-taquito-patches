@@ -115,6 +115,36 @@ describe('toHex', () => {
   it('converts Uint8Array to hex', () => {
     expect(toHex(new Uint8Array([255, 0, 128]))).toBe('ff0080')
   })
+
+  it('uses only the visible bytes of a typed-array subarray', () => {
+    const bytes = new Uint8Array([0xaa, 0x01, 0x02, 0xbb])
+    expect(toHex(bytes.subarray(1, 3))).toBe('0102')
+  })
+
+  it('converts array-like inputs without checking for inherited properties', () => {
+    const value = new Proxy(
+      { 0: 0x61, length: 1 },
+      {
+        has() {
+          throw new Error('Array-like input does not support property checks')
+        }
+      }
+    )
+
+    expect(toHex(value)).toBe('61')
+  })
+
+  it('converts every byte of a raw ArrayBuffer', () => {
+    const bytes = new Uint8Array([0x00, 0x80, 0xff])
+    expect(toHex(bytes.buffer)).toBe('0080ff')
+  })
+
+  it.each([
+    { name: 'numeric arrays', value: [0x1234, -1, 0x100] },
+    { name: 'numeric typed arrays', value: new Uint16Array([0x1234, 0xffff, 0x100]) }
+  ])('uses native byte conversion for $name', ({ value }) => {
+    expect(toHex(value)).toBe('34ff00')
+  })
 })
 
 describe('getHexHash', () => {

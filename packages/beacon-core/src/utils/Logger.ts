@@ -35,15 +35,15 @@ export class InternalLogger implements LoggerInterface {
     start ? console.time(label) : console.timeEnd(label)
   }
 
-  public timeLog(name: string, method: string, ...args: unknown[]): void {
-    this._log('timeLog', name, method, args)
+  public timeLog(method: string, ...args: unknown[]): void {
+    this._log('timeLog', '', method, args)
   }
 
   private _log(
     type: 'debug' | 'log' | 'warn' | 'error' | 'timeLog',
     name: string,
     method: string,
-    args: any[] = []
+    args: unknown[] = []
   ): void {
     if (!getDebugEnabled()) {
       return
@@ -71,7 +71,7 @@ export class InternalLogger implements LoggerInterface {
         break
       case 'timeLog':
         console.group(groupText)
-        console.timeLog(...data)
+        console.timeLog(method, ...data)
         break
       default:
         console.group(groupText)
