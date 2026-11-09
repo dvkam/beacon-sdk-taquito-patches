@@ -14,7 +14,7 @@ import { TooManyOperationsBeaconError } from './errors/TooManyOperationsBeaconEr
 import { TransactionInvalidBeaconError } from './errors/TransactionInvalidBeaconError'
 import { UnknownBeaconError } from './errors/UnknownBeaconError'
 import { PeerUnreachableBeaconError } from './errors/PeerUnreachableBeaconError'
-import { Transport } from './transports/Transport'
+import { Transport, getPairingPeerOwnership } from './transports/Transport'
 import { ChromeStorage } from './storage/ChromeStorage'
 import { LocalStorage } from './storage/LocalStorage'
 import { getStorage } from './storage/getStorage'
@@ -44,7 +44,7 @@ import { ClientEvents } from './transports/clients/ClientEvents'
 import { WCStorage } from './storage/WCStorage'
 import { IndexedDBStorage } from './storage/IndexedDBStorage'
 import { StorageValidator } from './storage/StorageValidator'
-import { MultiTabChannel } from './utils/multi-tab-channel'
+import { MultiTabChannel, observeMultiTabChannel } from './utils/multi-tab-channel'
 import getError from './errors/get-error'
 // import { EncryptionType } from './types/EncryptionType'
 // import { EncryptionOperation } from './types/EncryptionOperation'
@@ -72,7 +72,7 @@ export {
 }
 
 // Transport
-export { Transport, MessageBasedClient, CommunicationClient }
+export { Transport, getPairingPeerOwnership, MessageBasedClient, CommunicationClient }
 
 // Storage
 export { ChromeStorage, LocalStorage, WCStorage, IndexedDBStorage, StorageValidator, getStorage }
@@ -84,10 +84,12 @@ export { PeerManager, AccountManager, AppMetadataManager, PermissionManager }
 export { SDK_VERSION, BEACON_VERSION }
 
 // Utils
-export { getSenderId, getAccountIdentifier, windowRef, MultiTabChannel }
+export { getSenderId, getAccountIdentifier, windowRef, MultiTabChannel, observeMultiTabChannel }
 
 // Others
 export { Serializer, Logger, setLogger, getLogger }
+
+export { PendingPairingRequests } from './transports/clients/PendingPairingRequests'
 
 // Debug
 export { setDebugEnabled, getDebugEnabled }

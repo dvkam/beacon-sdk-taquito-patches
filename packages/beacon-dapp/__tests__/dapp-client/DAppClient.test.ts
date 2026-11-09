@@ -1,7 +1,16 @@
+import type { Mock } from 'vitest'
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
   AccountInfo,
+  BeaconMessage,
+  BeaconMessageWrapper,
+  BeaconBaseMessage,
+  ConnectionContext,
+  ErrorResponse,
+  ExtendedP2PPairingResponse,
+  PeerInfoType,
+  WalletInfo,
   BeaconMessageType,
   BeaconErrorType,
   NetworkType,
@@ -21,6 +30,34 @@ import { DappWalletConnectTransport } from '../../src/transports/DappWalletConne
 import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
 import { getDAppClientInstance } from '../../src/utils/get-instance'
+
+type RequestResponse = Awaited<NonNullable<ReturnType<DAppClient['createRequest']>>['promise']>
+type RequestRoute = NonNullable<Parameters<DAppClient['createRequest']>[1]>
+
+function admitRequest<Failure>(
+  owner: DAppClient,
+  id: string,
+  pending: {
+    promise: Promise<unknown>
+    resolve(value: RequestResponse): void
+    reject(error?: Failure): void
+  },
+  route: RequestRoute = 'Direct',
+  armDeadline = true
+) {
+  const request = owner['createRequest'](id, route)
+  if (!request) throw new Error('Request already registered')
+  // Observe fixture teardown even when the test ends without a response.
+  void pending.promise.catch(() => undefined)
+  void request.promise.then(pending.resolve, pending.reject)
+  if (armDeadline) owner['armRequestDeadline'](request.key)
+  return request
+}
+
+function closeRequest(owner: DAppClient, id: string) {
+  const request = owner['requestTracker'].get(id)
+  if (request) owner['requestTracker'].abort(request.key, owner['createAbortedError'](id))
+}
 
 const mockLoggerWarn = vi.fn()
 const mockLoggerError = vi.fn()
@@ -128,7 +165,11 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
       }
     },
     generateGUID: vi.fn().mockResolvedValue('guid'),
-    getSenderId: vi.fn().mockResolvedValue('senderId'),
+    getSenderId: vi
+      .fn()
+      .mockImplementation(async (pk: string) =>
+        pk === 'wallet-public-key' ? 'wallet-sender-id' : 'senderId'
+      ),
     Logger: class {
       constructor(_name: string) {}
       error(...args: unknown[]) {
@@ -172,7 +213,7 @@ vi.mock('@walletconnect/sign-client', () => ({ default: {} }))
 vi.mock('@walletconnect/types', () => ({}))
 vi.mock('@walletconnect/utils', () => ({ getSdkError: vi.fn() }))
 
-describe('DAppClient — basic unit tests', () => {
+describe('DAppClient: basic unit tests', () => {
   let client: DAppClient
 
   beforeEach(() => {
@@ -237,10 +278,24 @@ describe('DAppClient — basic unit tests', () => {
     connectedAt: 1
   })
 
-  it('addOpenRequest stores given promise in openRequests map', () => {
-    const p = new ExposedPromise<{ foo: string }, any>()
-    ;(client as any).addOpenRequest('myId', p)
-    expect((client as any).openRequests.get('myId')).toBe(p)
+  it('settles an admitted request from its matching response', async () => {
+    const pending = new ExposedPromise<RequestResponse, ErrorResponse>()
+    const request = admitRequest(client, 'myId', pending)
+    expect(client['requestTracker'].isCurrent(request.key)).toBe(true)
+    const error: ErrorResponse = {
+      id: 'myId',
+      version: '2',
+      senderId: 'wallet-sender-id',
+      type: BeaconMessageType.Error,
+      errorType: BeaconErrorType.NOT_GRANTED_ERROR
+    }
+    const receive = client['handleResponse'] as (
+      message: BeaconMessage,
+      context: ConnectionContext
+    ) => Promise<void>
+    await receive(error, { origin: Origin.P2P, id: 'wallet-public-key' })
+    await expect(pending.promise).rejects.toEqual(error)
+    expect(client['requestTracker'].isCurrent(request.key)).toBe(false)
   })
 
   it('addBlockchain / removeBlockchain manage internal map', async () => {
@@ -263,6 +318,13 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('handles raw v3 disconnect messages without a nested message wrapper', async () => {
+    const publicKey = '11'.repeat(32)
+    const senderId = await (await import('@ecadlabs/beacon-core')).getSenderId(publicKey)
+    ;(client as any)._activePeer = ExposedPromise.resolve({
+      type: 'p2p-pairing-response',
+      publicKey,
+      senderId
+    })
     const channelClosedHandler = vi.fn()
     const removeAccountsForPeerIds = vi
       .spyOn(client as any, 'removeAccountsForPeerIds')
@@ -280,29 +342,64 @@ describe('DAppClient — basic unit tests', () => {
         {
           id: 'disconnect-id',
           version: '3',
-          senderId: 'wallet-sender-id',
+          senderId,
           type: BeaconMessageType.Disconnect
         },
         {
           origin: Origin.P2P,
-          id: 'wallet-public-key'
+          id: publicKey
         }
       )
     ).resolves.toBeUndefined()
 
-    expect(removeAccountsForPeerIds).toHaveBeenCalledWith(['wallet-sender-id'])
+    expect(removeAccountsForPeerIds).toHaveBeenCalledWith([senderId])
     expect(channelClosedHandler).toHaveBeenCalled()
 
     removeAccountsForPeerIds.mockRestore()
+  })
+
+  it('ignores disconnects that do not match the active wallet identity', async () => {
+    const publicKey = '11'.repeat(32)
+    const senderId = await (await import('@ecadlabs/beacon-core')).getSenderId(publicKey)
+    ;(client as any)._activePeer = ExposedPromise.resolve({
+      type: 'p2p-pairing-response',
+      publicKey,
+      senderId
+    })
+    const removeAccounts = vi
+      .spyOn(client as any, 'removeAccountsForPeerIds')
+      .mockResolvedValue(undefined)
+    const closed = vi.fn()
+    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
+    for (const [claimedSender, connectionId] of [
+      ['mismatched-sender', publicKey],
+      [senderId, '22'.repeat(32)]
+    ]) {
+      await (client as any).handleResponse(
+        {
+          id: 'mismatched-disconnect',
+          version: '3',
+          senderId: claimedSender,
+          type: BeaconMessageType.Disconnect
+        },
+        { origin: Origin.P2P, id: connectionId }
+      )
+    }
+    expect(removeAccounts).not.toHaveBeenCalled()
+    expect(closed).not.toHaveBeenCalled()
+    removeAccounts.mockRestore()
   })
 
   it('emits one acknowledge event for duplicate acknowledge messages on an open request', async () => {
     const acknowledgeHandler = vi.fn()
     const getWalletInfo = vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
 
-    ;(client as any).openRequests.set(
+    admitRequest(
+      client,
       'request-id',
-      new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+      new ExposedPromise<RequestResponse, ErrorResponse>(),
+      'Direct',
+      false
     )
 
     client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
@@ -332,9 +429,12 @@ describe('DAppClient — basic unit tests', () => {
     const acknowledgeHandler = vi.fn()
     const getWalletInfo = vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
 
-    ;(client as any).openRequests.set(
+    admitRequest(
+      client,
       'wrapper-request-id',
-      new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+      new ExposedPromise<RequestResponse, ErrorResponse>(),
+      'Direct',
+      false
     )
 
     client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
@@ -770,11 +870,11 @@ describe('DAppClient — basic unit tests', () => {
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
     await (client as any).storage.set(StorageKey.ACCOUNTS, [])
     await (client as any).setTransport(transport)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    admitRequest(client, 'pending-after-disconnect', pendingRequest, 'Direct', false)
 
     await client.disconnect()
 
-    expect((client as any).openRequests.size).toBe(0)
+    expect(client['requestTracker'].size).toBe(0)
     await expect(pendingRejection).resolves.toMatchObject({
       id: 'pending-after-disconnect',
       errorType: BeaconErrorType.ABORTED_ERROR
@@ -1337,13 +1437,13 @@ describe('DAppClient — basic unit tests', () => {
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
     await (client as any).storage.set(StorageKey.ACCOUNTS, [])
     await (client as any).setTransport(transport)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    admitRequest(client, 'pending-after-disconnect', pendingRequest, 'Direct', false)
 
     await expect(client.disconnect()).resolves.toBeUndefined()
 
     expect(transport.send).toHaveBeenCalledWith(expect.any(String), peer)
     expect(transport.disconnect).toHaveBeenCalledTimes(1)
-    expect((client as any).openRequests.size).toBe(0)
+    expect(client['requestTracker'].size).toBe(0)
     await expect(pendingRejection).resolves.toMatchObject({
       id: 'pending-after-disconnect',
       errorType: BeaconErrorType.ABORTED_ERROR
@@ -1357,12 +1457,12 @@ describe('DAppClient — basic unit tests', () => {
     const pendingRejection = pendingRequest.promise.catch((error) => error)
 
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    admitRequest(client, 'pending-after-disconnect', pendingRequest, 'Direct', false)
     await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
 
     await expect(client.disconnect()).resolves.toBeUndefined()
 
-    expect((client as any).openRequests.size).toBe(0)
+    expect(client['requestTracker'].size).toBe(0)
     await expect(pendingRejection).resolves.toMatchObject({
       id: 'pending-after-disconnect',
       errorType: BeaconErrorType.ABORTED_ERROR
@@ -1434,8 +1534,8 @@ describe('DAppClient — basic unit tests', () => {
   it('cleans up v3 wrapped responses by the outer request id', async () => {
     await seedPeerStorage()
 
-    const request = new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
-    ;(client as any).openRequests.set('wrapper-request-id', request)
+    const request = new ExposedPromise<RequestResponse, ErrorResponse>()
+    admitRequest(client, 'wrapper-request-id', request, 'Direct', false)
 
     await (client as any).handleResponse(
       {
@@ -1456,7 +1556,7 @@ describe('DAppClient — basic unit tests', () => {
       }
     )
 
-    expect((client as any).openRequests.has('wrapper-request-id')).toBe(false)
+    expect(client['requestTracker'].get('wrapper-request-id') !== undefined).toBe(false)
   })
 
   it('rejects open requests when the wallet peer never answers', async () => {
@@ -1477,10 +1577,9 @@ describe('DAppClient — basic unit tests', () => {
     void operationRequest.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).addOpenRequest('ghost-request-id', operationRequest)
+      admitRequest(timeoutClient, 'ghost-request-id', operationRequest)
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
       expect(rejection).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1489,7 +1588,7 @@ describe('DAppClient — basic unit tests', () => {
           id: 'ghost-request-id'
         })
       )
-      expect((timeoutClient as any).openRequests.has('ghost-request-id')).toBe(false)
+      expect(timeoutClient['requestTracker'].get('ghost-request-id') !== undefined).toBe(false)
       expect(channelClosedHandler).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -1511,13 +1610,16 @@ describe('DAppClient — basic unit tests', () => {
     const postMessage = vi.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
 
     try {
-      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
-      ;(timeoutClient as any).addOpenRequest(
+      admitRequest(
+        timeoutClient,
         'delegated-request-id',
-        new ExposedPromise<unknown, unknown>()
+        new ExposedPromise<unknown, unknown>(),
+        'LeaderProxy'
       )
 
-      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(true)
+      expect(
+        timeoutClient['requestTracker'].get('delegated-request-id')?.route === 'LeaderProxy'
+      ).toBe(true)
 
       await (timeoutClient as any).handleResponse(
         {
@@ -1539,11 +1641,12 @@ describe('DAppClient — basic unit tests', () => {
           type: 'RESPONSE'
         })
       )
-      expect((timeoutClient as any).openRequests.has('delegated-request-id')).toBe(false)
-      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(false)
+      expect(timeoutClient['requestTracker'].get('delegated-request-id') !== undefined).toBe(false)
+      expect(
+        timeoutClient['requestTracker'].get('delegated-request-id')?.route === 'LeaderProxy'
+      ).toBe(false)
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
       expect(channelClosedHandler).not.toHaveBeenCalled()
     } finally {
@@ -1570,8 +1673,12 @@ describe('DAppClient — basic unit tests', () => {
     void operationRequest.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-acknowledged-request-id')
-      ;(timeoutClient as any).addOpenRequest('delegated-acknowledged-request-id', operationRequest)
+      admitRequest(
+        timeoutClient,
+        'delegated-acknowledged-request-id',
+        operationRequest,
+        'LeaderProxy'
+      )
 
       await (timeoutClient as any).handleResponse(
         {
@@ -1586,8 +1693,7 @@ describe('DAppClient — basic unit tests', () => {
         }
       )
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
       expect(postMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1597,14 +1703,15 @@ describe('DAppClient — basic unit tests', () => {
       )
       expect(rejection).not.toHaveBeenCalled()
       expect(channelClosedHandler).not.toHaveBeenCalled()
-      expect((timeoutClient as any).openRequests.has('delegated-acknowledged-request-id')).toBe(
-        true
-      )
       expect(
-        (timeoutClient as any).openRequestsOtherTabs.has('delegated-acknowledged-request-id')
+        timeoutClient['requestTracker'].get('delegated-acknowledged-request-id') !== undefined
+      ).toBe(true)
+      expect(
+        timeoutClient['requestTracker'].get('delegated-acknowledged-request-id')?.route ===
+          'LeaderProxy'
       ).toBe(true)
     } finally {
-      ;(timeoutClient as any).clearOpenRequest('delegated-acknowledged-request-id')
+      closeRequest(timeoutClient, 'delegated-acknowledged-request-id')
       vi.useRealTimers()
     }
   })
@@ -1661,9 +1768,9 @@ describe('DAppClient — basic unit tests', () => {
         })
       })
     )
-    expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-send-failure-id')).toBe(
-      false
-    )
+    expect(
+      timeoutClient['requestTracker'].get('delegated-send-failure-id')?.route === 'LeaderProxy'
+    ).toBe(false)
   })
 
   it('clears open requests when transport send rejects asynchronously', async () => {
@@ -1712,7 +1819,7 @@ describe('DAppClient — basic unit tests', () => {
       })
     ).rejects.toBe(sendError)
 
-    expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
+    expect(timeoutClient['requestTracker'].get('guid') !== undefined).toBe(false)
   })
 
   it('restores an upstream v4.8.0-style P2P persisted session without deactivating it', async () => {
@@ -2281,7 +2388,7 @@ describe('DAppClient — basic unit tests', () => {
       })
     ).rejects.toBe(sendError)
 
-    expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
+    expect(timeoutClient['requestTracker'].get('guid') !== undefined).toBe(false)
   })
 
   it('clears delegated request markers when the delegated request times out', async () => {
@@ -2299,13 +2406,13 @@ describe('DAppClient — basic unit tests', () => {
     void operationRequest.promise.catch(() => undefined)
 
     try {
-      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
-      ;(timeoutClient as any).addOpenRequest('delegated-request-id', operationRequest)
+      admitRequest(timeoutClient, 'delegated-request-id', operationRequest, 'LeaderProxy')
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
-      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(false)
+      expect(
+        timeoutClient['requestTracker'].get('delegated-request-id')?.route === 'LeaderProxy'
+      ).toBe(false)
     } finally {
       vi.useRealTimers()
     }
@@ -2332,11 +2439,11 @@ describe('DAppClient — basic unit tests', () => {
       void operationRequest.promise.catch(rejection)
 
       try {
-        ;(timeoutClient as any).addOpenRequest('acknowledged-request-id', operationRequest)
+        admitRequest(timeoutClient, 'acknowledged-request-id', operationRequest)
 
         if (ackKind === 'closed') {
-          timeoutClient['addOpenRequest']('closed-request-id', new ExposedPromise())
-          timeoutClient['clearOpenRequest']('closed-request-id')
+          admitRequest(timeoutClient, 'closed-request-id', new ExposedPromise())
+          closeRequest(timeoutClient, 'closed-request-id')
         }
 
         await timeoutClient['handleResponse'](
@@ -2352,13 +2459,14 @@ describe('DAppClient — basic unit tests', () => {
           }
         )
 
-        vi.advanceTimersByTime(10)
-        await Promise.resolve()
+        await vi.advanceTimersByTimeAsync(10)
 
         if (ackKind === 'valid') {
           expect(rejection).not.toHaveBeenCalled()
           expect(channelClosedHandler).not.toHaveBeenCalled()
-          expect(timeoutClient['openRequests'].has('acknowledged-request-id')).toBe(true)
+          expect(timeoutClient['requestTracker'].get('acknowledged-request-id') !== undefined).toBe(
+            true
+          )
         } else {
           expect(rejection).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -2367,16 +2475,18 @@ describe('DAppClient — basic unit tests', () => {
             })
           )
           expect(channelClosedHandler).toHaveBeenCalledTimes(1)
-          expect(timeoutClient['openRequests'].has('acknowledged-request-id')).toBe(false)
+          expect(timeoutClient['requestTracker'].get('acknowledged-request-id') !== undefined).toBe(
+            false
+          )
         }
       } finally {
-        ;(timeoutClient as any).clearOpenRequest('acknowledged-request-id')
+        closeRequest(timeoutClient, 'acknowledged-request-id')
         vi.useRealTimers()
       }
     }
   )
 
-  it('does not time out the walletconnect session_update marker', async () => {
+  it('applies the deadline to a real request whose ID is session_update', async () => {
     vi.useFakeTimers()
     ;(window as any).beaconCreatedClientInstance = false
     const timeoutClient = new DAppClient({
@@ -2389,24 +2499,1268 @@ describe('DAppClient — basic unit tests', () => {
     const channelClosedHandler = vi.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
-    const sessionUpdate = new ExposedPromise<unknown, unknown>()
+    const sessionUpdate = new ExposedPromise<RequestResponse, ErrorResponse>()
     const rejection = vi.fn()
     void sessionUpdate.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).addOpenRequest('session_update', sessionUpdate)
+      admitRequest(timeoutClient, 'session_update', sessionUpdate)
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
-      expect(rejection).not.toHaveBeenCalled()
-      expect(channelClosedHandler).not.toHaveBeenCalled()
-      expect((timeoutClient as any).openRequests.has('session_update')).toBe(true)
+      expect(rejection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'session_update',
+          errorType: BeaconErrorType.PEER_UNREACHABLE
+        })
+      )
+      expect(channelClosedHandler).toHaveBeenCalledTimes(1)
+      expect(timeoutClient['requestTracker'].get('session_update') !== undefined).toBe(false)
     } finally {
-      ;(timeoutClient as any).clearOpenRequest('session_update')
+      closeRequest(timeoutClient, 'session_update')
       vi.useRealTimers()
     }
   })
+
+  describe('notification routing', () => {
+    let getWalletInfo: DAppClient['getWalletInfo']
+    let receive: (
+      message: BeaconMessage | BeaconMessageWrapper<{ type: unknown }>,
+      connectionInfo: ConnectionContext
+    ) => Promise<void>
+    const connectionInfo: ConnectionContext = { origin: Origin.P2P, id: 'wallet-public-key' }
+    const activePeer: ExtendedP2PPairingResponse = {
+      type: 'p2p-pairing-response',
+      id: 'active-peer',
+      publicKey: 'wallet-public-key',
+      senderId: 'wallet-sender-id',
+      name: 'Wallet',
+      version: '3',
+      relayServer: 'matrix.example.com'
+    }
+
+    beforeEach(async () => {
+      vi.useFakeTimers()
+      getWalletInfo = client['getWalletInfo']
+      // Client declares request input; DAppClient installs a V2/V3 response handler.
+      receive = client['handleResponse'] as typeof receive
+      await client['storageValidated']
+      await seedPeerStorage()
+      client['_activePeer'] = ExposedPromise.resolve<PeerInfoType | undefined>(activePeer)
+      client['_activeAccount'] = ExposedPromise.resolve<AccountInfo | undefined>(
+        createStoredAccount()
+      )
+      await client['storage'].set(StorageKey.ACCOUNTS, [createStoredAccount()])
+    })
+
+    afterEach(() => {
+      client['abortOpenRequests']()
+      client['getWalletInfo'] = getWalletInfo
+      vi.restoreAllMocks()
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    })
+
+    function register(id = 'live-request', route: RequestRoute = 'Direct') {
+      const pending = new ExposedPromise<
+        {
+          message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
+          connectionInfo: ConnectionContext
+        },
+        ErrorResponse
+      >()
+      const resolved = vi.fn()
+      const rejected = vi.fn()
+      void pending.promise.then(resolved, rejected)
+      admitRequest(client, id, pending, route)
+      return { pending, resolved, rejected }
+    }
+
+    function envelope(message: BeaconMessage, version: string) {
+      return version === '3'
+        ? { id: message.id, senderId: message.senderId, version, message }
+        : message
+    }
+
+    it('aborts a real request whose ID is session_update', async () => {
+      const request = register('session_update')
+
+      client['abortOpenRequests']()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(request.rejected).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'session_update', errorType: BeaconErrorType.ABORTED_ERROR })
+      )
+      expect(request.resolved).not.toHaveBeenCalled()
+      expect(client['requestTracker'].size).toBe(0)
+    })
+
+    it.each([BeaconMessageType.ChangeAccountRequest, BeaconMessageType.Disconnect] as const)(
+      'keeps a delegated request pending after a mismatched %s with the same ID',
+      async (type) => {
+        const request = register('live-request', 'LeaderProxy')
+        const forwarded = vi.spyOn(client['multiTabChannel'], 'postMessage')
+
+        await receive(
+          envelope(
+            {
+              id: 'live-request',
+              version: '2',
+              senderId: activePeer.senderId,
+              type,
+              address: createStoredAccount().address,
+              walletType: 'implicit',
+              network: { type: NetworkType.MAINNET },
+              scopes: [PermissionScope.SIGN]
+            },
+            '3'
+          ),
+          { ...connectionInfo, id: 'other-public-key' }
+        )
+
+        expect(forwarded).not.toHaveBeenCalled()
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+
+    it.each([BeaconMessageType.ChangeAccountRequest, BeaconMessageType.Disconnect] as const)(
+      'handles a retained peer %s without settling the active peer request with the same ID',
+      async (type) => {
+        const retainedPeer: ExtendedP2PPairingResponse = {
+          ...activePeer,
+          id: 'retained-peer',
+          publicKey: 'retained-public-key',
+          senderId: 'senderId'
+        }
+        const retainedAccount: AccountInfo = {
+          ...createStoredAccount(),
+          accountIdentifier: 'retained-account',
+          senderId: retainedPeer.senderId,
+          origin: { type: Origin.P2P, id: retainedPeer.publicKey }
+        }
+        await client['storage'].set(StorageKey.ACCOUNTS, [createStoredAccount(), retainedAccount])
+        const transport = new DappP2PTransport(
+          'Notification test',
+          { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
+          client['storage'],
+          {}
+        )
+        vi.spyOn(transport, 'getPeers').mockResolvedValue([activePeer, retainedPeer])
+        const removed = vi.spyOn(transport, 'removePeer').mockResolvedValue(undefined)
+        client['p2pTransport'] = transport
+        const request = register()
+        const closed = vi.fn()
+        await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
+
+        await receive(
+          {
+            id: 'live-request',
+            version: '2',
+            senderId: retainedPeer.senderId,
+            type,
+            address: 'tz1Ke2h7sDdakHJQh8WX4Z372du1KChsksyU',
+            walletType: 'implicit',
+            network: { type: NetworkType.MAINNET },
+            scopes: [PermissionScope.SIGN]
+          },
+          { origin: Origin.P2P, id: retainedPeer.publicKey }
+        )
+
+        if (type === BeaconMessageType.Disconnect) {
+          expect(removed).toHaveBeenCalledWith(retainedPeer)
+          expect(closed).toHaveBeenCalledTimes(1)
+          await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual([
+            createStoredAccount()
+          ])
+        } else {
+          expect(removed).not.toHaveBeenCalled()
+          expect(closed).not.toHaveBeenCalled()
+          await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual([
+            createStoredAccount(),
+            retainedAccount
+          ])
+        }
+        await expect(client.getActiveAccount()).resolves.toEqual(createStoredAccount())
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+
+    it.each([
+      ['2', BeaconMessageType.ChangeAccountRequest],
+      ['3', BeaconMessageType.ChangeAccountRequest],
+      ['2', BeaconMessageType.Disconnect],
+      ['3', BeaconMessageType.Disconnect]
+    ] as const)(
+      'keeps a live request pending after a V%s %s from a mismatched connection',
+      async (version, type) => {
+        const request = register()
+        const selected = vi.spyOn(client, 'setActiveAccount')
+        const closed = vi.fn()
+        await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
+        const message: BeaconMessage = {
+          id: 'live-request',
+          version: '2',
+          senderId: activePeer.senderId,
+          type,
+          address: createStoredAccount().address,
+          walletType: 'implicit' as const,
+          network: { type: NetworkType.MAINNET },
+          scopes: [PermissionScope.SIGN]
+        }
+
+        await receive(envelope(message, version), {
+          ...connectionInfo,
+          id: 'other-public-key'
+        })
+
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).not.toHaveBeenCalled()
+        expect(selected).not.toHaveBeenCalled()
+        expect(closed).not.toHaveBeenCalled()
+        await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual([
+          createStoredAccount()
+        ])
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+
+    it.each(['2', '3'])(
+      'applies a V%s account change without settling a request with the same ID',
+      async (version) => {
+        const request = register()
+        const selected = vi.spyOn(client, 'setActiveAccount').mockResolvedValue(undefined)
+        const message: BeaconMessage = {
+          id: 'live-request',
+          version: '2',
+          senderId: activePeer.senderId,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1Ke2h7sDdakHJQh8WX4Z372du1KChsksyU',
+          walletType: 'implicit',
+          network: { type: NetworkType.MAINNET },
+          scopes: [PermissionScope.SIGN]
+        }
+
+        await receive(envelope(message, version), connectionInfo)
+
+        expect(selected).toHaveBeenCalledWith(expect.objectContaining({ address: message.address }))
+        await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual(
+          expect.arrayContaining([expect.objectContaining({ address: message.address })])
+        )
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+
+    it.each([BeaconMessageType.Acknowledge, BeaconMessageType.BlockchainResponse] as const)(
+      'keeps the deadline armed while a V3 %s awaits wallet information',
+      async (type) => {
+        const request = register()
+        await client['storage'].set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [activePeer])
+        const entered = new ExposedPromise<void>()
+        const wallet = new ExposedPromise<WalletInfo>()
+        client['getWalletInfo'] = () => {
+          entered.resolve()
+          return wallet.promise
+        }
+        const acknowledged = vi.fn()
+        await client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledged)
+        const message =
+          type === BeaconMessageType.Acknowledge
+            ? { type }
+            : {
+                type,
+                blockchainIdentifier: 'tezos',
+                blockchainData: { transactionHash: 'op-hash' }
+              }
+        const delivery = receive(
+          {
+            id: 'live-request',
+            version: '3',
+            senderId: activePeer.senderId,
+            message
+          },
+          connectionInfo
+        )
+        await entered.promise
+
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+        wallet.resolve({ name: 'Wallet' })
+        await delivery
+
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).toHaveBeenCalledTimes(1)
+        expect(acknowledged).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each([BeaconMessageType.Acknowledge, BeaconMessageType.BlockchainResponse] as const)(
+      'does not attach an earlier V3 %s to a request registered during wallet lookup',
+      async (type) => {
+        await client['storage'].set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [activePeer])
+        const entered = new ExposedPromise<void>()
+        const wallet = new ExposedPromise<WalletInfo>()
+        client['getWalletInfo'] = () => {
+          entered.resolve()
+          return wallet.promise
+        }
+        const acknowledged = vi.fn()
+        await client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledged)
+        const message =
+          type === BeaconMessageType.Acknowledge
+            ? { type }
+            : {
+                type,
+                blockchainIdentifier: 'tezos',
+                blockchainData: { transactionHash: 'op-hash' }
+              }
+        const delivery = receive(
+          {
+            id: 'live-request',
+            version: '3',
+            senderId: activePeer.senderId,
+            message
+          },
+          connectionInfo
+        )
+        await entered.promise
+        const request = register()
+        wallet.resolve({ name: 'Wallet' })
+        await delivery
+
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(acknowledged).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+  })
+
+  it('processes buffered Disconnect delivered during transport.connect() when restoring active account on startup', async () => {
+    const publicKey = '11'.repeat(32)
+    const senderId = await (await import('@ecadlabs/beacon-core')).getSenderId(publicKey)
+    const storedAccount = {
+      ...createStoredAccount(),
+      senderId,
+      origin: {
+        type: Origin.P2P,
+        id: publicKey
+      }
+    }
+    const p2pPeer = {
+      ...createV480P2PPeer(),
+      id: publicKey,
+      publicKey,
+      senderId
+    }
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
+      [StorageKey.ACCOUNTS]: [storedAccount],
+      [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]
+    })
+
+    let storedStateClient!: DAppClient
+    const p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.NOT_CONNECTED,
+      getPeers: vi.fn().mockResolvedValue([p2pPeer]),
+      removePeer: vi.fn().mockResolvedValue(undefined),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockImplementation(async () => {
+        p2pTransport.connectionStatus = TransportStatus.CONNECTED
+        await (storedStateClient as any).handleResponse(
+          {
+            id: 'buffered-disconnect-id',
+            version: '3',
+            senderId,
+            type: BeaconMessageType.Disconnect
+          },
+          {
+            origin: Origin.P2P,
+            id: publicKey
+          }
+        )
+      })
+    }
+
+    const initInternalTransports = vi
+      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .mockImplementation(async function (this: any) {
+        this.p2pTransport = p2pTransport
+      })
+
+    try {
+      ;(window as any).beaconCreatedClientInstance = false
+      storedStateClient = new DAppClient({
+        name: 'BufferedDisconnectOnReloadApp',
+        storage,
+        preferredNetwork: NetworkType.MAINNET,
+        disableDefaultEvents: true
+      })
+
+      await (storedStateClient as any).storageValidated
+
+      expect(p2pTransport.connect).toHaveBeenCalledTimes(1)
+      expect(p2pTransport.removePeer).toHaveBeenCalledWith(p2pPeer)
+      await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+      await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+      await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([])
+    } finally {
+      initInternalTransports.mockRestore()
+    }
+  })
+
+  it('removes an inactive saved peer and its accounts on a matching Disconnect without deactivating the active peer', async () => {
+    const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
+    const pubKeyA = 'aa'.repeat(32)
+    const pubKeyB = 'bb'.repeat(32)
+    const senderIdA = 'sender-wallet-a'
+    const senderIdB = 'sender-wallet-b'
+    ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) => {
+      if (pk === pubKeyA) return senderIdA
+      if (pk === pubKeyB) return senderIdB
+      return 'senderId'
+    })
+
+    const peerA = {
+      ...createV480P2PPeer(),
+      id: pubKeyA,
+      publicKey: pubKeyA,
+      senderId: senderIdA,
+      name: 'Wallet A'
+    }
+    const peerB = {
+      ...createV480P2PPeer(),
+      id: pubKeyB,
+      publicKey: pubKeyB,
+      senderId: senderIdB,
+      name: 'Wallet B'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-a-id',
+      senderId: senderIdA,
+      address: 'tz1AccountAAddress111111111111111111',
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyA
+      }
+    }
+    const accountB = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-b-id',
+      senderId: senderIdB,
+      address: 'tz1AccountBAddress222222222222222222',
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyB
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA, accountB])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountB.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountB)
+    ;(client as any)._activePeer = ExposedPromise.resolve(peerB)
+    ;(client as any).p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: vi.fn().mockResolvedValue([peerA, peerB]),
+      removePeer: vi.fn().mockResolvedValue(undefined)
+    }
+
+    try {
+      await (client as any).handleResponse(
+        {
+          id: 'inactive-wallet-a-disconnect',
+          version: '3',
+          senderId: senderIdA,
+          type: BeaconMessageType.Disconnect
+        },
+        {
+          origin: Origin.P2P,
+          id: pubKeyA
+        }
+      )
+
+      expect((client as any).p2pTransport.removePeer).toHaveBeenCalledWith(peerA)
+      await expect(client.getActiveAccount()).resolves.toEqual(accountB)
+      await expect((client as any).storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([accountB])
+    } finally {
+      ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) =>
+        pk === 'wallet-public-key' ? 'wallet-sender-id' : 'senderId'
+      )
+    }
+  })
+
+  it('ignores ChangeAccountRequest with Origin.WALLETCONNECT when another peer or session is active', async () => {
+    const activeAccount = createStoredAccount()
+    const activePeer = createV480P2PPeer()
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [activeAccount])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, activeAccount.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(activeAccount)
+    ;(client as any)._activePeer = ExposedPromise.resolve(activePeer)
+    ;(client as any).postMessageTransport = {
+      type: TransportType.POST_MESSAGE,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: vi.fn().mockResolvedValue([])
+    }
+    ;(client as any).p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: vi.fn().mockResolvedValue([activePeer])
+    }
+    ;(client as any).walletConnectTransport = {
+      type: TransportType.WALLETCONNECT,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: vi.fn().mockResolvedValue([]),
+      forceUpdate: vi.fn()
+    }
+
+    const setActiveAccountSpy = vi.spyOn(client, 'setActiveAccount')
+
+    await (client as any).handleResponse(
+      {
+        id: 'wc-inactive-change-account',
+        version: '3',
+        senderId: 'inactive-wc-topic',
+        type: BeaconMessageType.ChangeAccountRequest,
+        address: 'tz1Ke2h7sDdakHJQh8WX4Z372du1KChsksyU',
+        publicKey: 'cc'.repeat(32),
+        walletType: 'implicit',
+        network: {
+          type: NetworkType.MAINNET
+        },
+        scopes: [PermissionScope.SIGN]
+      },
+      {
+        origin: Origin.WALLETCONNECT,
+        id: 'cc'.repeat(32)
+      }
+    )
+
+    expect(setActiveAccountSpy).not.toHaveBeenCalled()
+    await expect(client.getActiveAccount()).resolves.toEqual(activeAccount)
+    setActiveAccountSpy.mockRestore()
+  })
+
+  it('rejects an implicit account in onNewAccount when address does not match publicKey', async () => {
+    const publicKey = '11'.repeat(32)
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    const setActiveAccountSpy = vi
+      .spyOn(client, 'setActiveAccount')
+      .mockResolvedValue(undefined)
+
+    try {
+      await expect(
+        (client as any).onNewAccount(
+          {
+            address: 'tz1Ke2h7sDdakHJQh8WX4Z372du1KChsksyU',
+            publicKey,
+            walletType: 'implicit',
+            network: {
+              type: NetworkType.MAINNET
+            },
+            scopes: [PermissionScope.SIGN]
+          },
+          {
+            origin: Origin.P2P,
+            id: publicKey
+          },
+          'senderId'
+        )
+      ).rejects.toThrow(/address/i)
+      expect(setActiveAccountSpy).not.toHaveBeenCalled()
+    } finally {
+      setActiveAccountSpy.mockRestore()
+    }
+  })
+
+  it('processes buffered ChangeAccountRequest delivered during transport.connect() when restoring active account on startup', async () => {
+    const publicKey = '11'.repeat(32)
+    const newPublicKey = '22'.repeat(32)
+    const senderId = await (await import('@ecadlabs/beacon-core')).getSenderId(publicKey)
+    const storedAccount = {
+      ...createStoredAccount(),
+      senderId,
+      origin: {
+        type: Origin.P2P,
+        id: publicKey
+      }
+    }
+    const p2pPeer = {
+      ...createV480P2PPeer(),
+      id: publicKey,
+      publicKey,
+      senderId
+    }
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
+      [StorageKey.ACCOUNTS]: [storedAccount],
+      [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]
+    })
+
+    let storedStateClient!: DAppClient
+    const p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.NOT_CONNECTED,
+      getPeers: vi.fn().mockResolvedValue([p2pPeer]),
+      removePeer: vi.fn().mockResolvedValue(undefined),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockImplementation(async () => {
+        p2pTransport.connectionStatus = TransportStatus.CONNECTED
+        await (storedStateClient as any).handleResponse(
+          {
+            id: 'buffered-change-account-id',
+            version: '3',
+            senderId,
+            type: BeaconMessageType.ChangeAccountRequest,
+            publicKey: newPublicKey,
+            walletType: 'implicit',
+            network: {
+              type: NetworkType.MAINNET
+            },
+            scopes: [PermissionScope.SIGN]
+          },
+          {
+            origin: Origin.P2P,
+            id: publicKey
+          }
+        )
+      })
+    }
+
+    const initInternalTransports = vi
+      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .mockImplementation(async function (this: any) {
+        this.p2pTransport = p2pTransport
+      })
+
+    try {
+      ;(window as any).beaconCreatedClientInstance = false
+      storedStateClient = new DAppClient({
+        name: 'BufferedChangeAccountOnReloadApp',
+        storage,
+        preferredNetwork: NetworkType.MAINNET,
+        disableDefaultEvents: true
+      })
+
+      await (storedStateClient as any).storageValidated
+
+      expect(p2pTransport.connect).toHaveBeenCalledTimes(1)
+      const activeAccount = await storedStateClient.getActiveAccount()
+      expect(activeAccount?.publicKey).not.toBe(storedAccount.publicKey)
+      expect(activeAccount?.accountIdentifier).not.toBe(storedAccount.accountIdentifier)
+    } finally {
+      initInternalTransports.mockRestore()
+    }
+  })
+
+  it('removes an inactive saved WalletConnect account on Disconnect when another transport is active and WC session was already cleared', async () => {
+    const wcTopicA = 'wc-session-topic-a'
+    const wcPubKeyA = 'aa'.repeat(32)
+    const p2pPubKeyB = 'bb'.repeat(32)
+    const senderIdB = 'sender-wallet-b'
+
+    const wcPeerA = {
+      id: wcTopicA,
+      type: 'walletconnect-pairing-response' as const,
+      name: 'WC Wallet A',
+      publicKey: wcPubKeyA,
+      version: '2',
+      senderId: wcTopicA
+    }
+    const p2pPeerB = {
+      ...createV480P2PPeer(),
+      id: p2pPubKeyB,
+      publicKey: p2pPubKeyB,
+      senderId: senderIdB,
+      name: 'P2P Wallet B'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'wc-account-a-id',
+      senderId: wcTopicA,
+      address: 'tz1WcAccountAAddress1111111111111111',
+      origin: {
+        type: Origin.WALLETCONNECT,
+        id: wcPubKeyA
+      }
+    }
+    const accountB = {
+      ...createStoredAccount(),
+      accountIdentifier: 'p2p-account-b-id',
+      senderId: senderIdB,
+      address: 'tz1P2pAccountBAddress222222222222222',
+      origin: {
+        type: Origin.P2P,
+        id: p2pPubKeyB
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA, accountB])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountB.accountIdentifier)
+    await (client as any).storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, [wcPeerA])
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountB)
+    ;(client as any)._activePeer = ExposedPromise.resolve(p2pPeerB)
+    ;(client as any).walletConnectTransport = {
+      type: TransportType.WALLETCONNECT,
+      connectionStatus: TransportStatus.CONNECTED,
+      // Simulates currentSession() already cleared before Disconnect handler queries getPeers()
+      getPeers: vi.fn().mockResolvedValue([]),
+      removePeer: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await (client as any).handleResponse(
+      {
+        id: 'inactive-wc-disconnect',
+        version: '2',
+        senderId: wcTopicA,
+        type: BeaconMessageType.Disconnect
+      },
+      {
+        origin: Origin.WALLETCONNECT,
+        id: wcPubKeyA
+      }
+    )
+
+    await expect(client.getActiveAccount()).resolves.toEqual(accountB)
+    await expect((client as any).storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([accountB])
+  })
+
+  it.each(['peer', 'one', 'all'])('clears an account selected while %s removal waits for an earlier account write', async (kind) => {
+    await client.getActiveAccount()
+    const account = createStoredAccount()
+    const storage: LocalStorage = Reflect.get(client, 'storage')
+    await storage.set(StorageKey.ACCOUNTS, [account])
+    const pending = new ExposedPromise<void>()
+    const queued = Reflect.get(client, 'mutateAccounts').call(client, () => pending.promise)
+    const removed = kind === 'peer'
+      ? Reflect.get(client, 'removeAccountsForPeerIds').call(client, [account.senderId])
+      : kind === 'one' ? client.removeAccount(account.accountIdentifier) : client.removeAllAccounts()
+    vi.spyOn(client, 'initInternalTransports').mockResolvedValue(undefined)
+    vi.spyOn(Reflect.get(client, 'accountManager'), 'getAccount').mockResolvedValue(account)
+    await client.setActiveAccount(account)
+    pending.resolve()
+    await Promise.all([queued, removed])
+    expect((await client.getAccounts()) ?? []).toEqual([])
+    expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
+    expect(await client.getActiveAccount()).toBeUndefined()
+  })
+
+  it.each(['lookup', 'write'])('does not restore durable accounts after removal during %s', async (stage) => {
+    const storage: LocalStorage = Reflect.get(client, 'storage')
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    await client.getActiveAccount()
+    const get = storage.get.bind(storage)
+    const set = storage.set.bind(storage)
+    vi.spyOn(storage, 'get').mockImplementation(async (key) => {
+      if (stage === 'lookup' && key === StorageKey.LAST_SELECTED_WALLET) { entered.resolve(); await release.promise }
+      const result = await get(key)
+      return key === StorageKey.ACCOUNTS ? result ?? [] : result
+    })
+    if (stage === 'write') {
+      vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+        if (key === StorageKey.ACCOUNTS && Array.isArray(value) && value.length > 0) {
+          entered.resolve(); await release.promise
+        }
+        return set(key, value)
+      })
+    }
+    const change = Reflect.get(client, 'onNewAccount').call(client, {
+      id: 'permission', version: '2', senderId: 'wallet-sender-id',
+      type: BeaconMessageType.PermissionResponse,
+      address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+      network: { type: NetworkType.MAINNET }, scopes: [PermissionScope.SIGN]
+    }, { origin: Origin.P2P, id: 'wallet-public-key' })
+    await entered.promise
+    const removed = client.removeAllAccounts()
+    // Let cleanup reach storage while the earlier operation remains held.
+    for (let i = 0; i < 30; i++) await Promise.resolve()
+    release.resolve()
+    await Promise.all([change, removed])
+    expect(await storage.get(StorageKey.ACCOUNTS)).toEqual([])
+    expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
+    expect(await client.getActiveAccount()).toBeUndefined()
+  })
+
+  it('does not overwrite active account when a peer switch occurs while ChangeAccountRequest is awaiting storage in onNewAccount', async () => {
+    const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
+    const pubKeyA = 'aa'.repeat(32)
+    const pubKeyB = 'bb'.repeat(32)
+    const senderIdA = 'sender-wallet-a'
+    const senderIdB = 'sender-wallet-b'
+    ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) => {
+      if (pk === pubKeyA) return senderIdA
+      if (pk === pubKeyB) return senderIdB
+      return 'senderId'
+    })
+
+    const peerA = {
+      ...createV480P2PPeer(),
+      id: pubKeyA,
+      publicKey: pubKeyA,
+      senderId: senderIdA,
+      name: 'Wallet A'
+    }
+    const peerB = {
+      ...createV480P2PPeer(),
+      id: pubKeyB,
+      publicKey: pubKeyB,
+      senderId: senderIdB,
+      name: 'Wallet B'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-a-id',
+      senderId: senderIdA,
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyA
+      }
+    }
+    const accountB = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-b-id',
+      senderId: senderIdB,
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyB
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA, accountB])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountA.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountA)
+    ;(client as any)._activePeer = ExposedPromise.resolve(peerA)
+
+    let releaseAddAccount!: () => void
+    const entered = new ExposedPromise<void>()
+    const originalAddAccount = (client as any).accountManager.addAccount.bind(
+      (client as any).accountManager
+    )
+    const addAccountSpy = vi
+      .spyOn((client as any).accountManager, 'addAccount')
+      .mockImplementationOnce(async (account: any) => {
+        await new Promise<void>((resolve) => {
+          releaseAddAccount = resolve
+          entered.resolve()
+        })
+        return originalAddAccount(account)
+      })
+    const initTransportsSpy = vi
+      .spyOn(client as any, 'initInternalTransports')
+      .mockResolvedValue(undefined)
+
+    try {
+      const changePromise = (client as any).handleResponse(
+        {
+          id: 'overlapping-change-account',
+          version: '3',
+          senderId: senderIdA,
+          type: BeaconMessageType.ChangeAccountRequest,
+          publicKey: pubKeyA,
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.P2P,
+          id: pubKeyA
+        }
+      )
+
+      await entered.promise
+
+      // User switches to Wallet B while Wallet A's ChangeAccountRequest is paused in addAccount
+      ;(client as any)._activePeer = ExposedPromise.resolve(peerB)
+      ;(client as any)._activeAccount = ExposedPromise.resolve(accountB)
+      await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountB.accountIdentifier)
+
+      releaseAddAccount()
+      await changePromise
+
+      await expect(client.getActiveAccount()).resolves.toEqual(accountB)
+      expect(await client.getAccounts()).toEqual([accountA, accountB])
+      expect(await Reflect.get(client, 'storage').get(StorageKey.ACTIVE_ACCOUNT)).toBe(accountB.accountIdentifier)
+    } finally {
+      addAccountSpy.mockRestore()
+      initTransportsSpy.mockRestore()
+      ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) =>
+        pk === 'wallet-public-key' ? 'wallet-sender-id' : 'senderId'
+      )
+    }
+  })
+
+  it('does not let an earlier ChangeAccountRequest from the same peer overwrite a newer one when addAccount completes out of order', async () => {
+    const wcPubKey = 'cc'.repeat(32)
+    const wcTopic = 'wc-active-topic'
+    const wcPeer = {
+      id: wcPubKey,
+      type: 'walletconnect-pairing-response' as const,
+      name: 'WC Wallet',
+      publicKey: wcPubKey,
+      version: 'first',
+      senderId: wcTopic,
+      extensionId: 'WC Wallet'
+    }
+    const initialAccount = {
+      ...createStoredAccount(),
+      accountIdentifier: 'wc-initial-id',
+      senderId: wcTopic,
+      address: 'tz1InitialWcAddress11111111111111111',
+      origin: {
+        type: Origin.WALLETCONNECT,
+        id: wcPubKey
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [initialAccount])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, initialAccount.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(initialAccount)
+    ;(client as any)._activePeer = ExposedPromise.resolve(wcPeer)
+
+    let releaseFirstAdd!: () => void
+    const entered = new ExposedPromise<void>()
+    const originalAddAccount = (client as any).accountManager.addAccount.bind(
+      (client as any).accountManager
+    )
+    const addAccountSpy = vi
+      .spyOn((client as any).accountManager, 'addAccount')
+      .mockImplementationOnce(async (account: any) => {
+        await new Promise<void>((resolve) => {
+          releaseFirstAdd = resolve
+          entered.resolve()
+        })
+        return originalAddAccount(account)
+      })
+    const initTransportsSpy = vi
+      .spyOn(client as any, 'initInternalTransports')
+      .mockResolvedValue(undefined)
+    const getPeerSpy = vi.spyOn(client as any, 'getPeer').mockResolvedValue(wcPeer)
+
+    try {
+      const firstChange = (client as any).handleResponse(
+        {
+          id: 'wc-change-1',
+          version: '2',
+          senderId: wcTopic,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.WALLETCONNECT,
+          id: wcPubKey
+        }
+      )
+
+      await entered.promise
+
+      const secondChange = (client as any).handleResponse(
+        {
+          id: 'wc-change-2',
+          version: '2',
+          senderId: wcTopic,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1aSkwEot3L2kmUvcoxzjMomb9mvBNuzFK6',
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.WALLETCONNECT,
+          id: wcPubKey
+        }
+      )
+
+      // Release the older write before awaiting its serialized successor.
+      releaseFirstAdd()
+      await Promise.all([firstChange, secondChange])
+
+      await expect(client.getActiveAccount()).resolves.toEqual(
+        expect.objectContaining({
+          address: 'tz1aSkwEot3L2kmUvcoxzjMomb9mvBNuzFK6'
+        })
+      )
+    } finally {
+      addAccountSpy.mockRestore()
+      initTransportsSpy.mockRestore()
+      getPeerSpy.mockRestore()
+    }
+  })
+
+  it('does not overwrite active account if user switches account during setActiveAccount pre-commit awaits', async () => {
+    const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
+    const pubKeyA = 'aa'.repeat(32)
+    const pubKeyB = 'bb'.repeat(32)
+    const senderIdA = 'sender-wallet-a'
+    const senderIdB = 'sender-wallet-b'
+    ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) => {
+      if (pk === pubKeyA) return senderIdA
+      if (pk === pubKeyB) return senderIdB
+      return 'senderId'
+    })
+
+    const peerA = {
+      ...createV480P2PPeer(),
+      id: pubKeyA,
+      publicKey: pubKeyA,
+      senderId: senderIdA,
+      name: 'Wallet A'
+    }
+    const peerB = {
+      ...createV480P2PPeer(),
+      id: pubKeyB,
+      publicKey: pubKeyB,
+      senderId: senderIdB,
+      name: 'Wallet B'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-a-id',
+      senderId: senderIdA,
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyA
+      }
+    }
+    const accountB = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-b-id',
+      senderId: senderIdB,
+      address: 'tz1aSkwEot3L2kmUvcoxzjMomb9mvBNuzFK6',
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyB
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA, accountB])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountA.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountA)
+    ;(client as any)._activePeer = ExposedPromise.resolve(peerA)
+
+    let releaseInvalidStateCheck!: () => void
+    const entered = new ExposedPromise<void>()
+    const invalidStateSpy = vi
+      .spyOn(client as any, 'resetDisconnectedWalletConnectSelection')
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          releaseInvalidStateCheck = resolve
+          entered.resolve()
+        })
+        return false
+      })
+    const initTransportsSpy = vi
+      .spyOn(client as any, 'initInternalTransports')
+      .mockResolvedValue(undefined)
+
+    try {
+      const changePromise = (client as any).handleResponse(
+        {
+          id: 'change-during-invalid-state-await',
+          version: '3',
+          senderId: senderIdA,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.P2P,
+          id: pubKeyA
+        }
+      )
+
+      await entered.promise
+
+      // User explicitly selects accountB while ChangeAccountRequest is inside setActiveAccount before _activeAccount mutation
+      await client.setActiveAccount(accountB)
+      ;(client as any)._activePeer = ExposedPromise.resolve(peerB)
+
+      releaseInvalidStateCheck()
+      await changePromise
+
+      await expect(client.getActiveAccount()).resolves.toEqual(accountB)
+    } finally {
+      invalidStateSpy.mockRestore()
+      initTransportsSpy.mockRestore()
+      ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) =>
+        pk === 'wallet-public-key' ? 'wallet-sender-id' : 'senderId'
+      )
+    }
+  })
+
+  it('does not re-activate an account when ChangeAccountRequest arrives while disconnect is in flight', async () => {
+    const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
+    const pubKeyA = 'aa'.repeat(32)
+    const senderIdA = 'sender-wallet-a'
+    ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) =>
+      pk === pubKeyA ? senderIdA : 'senderId'
+    )
+
+    const peerA = {
+      ...createV480P2PPeer(),
+      id: pubKeyA,
+      publicKey: pubKeyA,
+      senderId: senderIdA,
+      name: 'Wallet A'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-a-id',
+      senderId: senderIdA,
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyA
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountA.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountA)
+    ;(client as any)._activePeer = ExposedPromise.resolve(peerA)
+
+    let releaseDisconnect!: () => void
+    const disconnectSpy = vi
+      .spyOn(client as any, 'removeAllPeersFromTransports')
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          releaseDisconnect = resolve
+        })
+      })
+    const initTransportsSpy = vi
+      .spyOn(client as any, 'initInternalTransports')
+      .mockResolvedValue(undefined)
+
+    try {
+      const disconnectPromise = client.disconnect()
+      for (let i = 0; i < 15 && !releaseDisconnect; i++) {
+        await Promise.resolve()
+      }
+      expect(releaseDisconnect).toBeDefined()
+
+      // ChangeAccountRequest arrives while disconnect() is already in flight and _activePeer has not been cleared yet
+      const changePromise = (client as any).handleResponse(
+        {
+          id: 'change-during-in-flight-disconnect',
+          version: '3',
+          senderId: senderIdA,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.P2P,
+          id: pubKeyA
+        }
+      )
+
+      releaseDisconnect()
+      await Promise.all([disconnectPromise, changePromise])
+
+      await expect(client.getActiveAccount()).resolves.toBeUndefined()
+    } finally {
+      disconnectSpy.mockRestore()
+      initTransportsSpy.mockRestore()
+      ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) =>
+        pk === 'wallet-public-key' ? 'wallet-sender-id' : 'senderId'
+      )
+    }
+  })
+
+  it('does not overwrite a newer active peer when setActivePeer awaits initInternalTransports', async () => {
+    const peerA = {
+      ...createV480P2PPeer(),
+      id: 'peer-a',
+      publicKey: 'aa'.repeat(32),
+      senderId: 'sender-a',
+      name: 'Wallet A'
+    }
+    const peerB = {
+      ...createV480P2PPeer(),
+      id: 'peer-b',
+      publicKey: 'bb'.repeat(32),
+      senderId: 'sender-b',
+      name: 'Wallet B'
+    }
+
+    let releaseInit!: () => void
+    const initTransportsSpy = vi
+      .spyOn(client as any, 'initInternalTransports')
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          releaseInit = resolve
+        })
+      })
+      .mockResolvedValue(undefined)
+    const setTransportSpy = vi.spyOn(client as any, 'setTransport').mockResolvedValue(undefined)
+
+    try {
+      const firstSetPeer = (client as any).setActivePeer(peerA)
+      for (let i = 0; i < 10 && !releaseInit; i++) {
+        await Promise.resolve()
+      }
+      expect(releaseInit).toBeDefined()
+
+      // Superseding account transition and active peer selection happens before initInternalTransports resolves
+      ;(client as any).beginAccountTransition()
+      await (client as any).setActivePeer(peerB)
+
+      releaseInit()
+      await firstSetPeer
+
+      const resolvedPeer = await (client as any)._activePeer.promise
+      expect(resolvedPeer).toEqual(peerB)
+    } finally {
+      initTransportsSpy.mockRestore()
+      setTransportSpy.mockRestore()
+    }
+  })
+
   const delayedStartup = async () => {
     const account = createStoredAccount()
     const storage = new LocalStorage()

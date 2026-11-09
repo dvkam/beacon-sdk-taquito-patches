@@ -14,6 +14,16 @@ import { ClientEvents } from './clients/ClientEvents'
 
 const logger = new Logger('Transport')
 
+const pairingPeerOwnership = new WeakMap<object, WeakMap<PeerInfo, () => boolean>>()
+
+/** @internal Captures the current acceptance transaction without changing callback signatures. */
+export function getPairingPeerOwnership(
+  transport: object,
+  peer: PeerInfo
+): (() => boolean) | undefined {
+  return pairingPeerOwnership.get(transport)?.get(peer)
+}
+
 /**
  * @internalapi
  *
@@ -51,10 +61,27 @@ export abstract class Transport<
    */
   protected client: S
 
+  // Serialize storage mutations without holding the queue across message delivery.
+  private peerWrite: Promise<void> = Promise.resolve()
+
+  private readonly pairingPeers = new Map<string, symbol>()
+
+  private pairingAdmissions?: Map<string, Set<symbol>>
+
+  private mutatePeers<R>(operation: () => Promise<R>): Promise<R> {
+    const result = this.peerWrite.then(operation, operation)
+    this.peerWrite = result.then(
+      () => undefined,
+      () => undefined
+    )
+
+    return result
+  }
+
   /**
    * The listener that will be invoked when a new peer is connected
    */
-  protected newPeerListener?: (peer: T) => void
+  protected newPeerListener?: (peer: T) => boolean | Promise<boolean>
 
   setEventHandler(event: ClientEvents, fun: Function) {
     this.client.eventHandlers.set(event, fun)
@@ -103,6 +130,7 @@ export abstract class Transport<
    */
   public async disconnect(): Promise<void> {
     logger.log('disconnect')
+    await this.peerWrite
     this._isConnected = TransportStatus.NOT_CONNECTED
 
     return
@@ -166,25 +194,125 @@ export abstract class Transport<
   }
 
   public async addPeer(newPeer: T, _sendPairingResponse: boolean = true): Promise<void> {
-    logger.log('addPeer', 'adding peer', newPeer)
-    await this.peerManager.addPeer(newPeer as ArrayElem<StorageKeyReturnType[K]>) // TODO: Fix type
+    this.pairingAdmissions?.delete(newPeer.publicKey)
+    this.pairingPeers.delete(newPeer.publicKey)
+    await this.mutatePeers(async () => {
+      logger.log('addPeer', 'adding peer', newPeer)
+      await this.peerManager.addPeer(newPeer as ArrayElem<StorageKeyReturnType[K]>) // TODO: Fix type
+    })
     await this.listen(newPeer.publicKey)
   }
 
-  public async removePeer(peerToBeRemoved: T): Promise<void> {
-    logger.log('removePeer', 'removing peer', peerToBeRemoved)
-    await this.peerManager.removePeer(peerToBeRemoved.publicKey)
-    if (this.client) {
-      await this.client.unsubscribeFromEncryptedMessage(peerToBeRemoved.publicKey)
+  protected async addPairingPeer(
+    peer: T,
+    isActive: () => boolean,
+    accepted: () => boolean | Promise<boolean>
+  ): Promise<boolean> {
+    const owner = Symbol('pairing peer')
+    const ownsPeer = () => this.pairingPeers.get(peer.publicKey) === owner
+    const previousStatus = this._isConnected
+    let snapshot: ArrayElem<StorageKeyReturnType[K]> | undefined
+    let written = false
+    let committed = false
+    const pending = (this.pairingAdmissions ??= new Map<string, Set<symbol>>())
+    const admissions = pending.get(peer.publicKey) ?? new Set<symbol>()
+    admissions.add(owner)
+    pending.set(peer.publicKey, admissions)
+    try {
+      await this.mutatePeers(async () => {
+        const previous = await this.peerManager.getPeer(peer.publicKey)
+        if (!pending.get(peer.publicKey)?.has(owner) || !isActive()) {
+          return
+        }
+        snapshot = previous ? JSON.parse(JSON.stringify(previous)) : undefined
+        this.pairingPeers.set(peer.publicKey, owner)
+        written = true
+        await this.peerManager.addPeer(peer as ArrayElem<StorageKeyReturnType[K]>)
+      })
+      if (!ownsPeer() || !isActive()) {
+        return false
+      }
+      // Matrix registration can replay a Disconnect that removes this peer.
+      await this.listen(peer.publicKey)
+      // Confirm admitted writes without retaining the queue during application callbacks.
+      await this.peerWrite
+      if (!ownsPeer() || !isActive()) {
+        return false
+      }
+      let ownership = pairingPeerOwnership.get(this)
+      if (!ownership) {
+        ownership = new WeakMap()
+        pairingPeerOwnership.set(this, ownership)
+      }
+      ownership.set(peer, ownsPeer)
+      // The winner may retire pairing requests while retaining this peer's ownership.
+      committed = (await accepted()) && ownsPeer()
+
+      return committed
+    } finally {
+      const ownership = pairingPeerOwnership.get(this)
+      if (ownership?.get(peer) === ownsPeer) {
+        ownership.delete(peer)
+      }
+      admissions.delete(owner)
+      if (admissions.size === 0 && pending.get(peer.publicKey) === admissions) {
+        pending.delete(peer.publicKey)
+      }
+      if (written) {
+        await this.mutatePeers(async () => {
+          if (ownsPeer()) {
+            this.pairingPeers.delete(peer.publicKey)
+            if (!committed) {
+              if (this._isConnected !== TransportStatus.NOT_CONNECTED) {
+                this._isConnected = previousStatus
+              }
+              if (snapshot) {
+                await this.peerManager.addPeer(snapshot)
+              } else {
+                await this.peerManager.removePeer(peer.publicKey)
+                await this.client.unsubscribeFromEncryptedMessage(peer.publicKey)
+              }
+            }
+          } else if (!committed && !(await this.peerManager.getPeer(peer.publicKey))) {
+            // Registration may finish after removal; leave replacement peers listening.
+            await this.client.unsubscribeFromEncryptedMessage(peer.publicKey)
+            if (
+              this._isConnected !== TransportStatus.NOT_CONNECTED &&
+              (await this.peerManager.getPeers()).length === 0
+            ) {
+              this._isConnected = previousStatus
+            }
+          }
+        })
+      }
     }
   }
 
+  public async removePeer(peerToBeRemoved: T): Promise<void> {
+    // Publication stops at removal intent, even while an earlier storage write is pending.
+    this.pairingAdmissions?.delete(peerToBeRemoved.publicKey)
+    this.pairingPeers.delete(peerToBeRemoved.publicKey)
+
+    return this.mutatePeers(async () => {
+      logger.log('removePeer', 'removing peer', peerToBeRemoved)
+      await this.peerManager.removePeer(peerToBeRemoved.publicKey)
+      if (this.client) {
+        await this.client.unsubscribeFromEncryptedMessage(peerToBeRemoved.publicKey)
+      }
+    })
+  }
+
   public async removeAllPeers(): Promise<void> {
-    logger.log('removeAllPeers')
-    await this.peerManager.removeAllPeers()
-    if (this.client) {
-      await this.client.unsubscribeFromEncryptedMessages()
-    }
+    this.pairingAdmissions?.clear()
+    this.pairingPeers.clear()
+
+    return this.mutatePeers(async () => {
+      logger.log('removeAllPeers')
+      await this.peerManager.removeAllPeers()
+      if (this.client) {
+        await this.client.unsubscribeFromEncryptedMessages()
+      }
+    })
   }
 
   /**
@@ -195,7 +323,10 @@ export abstract class Transport<
    */
   protected async notifyListeners(
     message: unknown,
-    connectionInfo: ConnectionContext
+    connectionInfo: ConnectionContext,
+    dispatch?: (
+      listener: (message: unknown, connectionInfo: ConnectionContext) => void | Promise<void>
+    ) => void | Promise<void>
   ): Promise<void> {
     if (this.listeners.length === 0) {
       logger.warn('notifyListeners', '0 listeners notified!', this)
@@ -203,7 +334,11 @@ export abstract class Transport<
       logger.log('notifyListeners', `Notifying ${this.listeners.length} listeners`, this)
     }
 
-    await Promise.all(this.listeners.map(async (listener) => listener(message, connectionInfo)))
+    await Promise.all(
+      this.listeners.map(async (listener) =>
+        dispatch ? dispatch(listener) : listener(message, connectionInfo)
+      )
+    )
   }
 
   abstract listen(publicKey: string): Promise<void>
