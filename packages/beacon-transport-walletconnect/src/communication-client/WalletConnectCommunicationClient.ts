@@ -18,6 +18,7 @@ import {
   BeaconResponseInputMessage,
   ChangeAccountRequest,
   DisconnectMessage,
+  ErrorResponseInput,
   ExtendedWalletConnectPairingRequest,
   ExtendedWalletConnectPairingResponse,
   IgnoredResponseInputProperties,
@@ -46,6 +47,7 @@ import {
   NotConnected
 } from '../error'
 import { WalletConnectStorageOwner } from './WalletConnectStorageOwner'
+import { classifyRequestFailure } from './request-failure'
 
 const TEZOS_PLACEHOLDER = 'tezos'
 const BEACON_SDK_VERSION = 'beacon_sdk_version'
@@ -125,9 +127,23 @@ interface ProposalRetirement {
   disconnecting: Promise<boolean>
 }
 
+/**
+ * Sign-client's request expiry passed and the wallet sent nothing. The adapter made this error,
+ * so it marks it as local; DAppClient trusts marks on messages this adapter delivers.
+ */
+const expiredResponse = (id: string): ErrorResponseInput & { errorOrigin: 'local' } => ({
+  id,
+  type: BeaconMessageType.Error,
+  errorType: BeaconErrorType.PEER_UNREACHABLE,
+  errorOrigin: 'local'
+})
+
 interface PendingRequest {
   readonly id: string
   readonly topic: string
+  // Set when the request is handed to signClient.request. Before that, nothing reached the
+  // wallet, so a caller that gives up can still stop the request from being sent.
+  sent?: boolean
 }
 
 type ChannelOpeningListener = (
@@ -189,13 +205,35 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   private requestGeneration = 0
   private readonly pendingRequests = new Map<string, PendingRequest>()
+  // Requests whose public caller already timed out. A real wallet reply is still delivered so
+  // the dApp can report it; session teardown drops them without a synthetic error.
+  private readonly detachedRequests = new Set<string>()
 
   /** Release transport ownership when the public caller settles or times out. */
   public cancelRequest(id: string): void {
     this.pendingRequests.delete(id)
+    this.detachedRequests.delete(id)
     if (!this.pendingRequests.size) {
       this.stopPing()
     }
+  }
+
+  /**
+   * Keep a timed-out request open for its late reply without settling it again on teardown.
+   * A request not yet handed to sign-client is released instead, so the checks before sending
+   * stop it: its caller was told the wallet did not respond.
+   */
+  public detachRequest(id: string): void {
+    const request = this.pendingRequests.get(id)
+    if (!request) {
+      return
+    }
+    if (!request.sent) {
+      this.cancelRequest(id)
+
+      return
+    }
+    this.detachedRequests.add(id)
   }
 
   private ownsRequest(request: PendingRequest): boolean {
@@ -207,6 +245,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     for (const request of this.pendingRequests.values()) {
       if (request !== keep) {
         this.pendingRequests.delete(request.id)
+        // A detached request's caller already settled; teardown is not a wallet answer.
+        if (this.detachedRequests.delete(request.id)) {
+          continue
+        }
         // Adapter revocation must settle public callers even when their deadline
         // is disabled. Public timeout cancellation remains silent in cancelRequest.
         this.notifyListeners(request.topic, {
@@ -243,7 +285,19 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       response = await execute(request)
     } catch (error: unknown) {
       logger.debug('request failed', getErrorDiagnostic(error))
-      response = { id, type: BeaconMessageType.Error, errorType: BeaconErrorType.ABORTED_ERROR }
+      const failure = classifyRequestFailure(error)
+      if (failure !== 'wallet' && this.detachedRequests.has(id)) {
+        // The caller already timed out. Only a wallet answer is reported as a late response.
+        if (this.ownsRequest(request)) {
+          this.cancelRequest(id)
+        }
+
+        return
+      }
+      response =
+        failure === 'expired'
+          ? expiredResponse(id)
+          : { id, type: BeaconMessageType.Error, errorType: BeaconErrorType.ABORTED_ERROR }
     }
     if (!this.ownsRequest(request)) {
       return
@@ -947,6 +1001,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       if (!this.ownsRequest(request)) {
         throw new Error('Request no longer pending')
       }
+      request.sent = true
       const response = await signClient.request<{ signature: string }>({
         topic,
         chainId,
@@ -975,6 +1030,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       if (!this.ownsRequest(request)) {
         throw new Error('Request no longer pending')
       }
+      request.sent = true
       const response = await signClient.request<{
         operationHash?: string
         transactionHash?: string
