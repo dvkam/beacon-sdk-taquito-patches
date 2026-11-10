@@ -22,7 +22,7 @@ const createAlert = (config: AlertConfig) => {
   const shadowRoot = el.attachShadow({ mode: 'open' })
 
   // Inject the bundled CSS into the shadow root
-  const styleEl: any = document.createElement('style')
+  const styleEl = document.createElement('style')
   styleEl.textContent = cssText
   shadowRoot.appendChild(styleEl)
 

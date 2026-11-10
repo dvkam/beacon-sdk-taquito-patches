@@ -1,5 +1,7 @@
+import type { CSSProperties } from 'react'
+
 interface IconProps {
-  style?: any
+  style?: CSSProperties
 }
 
 export function CloseIcon(props: IconProps) {
