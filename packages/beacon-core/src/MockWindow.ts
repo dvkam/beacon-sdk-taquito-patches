@@ -6,6 +6,7 @@ interface WindowRef {
   removeEventListener(name: string, eventCallback: Callback): void
   location: { origin: string }
   beaconCreatedClientInstance?: boolean
+  beaconSdkDebugEnabled?: unknown
 }
 
 const cbs: Callback[] = [(_: unknown): void => undefined]

@@ -28,11 +28,19 @@ export type { DAppClientDisconnectOptions, DAppClientRemoveAllPeersOptions }
 
 // Events
 export { BeaconEvent, BeaconEventHandler, defaultEventCallbacks }
+export type { BeaconEventType, InvalidAccountDeactivatedEvent, InvalidAccountDeactivatedReason }
 export type {
-  BeaconEventType,
-  InvalidAccountDeactivatedEvent,
-  InvalidAccountDeactivatedReason
-}
+  ErrorOrigin,
+  LateErrorResponseInfo,
+  LateResponseInfo,
+  LateSuccessResponseInfo,
+  RequestErrorResponse,
+  ResponseMessage,
+  ResponseOutput,
+  V3ResponsePayload,
+  WireErrorMessage,
+  WireErrorPayload
+} from './dapp-client/request-error'
 
 // BlockExplorer
 export { BlockExplorer, TzktBlockExplorer, TzktBlockExplorer as TezblockBlockExplorer }

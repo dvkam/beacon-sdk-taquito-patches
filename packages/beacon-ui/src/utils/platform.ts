@@ -47,7 +47,22 @@ export const isIOS = (win: Window): boolean =>
 export const isAndroid = (win: Window): boolean =>
   !isPrivacyBrowser(win) && testUserAgent(win, /android|sink/i)
 
-export const isTwBrowser = (win: Window): boolean => win && (win as any).ethereum?.isTrust == true
+export const isTwBrowser = (win: Window): boolean => {
+  if (!win) {
+    return false
+  }
+
+  const provider: unknown = Reflect.get(win, 'ethereum')
+  if (provider === null || (typeof provider !== 'object' && typeof provider !== 'function')) {
+    return false
+  }
+
+  const isTrust: unknown = Reflect.get(provider, 'isTrust')
+
+  // Preserve compatibility with providers that expose true-like Trust flags.
+  // eslint-disable-next-line eqeqeq
+  return isTrust == true
+}
 
 export const isDesktop = (win: Window): boolean => !isMobile(win)
 

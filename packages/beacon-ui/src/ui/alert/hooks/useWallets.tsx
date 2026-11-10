@@ -92,15 +92,19 @@ const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
       // Additional detected extensions
       ...availableExtensions
         .filter((e) => !extensionList.some((w) => w.id === e.id))
-        .map((e) => ({
-          id: e.id,
-          key: e.id,
-          name: e.shortName ?? e.name ?? '',
-          image: e.iconUrl ?? '',
-          description: 'Browser Extension',
-          type: 'extension' as const,
-          link: (e as any).link ?? ''
-        }))
+        .map((e) => {
+          const link: unknown = Reflect.get(e, 'link')
+
+          return {
+            id: e.id,
+            key: e.id,
+            name: e.shortName ?? e.name ?? '',
+            image: e.iconUrl ?? '',
+            description: 'Browser Extension',
+            type: 'extension' as const,
+            link: typeof link === 'string' ? link : ''
+          }
+        })
     ]
 
     return arrangeTopWallets(
