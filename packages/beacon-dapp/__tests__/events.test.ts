@@ -1,14 +1,25 @@
 import { closeAlert, closeToast, openAlert, openToast } from '@ecadlabs/beacon-ui'
-import { BeaconEvent, BeaconEventHandler, defaultEventCallbacks } from '../src/events'
+import { getError } from '@ecadlabs/beacon-core'
+import {
+  BeaconEvent,
+  BeaconEventHandler,
+  BeaconEventType,
+  defaultEventCallbacks
+} from '../src/events'
 import {
   AccountInfo,
   BeaconErrorType,
   BeaconMessageType,
+  ErrorResponse,
   NetworkType,
+  OperationResponse,
   Origin,
+  SignPayloadResponse,
   SigningType
 } from '@ecadlabs/beacon-types'
+import { RequestErrorResponse } from '../src/dapp-client/request-error'
 import { TzktBlockExplorer } from '../src/utils/tzkt-blockexplorer'
+import { shortenString } from '../src/utils/shorten-string'
 
 vi.mock('@ecadlabs/beacon-ui', () => ({
   closeAlert: vi.fn(),
@@ -298,5 +309,258 @@ describe('Phase 2A event wiring', () => {
         data: JSON.stringify(errorData, undefined, 2)
       })
     )
+  })
+})
+
+describe('request timeout toast', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  // The dApp raises PEER_UNREACHABLE itself when its request deadline fires. The wallet
+  // returned nothing and still holds the request, so the toast must not claim the wallet
+  // answered, and must show the description that warns the request can still complete.
+  // The toast keys on `errorOrigin`, not on the error type: a wallet can send PEER_UNREACHABLE too.
+  function errorResponse(
+    errorType: BeaconErrorType,
+    errorOrigin: 'wallet' | 'local'
+  ): ErrorResponse & { errorOrigin: 'wallet' | 'local' } {
+    return { ...envelope, type: BeaconMessageType.Error, errorType, errorOrigin }
+  }
+  type ErrorToast = {
+    request: string
+    show: (errorResponse: ErrorResponse) => void | Promise<void>
+  }
+  const errorToasts: ErrorToast[] = [
+    {
+      request: 'permission',
+      show: (errorResponse) =>
+        defaultEventCallbacks[BeaconEvent.PERMISSION_REQUEST_ERROR]({ walletInfo, errorResponse })
+    },
+    {
+      request: 'operation',
+      show: (errorResponse) =>
+        defaultEventCallbacks[BeaconEvent.OPERATION_REQUEST_ERROR]({
+          walletInfo,
+          errorResponse,
+          errorMessages: {}
+        })
+    },
+    {
+      request: 'sign payload',
+      show: (errorResponse) =>
+        defaultEventCallbacks[BeaconEvent.SIGN_REQUEST_ERROR]({ walletInfo, errorResponse })
+    },
+    {
+      request: 'broadcast',
+      show: (errorResponse) =>
+        defaultEventCallbacks[BeaconEvent.BROADCAST_REQUEST_ERROR]({ walletInfo, errorResponse })
+    },
+    {
+      request: 'proof of event',
+      show: (errorResponse) =>
+        defaultEventCallbacks[BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]({
+          walletInfo,
+          errorResponse
+        })
+    },
+    {
+      request: 'simulated proof of event',
+      show: (errorResponse) =>
+        defaultEventCallbacks[BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]({
+          walletInfo,
+          errorResponse
+        })
+    }
+  ]
+  const timedOut = errorResponse(BeaconErrorType.PEER_UNREACHABLE, 'local')
+
+  it.each(errorToasts)(
+    'says the wallet did not respond for a timed-out $request request',
+    async ({ show }) => {
+      await show(timedOut)
+
+      expect(openToast).toHaveBeenCalledTimes(1)
+      const toast = vi.mocked(openToast).mock.calls[0][0]
+      expect(toast.body).toBe('{{wallet}}  did not respond')
+      expect(toast.state).toBe('finished')
+      expect(toast.walletInfo).toEqual(walletInfo)
+      // Stays open: the user has to read it before deciding whether to retry.
+      expect(toast.timer).toBeUndefined()
+    }
+  )
+
+  it.each(errorToasts)(
+    'shows the timeout title and description for a timed-out $request request',
+    async ({ show }) => {
+      await show(timedOut)
+
+      const error = getError(BeaconErrorType.PEER_UNREACHABLE, undefined)
+      expect(vi.mocked(openToast).mock.calls[0][0].actions).toEqual([
+        { text: error.title, isBold: true },
+        { text: error.description }
+      ])
+    }
+  )
+
+  it.each([
+    [BeaconErrorType.ABORTED_ERROR, '{{wallet}}  request was cancelled'],
+    [BeaconErrorType.UNKNOWN_ERROR, '{{wallet}}  request failed'],
+    [BeaconErrorType.NOT_GRANTED_ERROR, '{{wallet}}  request failed']
+  ])('describes a local %s without blaming the wallet', async (errorType, body) => {
+    await defaultEventCallbacks[BeaconEvent.OPERATION_REQUEST_ERROR]({
+      walletInfo,
+      errorResponse: errorResponse(errorType, 'local'),
+      errorMessages: {}
+    })
+
+    expect(vi.mocked(openToast).mock.calls[0][0].body).toBe(body)
+  })
+
+  // Guards against widening the local copy to errors the wallet actually sent.
+  it.each([
+    BeaconErrorType.NOT_GRANTED_ERROR,
+    BeaconErrorType.ABORTED_ERROR,
+    BeaconErrorType.UNKNOWN_ERROR,
+    BeaconErrorType.PEER_UNREACHABLE
+  ])('keeps "has returned an error" for a wallet-sent %s', async (errorType) => {
+    await defaultEventCallbacks[BeaconEvent.OPERATION_REQUEST_ERROR]({
+      walletInfo,
+      errorResponse: errorResponse(errorType, 'wallet'),
+      errorMessages: {}
+    })
+
+    expect(vi.mocked(openToast).mock.calls[0][0].body).toBe('{{wallet}}  has returned an error')
+  })
+})
+
+describe('late response toast', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const connectionInfo = { origin: Origin.P2P, id: 'peer' }
+  const hash = 'ooLateOperationHashThatIsLongEnoughToShorten'
+  type LateResponse = BeaconEventType[BeaconEvent.LATE_RESPONSE_RECEIVED]
+  const base = { requestId: 'one', connectionInfo, walletInfo }
+  const operation: OperationResponse = {
+    ...envelope,
+    type: BeaconMessageType.OperationResponse,
+    transactionHash: hash
+  }
+  const v3Operation = {
+    ...envelope,
+    version: '3',
+    message: {
+      type: BeaconMessageType.BlockchainResponse,
+      blockchainIdentifier: 'tezos',
+      blockchainData: { transactionHash: hash }
+    }
+  }
+  const signature: SignPayloadResponse = {
+    ...envelope,
+    type: BeaconMessageType.SignPayloadResponse,
+    signingType: SigningType.RAW,
+    signature: 'late-signature'
+  }
+  const walletError: RequestErrorResponse = {
+    ...envelope,
+    type: BeaconMessageType.Error,
+    errorType: BeaconErrorType.ABORTED_ERROR,
+    errorOrigin: 'wallet'
+  }
+
+  // A user who saw the timeout toast may be about to retry. If the operation went through
+  // after all, the default UI has to say so, with the hash, before they pay twice.
+  it.each<{ response: string; data: LateResponse; body: string }>([
+    {
+      response: 'V2 operation',
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.OperationRequest,
+        message: operation,
+        output: operation,
+        transactionHash: hash
+      },
+      body: '{{wallet}}\u00A0 submitted the operation after the request timed out'
+    },
+    {
+      response: 'V3 operation',
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.BlockchainRequest,
+        message: v3Operation,
+        output: v3Operation.message,
+        transactionHash: hash
+      },
+      body: '{{wallet}}\u00A0 submitted the operation after the request timed out'
+    },
+    {
+      response: 'V2 broadcast',
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.BroadcastRequest,
+        message: { ...operation, type: BeaconMessageType.BroadcastResponse },
+        output: { ...operation, type: BeaconMessageType.BroadcastResponse },
+        transactionHash: hash
+      },
+      body: '{{wallet}}\u00A0 broadcast the transaction after the request timed out'
+    }
+  ])('shows the hash for a late $response response', async ({ data, body }) => {
+    // Through the handler, so the default callback is also registered for the event.
+    await new BeaconEventHandler().emit(BeaconEvent.LATE_RESPONSE_RECEIVED, data)
+
+    expect(openToast).toHaveBeenCalledTimes(1)
+    const toast = vi.mocked(openToast).mock.calls[0][0]
+    expect(toast.body).toBe(body)
+    expect(toast.state).toBe('finished')
+    expect(toast.walletInfo).toEqual(walletInfo)
+    expect(toast.timer).toBeUndefined()
+    expect(toast.actions).toContainEqual(
+      expect.objectContaining({ text: shortenString(hash), isBold: true })
+    )
+  })
+
+  // The toast follows the normalised payload; extracting the hash is tested with the helper
+  // that builds it (request-error.test.ts).
+  it.each<{ response: string; data: LateResponse }>([
+    {
+      response: 'wallet error for an operation',
+      data: {
+        ...base,
+        kind: 'error',
+        requestType: BeaconMessageType.OperationRequest,
+        message: walletError,
+        error: walletError
+      }
+    },
+    {
+      response: 'signature',
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.SignPayloadRequest,
+        message: signature,
+        output: signature
+      }
+    },
+    {
+      response: 'success without a transaction hash',
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.OperationRequest,
+        message: { ...operation, transactionHash: '' },
+        output: { ...operation, transactionHash: '' }
+      }
+    }
+  ])('stays quiet for a late $response', async ({ data }) => {
+    // The handler swallows callback errors, so call the default callback directly as well.
+    await expect(
+      Promise.resolve(defaultEventCallbacks[BeaconEvent.LATE_RESPONSE_RECEIVED](data))
+    ).resolves.toBeUndefined()
+    await new BeaconEventHandler().emit(BeaconEvent.LATE_RESPONSE_RECEIVED, data)
+
+    expect(openToast).not.toHaveBeenCalled()
+    expect(openAlert).not.toHaveBeenCalled()
   })
 })
