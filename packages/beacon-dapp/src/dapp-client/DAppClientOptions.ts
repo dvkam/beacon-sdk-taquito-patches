@@ -145,17 +145,31 @@ export interface DAppClientOptions {
 
   /**
    * Maximum time in milliseconds to wait for a wallet acknowledge or response before rejecting
-   * the request (default: 60_000). WalletConnect's legacy requestAcknowledged events
-   * cannot identify a Beacon request, so they do not acknowledge requests or disable
-   * this deadline. Set a longer finite value for slow signing/operation approvals, for
-   * example 120_000. Correlated WalletConnect ACKs require future wallet capability
-   * negotiation; neither a ping nor the outer event ID supplies that correlation.
-   * Permission renewal is also bounded by this deadline; initial pairing starts
-   * before it. Session establishment additionally has separate adapter timeouts.
-   * Timeout or ABORTED revocation does not cancel the wallet action: an operation
-   * may still be injected.
-   * Check its chain status before retrying to avoid submitting it twice.
-   * Set to 0 or a negative value to opt out of bounded request completion.
+   * the request with PEER_UNREACHABLE.
+   *
+   * When this is not set, only permission requests have a deadline (60_000). Operation, sign,
+   * broadcast, proof-of-event and V3 blockchain requests have no dApp deadline: Beacon has no
+   * way to cancel a request at the wallet, so a timed-out request can still be approved there,
+   * and retrying it can submit an operation twice. Mobile wallets often only receive a request
+   * once the app is opened, and WalletConnect acknowledges cannot be matched to a Beacon request,
+   * so a deadline over WalletConnect covers the whole approval.
+   *
+   * Without a deadline, a request to a wallet that never answers stays pending: indefinitely over
+   * P2P and postMessage, and over WalletConnect until WalletConnect's own request expiry of five
+   * minutes. That expiry rejects the request with PEER_UNREACHABLE and `errorOrigin: 'local'`.
+   * The wallet may still act on the request afterwards, and WalletConnect drops any later reply,
+   * so no late response is reported for it.
+   *
+   * When this is set, it applies to every request type. Over WalletConnect the effective deadline
+   * is the shorter of this value and the five minute expiry. Set 0 or a negative value to disable
+   * the dApp deadline entirely.
+   *
+   * A wallet response that arrives after a non-permission request timed out is reported once
+   * through BeaconEvent.LATE_RESPONSE_RECEIVED. With several tabs over WalletConnect, it is
+   * reported in the tab that made the request. Rejections carry `errorOrigin: 'local'` when the
+   * dApp produced them (timeout, abort, WalletConnect expiry) and `errorOrigin: 'wallet'` when
+   * they arrived on the response path. A local timeout or abort does not mean the wallet refused:
+   * check chain state before retrying an operation.
    */
   requestTimeoutMs?: number
 }

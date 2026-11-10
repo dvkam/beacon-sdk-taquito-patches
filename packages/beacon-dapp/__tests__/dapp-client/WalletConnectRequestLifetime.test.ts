@@ -119,14 +119,15 @@ describe('WalletConnect public request lifetime (#102)', () => {
     vi.clearAllTimers()
     vi.useRealTimers()
   })
-  async function start(requestTimeoutMs: number) {
+  // Omit requestTimeoutMs to test the default deadline policy.
+  async function start(requestTimeoutMs?: number) {
     dapp = new DAppClient({
       name: 'Lifetime test',
       network: { type: NetworkType.MAINNET },
       storage: new LocalStorage('lifetime'),
       disableDefaultEvents: true,
       enableAppSwitching: false,
-      requestTimeoutMs
+      ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs })
     })
     await dapp.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
     await dapp.getActiveAccount()
@@ -382,9 +383,13 @@ describe('WalletConnect public request lifetime (#102)', () => {
         })
       })
       expect(old.settled).toHaveBeenCalledTimes(1)
-      expect(delivered.slice(before)).toEqual([
-        expect.objectContaining({ id: next.id, signature: 'new-signature' })
-      ])
+      // The expired request's late reply is delivered under its own ID (and reported through
+      // LATE_RESPONSE_RECEIVED); nothing under the successor's ID except its own answer.
+      const deliveredIds = (message: unknown) =>
+        message && typeof message === 'object' && 'id' in message ? message.id : undefined
+      expect(
+        delivered.slice(before).filter((message) => deliveredIds(message) === next.id)
+      ).toEqual([expect.objectContaining({ id: next.id, signature: 'new-signature' })])
     }
   )
 
@@ -563,4 +568,297 @@ describe('WalletConnect public request lifetime (#102)', () => {
       expect(request.settled).toHaveBeenCalledTimes(1)
     }
   )
+  describe('late responses and the default deadline', () => {
+    async function operate() {
+      const previousRequests = mockRequests.length
+      const settled = vi.fn()
+      const outcome = dapp.requestOperation({ operationDetails: [] }).then(
+        (value) => {
+          settled({ value })
+          return { value }
+        },
+        (error: unknown) => {
+          settled({ error })
+          return { error }
+        }
+      )
+      await flush()
+      expect(mockRequests).toHaveLength(previousRequests + 1)
+      const message = await serializer.deserialize(sent.mock.calls[sent.mock.calls.length - 1][0])
+      if (
+        !message ||
+        typeof message !== 'object' ||
+        !('id' in message) ||
+        typeof message.id !== 'string'
+      ) {
+        throw new Error('Public request did not send a Beacon request ID')
+      }
+      return { outcome, settled, id: message.id }
+    }
+    const lateEvents = vi.fn()
+    async function startWithLateEvents(requestTimeoutMs?: number) {
+      await start(requestTimeoutMs)
+      lateEvents.mockClear()
+      await dapp.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) => lateEvents(info))
+    }
+
+    // WalletConnect never acknowledges a Beacon request, so a default deadline would cover
+    // the whole approval. Sign and operation requests have no default deadline.
+    it.each(['sign', 'operation'] as const)(
+      'keeps a %s request open past the old 60 s default',
+      async (kind) => {
+        await startWithLateEvents()
+        const request = kind === 'sign' ? await sign('aa') : await operate()
+        await vi.advanceTimersByTimeAsync(600_000)
+        expect(request.settled).not.toHaveBeenCalled()
+
+        mockRequests[0].reply.resolve(
+          kind === 'sign' ? { signature: 'slow-signature' } : { operationHash: 'ooSlowHash' }
+        )
+        await flush()
+        expect(await request.outcome).toEqual({
+          value: expect.objectContaining(
+            kind === 'sign' ? { signature: 'slow-signature' } : { transactionHash: 'ooSlowHash' }
+          )
+        })
+        expect(lateEvents).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each([
+      ['sign', BeaconMessageType.SignPayloadRequest],
+      ['operation', BeaconMessageType.OperationRequest]
+    ] as const)(
+      'reports a %s reply that arrives after an explicit deadline',
+      async (kind, requestType) => {
+        await startWithLateEvents(1000)
+        const request = kind === 'sign' ? await sign('aa') : await operate()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(await request.outcome).toEqual({
+          error: expect.objectContaining({
+            errorType: BeaconErrorType.PEER_UNREACHABLE,
+            errorOrigin: 'local'
+          })
+        })
+
+        mockRequests[0].reply.resolve(
+          kind === 'sign' ? { signature: 'late-signature' } : { operationHash: 'ooLateHash' }
+        )
+        await flush()
+
+        expect(lateEvents).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            kind: 'success',
+            requestId: request.id,
+            requestType,
+            transactionHash: kind === 'sign' ? undefined : 'ooLateHash',
+            output: expect.objectContaining({ id: request.id }),
+            message: expect.objectContaining(
+              kind === 'sign'
+                ? {
+                    id: request.id,
+                    type: BeaconMessageType.SignPayloadResponse,
+                    signature: 'late-signature'
+                  }
+                : {
+                    id: request.id,
+                    type: BeaconMessageType.OperationResponse,
+                    transactionHash: 'ooLateHash'
+                  }
+            ),
+            connectionInfo: expect.objectContaining({ origin: Origin.WALLETCONNECT }),
+            walletInfo: expect.objectContaining({ name: expect.any(String) })
+          })
+        )
+        expect(request.settled).toHaveBeenCalledTimes(1)
+      }
+    )
+
+    // Sign-client rejects request() with the wallet's JSON-RPC error object when the wallet
+    // answers with an error. That is a wallet answer and is reported.
+    it('reports a late wallet rejection after an explicit deadline', async () => {
+      await startWithLateEvents(1000)
+      const request = await operate()
+      await vi.advanceTimersByTimeAsync(1000)
+
+      mockRequests[0].reply.reject({ code: 5000, message: 'User rejected.' })
+      await flush()
+
+      expect(lateEvents).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          kind: 'error',
+          requestId: request.id,
+          error: expect.objectContaining({ id: request.id, type: BeaconMessageType.Error })
+        })
+      )
+      expect(lateEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ error: expect.objectContaining({ errorOrigin: 'wallet' }) })
+      )
+    })
+
+    // Sign-client 2.18.0 rejects request() locally with this Error after its own five minute
+    // request expiry, rejects with an Error when a publish fails, and rejects pending requests
+    // with USER_DISCONNECTED when the wallet deletes the session. None is the wallet answering
+    // the request, so a request whose caller already timed out must not report them as late.
+    it.each([
+      ['sign-client request expiry', new Error('Request expired. Please try again.')],
+      ['publish failure', new Error('Failed to publish payload')],
+      ['session deletion cleanup', { code: 6000, message: 'User disconnected.' }]
+    ])('does not report a %s as a late wallet response', async (_failure, reason) => {
+      await startWithLateEvents(1000)
+      const request = await operate()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(await request.outcome).toEqual({
+        error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+      })
+
+      mockRequests[0].reply.reject(reason)
+      await flush()
+
+      expect(lateEvents).not.toHaveBeenCalled()
+      expect(adapter['pendingRequests'].size).toBe(0)
+    })
+
+    // With no dApp deadline the request still ends at sign-client's five minute expiry. The
+    // wallet sent nothing, so the caller must not be told the wallet returned an error.
+    it.each(['sign', 'operation'] as const)(
+      'rejects a %s request as unanswered and local at the WalletConnect expiry',
+      async (kind) => {
+        await startWithLateEvents()
+        const request = kind === 'sign' ? await sign('aa') : await operate()
+        await vi.advanceTimersByTimeAsync(300_000)
+        expect(request.settled).not.toHaveBeenCalled()
+
+        mockRequests[0].reply.reject(new Error('Request expired. Please try again.'))
+        await flush()
+
+        expect(request.settled).toHaveBeenCalledTimes(1)
+        expect(await request.outcome).toEqual({
+          error: expect.objectContaining({
+            id: request.id,
+            errorType: BeaconErrorType.PEER_UNREACHABLE
+          })
+        })
+        expect(await request.outcome).toEqual({
+          error: expect.objectContaining({ errorOrigin: 'local' })
+        })
+        expect(lateEvents).not.toHaveBeenCalled()
+      }
+    )
+
+    // A user rejection with no dApp deadline is still the wallet's answer.
+    it('rejects a request the wallet rejected as origin wallet', async () => {
+      await startWithLateEvents()
+      const request = await operate()
+
+      mockRequests[0].reply.reject({ code: 5000, message: 'User rejected.' })
+      await flush()
+
+      expect(await request.outcome).toEqual({
+        error: expect.objectContaining({
+          errorType: BeaconErrorType.ABORTED_ERROR,
+          errorOrigin: 'wallet'
+        })
+      })
+    })
+
+    // Before the request reaches sign-client the adapter still has to resolve the session,
+    // account and network. If the dApp deadline fires in that window, the caller has been told
+    // the wallet did not respond, so the request must never be sent afterwards.
+    it.each(['sign', 'operation'] as const)(
+      'never sends a %s request whose deadline fired before it was handed to sign-client',
+      async (kind) => {
+        await startWithLateEvents(1000)
+        mockRemote.request.mockClear()
+        let release!: () => void
+        const held = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        const resolveAccount = adapter.getAccountOrPK.bind(adapter)
+        vi.spyOn(adapter, 'getAccountOrPK').mockImplementationOnce(async () => {
+          await held
+          return resolveAccount()
+        })
+        const settled = vi.fn()
+        const outcome = (
+          kind === 'sign'
+            ? dapp.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
+            : dapp.requestOperation({ operationDetails: [] })
+        ).then(
+          (value: unknown) => settled({ value }),
+          (error: unknown) => settled({ error })
+        )
+        await flush()
+        expect(mockRequests).toHaveLength(0)
+
+        await vi.advanceTimersByTimeAsync(1000)
+        await outcome
+        expect(settled).toHaveBeenCalledExactlyOnceWith({
+          error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        })
+
+        release()
+        await flush()
+
+        expect(mockRemote.request).not.toHaveBeenCalled()
+        expect(mockRequests).toHaveLength(0)
+        expect(lateEvents).not.toHaveBeenCalled()
+        expect(adapter['pendingRequests'].size).toBe(0)
+      }
+    )
+
+    // The transport drops replies for requests it no longer owns, so the deadline must leave
+    // a timed-out sign or operation request open there. Forgetting the request (cap eviction
+    // or lifecycle) must release it, or pending WalletConnect requests leak.
+    it('keeps the transport request open after the deadline and releases it once forgotten', async () => {
+      await startWithLateEvents(1000)
+      vi.spyOn(dapp, 'addRequestAndCheckIfRateLimited').mockResolvedValue(false)
+      const cancelled = vi.spyOn(DappWalletConnectTransport.prototype, 'cancelRequest')
+      const ids: string[] = []
+      for (let index = 0; index <= 100; index++) {
+        ids.push((await sign(`${index}`.padStart(2, '0'))).id)
+      }
+      cancelled.mockClear()
+      await vi.advanceTimersByTimeAsync(1000)
+
+      // The 101st timeout evicts the oldest; nothing else is released.
+      expect(cancelled.mock.calls).toEqual([[ids[0]]])
+
+      mockRequests[1].reply.resolve({ signature: 'late-signature' })
+      await flush()
+      expect(lateEvents).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ requestId: ids[1] })
+      )
+    })
+
+    // Session teardown aborts pending transport requests with a synthetic error. For a
+    // request that already timed out, that is not a wallet answer.
+    it.each(['session_delete', 'session_expire'])(
+      'does not report a timed-out request as late when the wallet %s arrives',
+      async (event) => {
+        await startWithLateEvents(1000)
+        await operate()
+        await vi.advanceTimersByTimeAsync(1000)
+
+        const handler = mockHandlers.get(event)
+        if (!handler) throw new Error(`Missing ${event} handler`)
+        handler({ topic: 'current' })
+        await flush()
+
+        expect(lateEvents).not.toHaveBeenCalled()
+      }
+    )
+
+    it('does not report a late reply after the dApp disconnects', async () => {
+      await startWithLateEvents(1000)
+      await operate()
+      await vi.advanceTimersByTimeAsync(1000)
+
+      await dapp.disconnect({ notifyPeers: false })
+      mockRequests[0].reply.resolve({ operationHash: 'ooAfterDisconnect' })
+      await flush()
+
+      expect(lateEvents).not.toHaveBeenCalled()
+    })
+  })
 })
