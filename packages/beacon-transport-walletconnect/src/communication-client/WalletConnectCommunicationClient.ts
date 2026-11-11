@@ -1325,16 +1325,14 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
         return delivery
       })
-      .catch(async (error: any) => {
+      .catch(async (error: unknown) => {
         hasResponse = true
         if (!ownsClient()) {
           return
         }
-        if (
-          !error.message ||
-          !error.message.length ||
-          error.message.toLowerCase().includes('expir')
-        ) {
+        const diagnostic = getErrorDiagnostic(error)
+        const message = typeof diagnostic === 'string' ? diagnostic : undefined
+        if (!message || message.toLowerCase().includes('expir')) {
           const fun = this.eventHandlers.get(ClientEvents.CLOSE_ALERT)
           if (fun) {
             fun(TransportType.WALLETCONNECT)
@@ -1343,7 +1341,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
           return
         }
 
-        logger.error('Error happened!', [error.message])
+        logger.error('Error happened!', [diagnostic])
 
         if (this.activeListeners.size === 0) {
           logger.debug('No active listeners', [])
@@ -2037,8 +2035,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   public async closeActiveSession(account: string, notify: boolean = true, keep?: PendingRequest) {
     try {
       this.validateNetworkAndAccount(this.getActiveNetwork(), account)
-    } catch (error: any) {
-      logger.error(error.message)
+    } catch (error: unknown) {
+      logger.error('closeActiveSession', getErrorDiagnostic(error))
 
       return
     }
