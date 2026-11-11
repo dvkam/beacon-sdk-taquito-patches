@@ -135,9 +135,16 @@ const messageSync = (body: string, messageSender = sender): MatrixSyncResponse =
 describe('P2P callbacks retired by stop', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected external request in callback lifecycle test'))
     localStorage.clear()
     vi.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
       server: 'relay.example',
+      timestamp: 12345
+    })
+    // Startup refreshes the relay timestamp before login, even with relay selection mocked.
+    vi.spyOn(P2PCommunicationClient.prototype, 'getBeaconInfo').mockResolvedValue({
+      region: 'eu',
+      known_servers: [],
       timestamp: 12345
     })
     vi.spyOn(MatrixUserService.prototype, 'login').mockResolvedValue({
@@ -147,12 +154,14 @@ describe('P2P callbacks retired by stop', () => {
     })
   })
   afterEach(() => {
+    const externalRequests = vi.mocked(globalThis.fetch).mock.calls
     mockOpenGate = undefined
     mockSenderIdGate = undefined
     vi.restoreAllMocks()
     vi.clearAllTimers()
     vi.useRealTimers()
     localStorage.clear()
+    expect(externalRequests).toEqual([])
   })
 
   const create = async (initial: MatrixSyncResponse = emptySync()) => {
