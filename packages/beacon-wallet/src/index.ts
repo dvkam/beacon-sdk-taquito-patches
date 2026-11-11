@@ -9,3 +9,8 @@ import { WalletClientOptions } from './client/WalletClientOptions'
 export { WalletClient, WalletClientOptions }
 
 export type { WalletRequestOutputMessage } from './types/WalletRequestOutputMessage'
+
+export type {
+  WalletResponseInputMessage,
+  WalletResponseOutputMessage
+} from './types/WalletResponseMessage'
