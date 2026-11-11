@@ -1,5 +1,4 @@
 import {
-  BeaconRequestOutputMessage,
   BeaconMessageType,
   PermissionRequestOutput,
   AppMetadata,
@@ -9,22 +8,23 @@ import {
   ProofOfEventChallengeRequestOutput,
   ConnectionContext,
   BeaconRequestMessage,
-  BeaconMessageWrapper,
-  BlockchainRequestV3,
-  PermissionRequestV3,
-  BeaconBaseMessage,
+  BeaconMessageEnvelopeV3,
   SimulatedProofOfEventChallengeRequestOutput
+
   // EncryptPayloadRequestOutput
 } from '@ecadlabs/beacon-types'
 import { AppMetadataManager, Logger } from '@ecadlabs/beacon-core'
 
+import type { WalletRequestOutputMessage } from '../types/WalletRequestOutputMessage'
+import { isRecord, isV3Envelope } from '../utils/message-guards'
+
 const logger = new Logger('IncomingRequestInterceptor')
 
 interface IncomingRequestInterceptorOptions {
-  message: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>
+  message: BeaconRequestMessage | BeaconMessageEnvelopeV3
   connectionInfo: ConnectionContext
   appMetadataManager: AppMetadataManager
-  interceptorCallback(message: BeaconRequestOutputMessage, connectionInfo: ConnectionContext): void
+  interceptorCallback: (message: WalletRequestOutputMessage, connectionInfo: ConnectionContext) => void
 }
 
 interface IncomingRequestInterceptorOptionsV2 extends IncomingRequestInterceptorOptions {
@@ -32,7 +32,7 @@ interface IncomingRequestInterceptorOptionsV2 extends IncomingRequestInterceptor
 }
 
 interface IncomingRequestInterceptorOptionsV3 extends IncomingRequestInterceptorOptions {
-  message: BeaconMessageWrapper<BeaconBaseMessage>
+  message: BeaconMessageEnvelopeV3
 }
 /**
  * @internalapi
@@ -54,10 +54,12 @@ export class IncomingRequestInterceptor {
         config as IncomingRequestInterceptorOptionsV2
       )
     } else if (config.message.version === '3') {
-      // eslint-disable-next-line no-return-await
-      return await IncomingRequestInterceptor.handleV3Message(
-        config as IncomingRequestInterceptorOptionsV3
-      )
+      if (!isV3Envelope(config.message)) {
+        throw new Error('Invalid V3 request envelope')
+      }
+
+      return IncomingRequestInterceptor.handleV3Message({ ...config, message: config.message })
+
     }
   }
 
@@ -194,39 +196,40 @@ export class IncomingRequestInterceptor {
       interceptorCallback
     }: IncomingRequestInterceptorOptionsV3 = config
 
-    const wrappedMessage = msg as unknown as
-      | BeaconMessageWrapper<PermissionRequestV3>
-      | BeaconMessageWrapper<BlockchainRequestV3>
+    const v3Message = msg.message
 
-    const v3Message: PermissionRequestV3 | BlockchainRequestV3 = wrappedMessage.message
 
     switch (v3Message.type) {
       case BeaconMessageType.PermissionRequest:
         {
+          const blockchainData =
+            'blockchainData' in v3Message ? v3Message.blockchainData : undefined
+          const metadata = isRecord(blockchainData) ? blockchainData.appMetadata : undefined
+          if (!isRecord(metadata)) {
+            throw new Error('Invalid V3 permission metadata')
+          }
+
+          const name = metadata.name
+          const icon = metadata.icon
+          if (typeof name !== 'string' || (icon !== undefined && typeof icon !== 'string')) {
+            throw new Error('Invalid V3 permission metadata')
+          }
+
           await appMetadataManager.addAppMetadata({
-            ...v3Message.blockchainData.appMetadata,
+            ...metadata,
+            name,
+            icon,
             senderId: msg.senderId
-          }) // Make sure we use the actual senderId, not what the dApp told us
-          const request: any /* PermissionRequestOutput */ = wrappedMessage
-          interceptorCallback(request, connectionInfo)
+          })
+          interceptorCallback(msg, connectionInfo)
         }
         break
       case BeaconMessageType.BlockchainRequest:
-        {
-          // const appMetadata: AppMetadata = await IncomingRequestInterceptor.getAppMetadata(
-          //   appMetadataManager,
-          //   msg.senderId
-          // )
-          const request: any /* BeaconMessageWrapper<BlockchainRequestV3<string>> */ = {
-            ...wrappedMessage
-          }
-          interceptorCallback(request, connectionInfo)
-        }
+        interceptorCallback({ ...msg }, connectionInfo)
         break
-
       default:
         logger.log('intercept', 'Message not handled')
-        assertNever(v3Message)
+        throw new Error('Unsupported V3 request type')
     }
   }
 }

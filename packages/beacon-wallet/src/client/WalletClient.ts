@@ -20,14 +20,12 @@ import {
   PeerInfo,
   DisconnectMessage,
   TransportType,
-  BeaconRequestOutputMessage,
   BeaconResponseInputMessage,
   AppMetadata,
   PermissionInfo,
   TransportStatus,
   BeaconMessage,
-  BeaconMessageWrapper,
-  BeaconBaseMessage,
+  BeaconMessageEnvelopeV3,
   StorageKey,
   PushToken,
   PostMessagePairingRequest,
@@ -40,6 +38,9 @@ import { WalletP2PTransport } from '../transports/WalletP2PTransport'
 import { IncomingRequestInterceptor } from '../interceptors/IncomingRequestInterceptor'
 import { OutgoingResponseInterceptor } from '../interceptors/OutgoingResponseInterceptor'
 import { WalletClientOptions } from './WalletClientOptions'
+
+import type { WalletRequestOutputMessage } from '../types/WalletRequestOutputMessage'
+import { isV3Envelope } from '../utils/message-guards'
 
 const logger = new Logger('WalletClient')
 
@@ -71,10 +72,7 @@ export class WalletClient extends Client {
   /**
    * This array stores pending requests, meaning requests we received and have not yet handled / sent a response.
    */
-  private pendingRequests: [
-    BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>,
-    ConnectionContext
-  ][] = []
+  private pendingRequests: [BeaconRequestMessage | BeaconMessageEnvelopeV3, ConnectionContext][] = []
   private readonly disconnectListeners = new Map<DisconnectListener, () => void>()
 
   constructor(config: WalletClientOptions) {
@@ -108,13 +106,13 @@ export class WalletClient extends Client {
    */
   public async connect(
     newMessageCallback: (
-      message: BeaconRequestOutputMessage,
+      message: WalletRequestOutputMessage,
       connectionContext: ConnectionContext
     ) => void
   ): Promise<void> {
     const generation = this.deliveryGeneration
     const deliver = (
-      message: BeaconRequestOutputMessage,
+      message: WalletRequestOutputMessage,
       connectionContext: ConnectionContext
     ): void => {
       // Metadata enrichment can finish after this wallet's listener has been retired.
@@ -123,19 +121,23 @@ export class WalletClient extends Client {
       }
     }
     this.handleResponse = async (
-      message: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage> | DisconnectMessage,
+      message: BeaconRequestMessage | BeaconMessageEnvelopeV3 | DisconnectMessage,
       connectionContext: ConnectionContext
     ): Promise<void> => {
       if (!this.ownsDelivery(generation)) {
         return
       }
       if (message.version === '3') {
-        const typedMessage = message as BeaconMessageWrapper<BeaconBaseMessage>
         const disconnectSenderId = this.getDisconnectSenderId(message)
 
         if (disconnectSenderId) {
           return this.disconnect(disconnectSenderId)
         }
+
+        if (!isV3Envelope(message)) {
+          throw new Error('Invalid V3 request envelope')
+        }
+        const typedMessage = message
 
         if (!this.pendingRequests.some((request) => request[0].id === message.id)) {
           this.pendingRequests.push([typedMessage, connectionContext])
@@ -558,7 +560,7 @@ export class WalletClient extends Client {
    * @param message The message that was received
    */
   private async sendAcknowledgeResponse(
-    request: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>,
+    request: BeaconRequestMessage | BeaconMessageEnvelopeV3,
     connectionContext: ConnectionContext
   ): Promise<void> {
     // Acknowledge the message
@@ -642,17 +644,16 @@ export class WalletClient extends Client {
   }
 
   private getDisconnectSenderId(
-    message: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage> | DisconnectMessage
+    message: BeaconRequestMessage | BeaconMessageEnvelopeV3 | DisconnectMessage
   ): string | undefined {
     if (message.version === '3') {
-      const wrappedMessage = message as BeaconMessageWrapper<BeaconBaseMessage>
-      if (wrappedMessage.message?.type === BeaconMessageType.Disconnect) {
-        return wrappedMessage.senderId
+      if (isV3Envelope(message) && message.message.type === BeaconMessageType.Disconnect) {
+        return message.senderId
       }
     }
 
-    const typedMessage = message as DisconnectMessage
-
-    return typedMessage.type === BeaconMessageType.Disconnect ? typedMessage.senderId : undefined
+    return 'type' in message && message.type === BeaconMessageType.Disconnect
+      ? message.senderId
+      : undefined
   }
 }
