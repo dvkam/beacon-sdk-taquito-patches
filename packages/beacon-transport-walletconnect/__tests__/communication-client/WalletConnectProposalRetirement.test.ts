@@ -129,6 +129,12 @@ class Remote extends EventEmitter {
       })
     },
     relayer: {
+      on(event: string, callback: (value: unknown) => void): void {
+        this.events.on(event, callback)
+      },
+      off(event: string, callback: (value: unknown) => void): void {
+        this.events.off(event, callback)
+      },
       onProviderErrorHandler: (_error: Error): void => {},
       transportClose: vi.fn(async () => {
         this.trace.push('relay closed')

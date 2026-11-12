@@ -1429,27 +1429,35 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       signClient.core.pairing.events.on(event, callback)
       disposers.push(() => signClient.core.pairing.events.off?.(event, callback))
     }
-    const relayer = signClient.core.relayer as unknown as {
-      onProviderErrorHandler: (event: Error) => void | Promise<void>
-    }
-    const baseHandler = relayer.onProviderErrorHandler
-    const handler = async (event: Error) => {
+    const relayer = signClient.core.relayer
+    const reportRelayerCallbackError = (error: unknown): void =>
+      logger.warn('relayer error callback', getErrorDiagnostic(error))
+    const onRelayerError = (event: unknown): void => {
       if (!isCurrent()) {
         return
       }
-      logger.error('subscribeToSessionEvents', event)
-      if (event.message?.includes('JWT validation error')) {
-        const fun = this.eventHandlers.get(ClientEvents.ON_RELAYER_ERROR)
-        fun && fun(TransportType.WALLETCONNECT)
+      try {
+        logger.error('subscribeToSessionEvents', event)
+        const diagnostic = getErrorDiagnostic(event)
+        if (typeof diagnostic === 'string' && diagnostic.includes('JWT validation error')) {
+          const notify = this.eventHandlers.get(ClientEvents.ON_RELAYER_ERROR)
+          const notification: unknown = notify?.(TransportType.WALLETCONNECT)
+          Promise.resolve(notification).catch(reportRelayerCallbackError)
+        }
+      } catch (error: unknown) {
+        reportRelayerCallbackError(error)
+      } finally {
+        // Application callbacks may synchronously retire this client.
+        if (isCurrent()) {
+          this.close().catch((error: unknown) =>
+            logger.warn('relayer error cleanup', getErrorDiagnostic(error))
+          )
+        }
       }
-      await this.close()
     }
-    relayer.onProviderErrorHandler = handler
-    disposers.push(() => {
-      if (relayer.onProviderErrorHandler === handler) {
-        relayer.onProviderErrorHandler = baseHandler
-      }
-    })
+    // WalletConnect retains its own fatal-provider handling and transport cleanup.
+    relayer.on('relayer_error', onRelayerError)
+    disposers.push(() => relayer.off('relayer_error', onRelayerError))
 
     on('session_event', () => {
       // Legacy requestAcknowledged events have no required Beacon request ID.

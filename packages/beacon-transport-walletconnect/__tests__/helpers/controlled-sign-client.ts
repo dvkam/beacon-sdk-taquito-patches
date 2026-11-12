@@ -83,6 +83,8 @@ export const mockRemote = {
     events: { removeAllListeners: vi.fn() },
     heartbeat: { stop: vi.fn() },
     relayer: {
+      on: vi.fn(),
+      off: vi.fn(),
       transportClose: vi.fn(async () => {}),
       events: { removeAllListeners: vi.fn() },
       provider: {
