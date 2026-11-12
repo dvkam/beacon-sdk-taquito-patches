@@ -292,6 +292,7 @@ export interface BeaconEventType {
   [BeaconEvent.NO_PERMISSIONS]: undefined
   [BeaconEvent.ACTIVE_ACCOUNT_SET]: AccountInfo | undefined
   [BeaconEvent.ACTIVE_TRANSPORT_SET]: ActiveTransportInfo | undefined
+
   [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: undefined
   [BeaconEvent.GENERIC_ERROR]: string
   [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: InvalidAccountDeactivatedEvent | undefined
@@ -311,8 +312,9 @@ export interface BeaconEventType {
     | ExtendedPostMessagePairingResponse
     | ExtendedP2PPairingResponse
     | ExtendedWalletConnectPairingResponse
-  [BeaconEvent.CHANNEL_CLOSED]: string
+  [BeaconEvent.CHANNEL_CLOSED]: string | undefined
   [BeaconEvent.LATE_RESPONSE_RECEIVED]: LateResponseInfo
+
   [BeaconEvent.INTERNAL_ERROR]: { text: string; buttons?: AlertButton[] }
   [BeaconEvent.RELAYER_ERROR]: undefined
   [BeaconEvent.UNKNOWN]: undefined
@@ -971,7 +973,7 @@ export class BeaconEventHandler {
   >()
 
   private readonly callbackMap: {
-    [key in BeaconEvent]: BeaconEventHandlerFunction<any>[] // TODO: Fix type
+    [key in BeaconEvent]: BeaconEventHandlerFunction<BeaconEventType[key]>[]
   } = {
     [BeaconEvent.PERMISSION_REQUEST_SENT]: [defaultEventCallbacks.PERMISSION_REQUEST_SENT],
     [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: [defaultEventCallbacks.PERMISSION_REQUEST_SUCCESS],
@@ -1074,7 +1076,11 @@ export class BeaconEventHandler {
         return
       }
       subscriptions.delete(eventCallback)
-      this.callbackMap[event] = this.callbackMap[event].filter((entry) => entry !== listener)
+      const listeners = this.callbackMap[event]
+      const index = listeners.indexOf(listener)
+      if (index >= 0) {
+        listeners.splice(index, 1)
+      }
     }
     subscriptions.set(eventCallback, unsubscribe)
 
@@ -1087,14 +1093,20 @@ export class BeaconEventHandler {
    * @param event The event being emitted
    * @param data The data to be emit
    */
+  public emit<K extends BeaconEvent>(
+    event: K,
+    ...args: undefined extends BeaconEventType[K]
+      ? [data?: BeaconEventType[K], eventCallback?: AlertButton[]]
+      : [data: BeaconEventType[K], eventCallback?: AlertButton[]]
+  ): Promise<void>
   public async emit<K extends BeaconEvent>(
     event: K,
-    data?: BeaconEventType[K],
+    data: BeaconEventType[K],
     eventCallback?: AlertButton[]
   ): Promise<void> {
-    const listeners = this.callbackMap[event]
-    if (listeners && listeners.length > 0) {
-      listeners.forEach(async (listener: BeaconEventHandlerFunction) => {
+    const listeners = [...this.callbackMap[event]]
+    if (listeners.length > 0) {
+      listeners.forEach(async (listener) => {
         try {
           await listener(data, eventCallback)
         } catch (listenerError) {
@@ -1114,29 +1126,34 @@ export class BeaconEventHandler {
       handler: BeaconEventHandlerFunction<BeaconEventType[key]>
     }
   }): void {
-    Object.keys(eventsToOverride).forEach((untypedEvent: string) => {
-      const eventType: BeaconEvent = untypedEvent as BeaconEvent
-      const event = eventsToOverride[eventType]
-      if (event) {
-        this.callbackMap[eventType] = [event.handler]
-      }
-    })
+    Object.values(BeaconEvent).forEach((event) => this.overrideEvent(event, eventsToOverride))
+  }
+
+  private overrideEvent<K extends BeaconEvent>(
+    event: K,
+    overrides: {
+      [key in BeaconEvent]?: { handler: BeaconEventHandlerFunction<BeaconEventType[key]> }
+    }
+  ): void {
+    const override = overrides[event]
+    if (override) {
+      const listeners = this.callbackMap[event]
+      listeners.splice(0, listeners.length, override.handler)
+    }
   }
 
   /**
    * Set all event callbacks to a specific handler.
    */
   private setAllHandlers(handler?: BeaconEventHandlerFunction): void {
-    Object.keys(this.callbackMap).forEach((untypedEvent: string) => {
-      const eventType: BeaconEvent = untypedEvent as BeaconEvent
-      this.callbackMap[eventType] = []
-      if (handler) {
-        this.callbackMap[eventType].push(handler)
-      } else {
-        this.callbackMap[eventType].push((...data) => {
-          logger.log(untypedEvent, ...data)
-        })
-      }
-    })
+    Object.values(BeaconEvent).forEach((event) => this.setEventHandler(event, handler))
+  }
+
+  private setEventHandler<K extends BeaconEvent>(
+    event: K,
+    handler?: BeaconEventHandlerFunction
+  ): void {
+    const listeners = this.callbackMap[event]
+    listeners.splice(0, listeners.length, handler ?? ((...data) => logger.log(event, ...data)))
   }
 }

@@ -1,5 +1,5 @@
 import { closeAlert, closeToast, openAlert, openToast } from '@ecadlabs/beacon-ui'
-import { getError } from '@ecadlabs/beacon-core'
+import { getError, Logger } from '@ecadlabs/beacon-core'
 import {
   BeaconEvent,
   BeaconEventHandler,
@@ -683,5 +683,37 @@ describe('event subscription cleanup', () => {
     await handler.emit(BeaconEvent.GENERIC_ERROR, 'second')
     expect(listener).toHaveBeenCalledTimes(1)
     expect(next).toHaveBeenCalledTimes(2)
+  })
+})
+
+
+describe('event listener rejection', () => {
+  afterEach(() => vi.restoreAllMocks())
+  it('reports asynchronous listener failure without delaying emit or skipping other listeners', async () => {
+    const diagnostic = vi.fn()
+    const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(diagnostic)
+    const later = vi.fn()
+    let reject: (reason: unknown) => void = () => {
+      throw new Error('listener not started')
+    }
+    const failure = new Error('listener failed')
+    const handler = new BeaconEventHandler({}, true)
+    await handler.on(
+      BeaconEvent.LOCAL_RATE_LIMIT_REACHED,
+      () =>
+        new Promise<void>((_resolve, rejectPromise) => {
+          reject = rejectPromise
+        })
+    )
+    await handler.on(BeaconEvent.LOCAL_RATE_LIMIT_REACHED, later)
+    await handler.emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
+    expect(later).toHaveBeenCalledWith(undefined, undefined)
+    reject(failure)
+    await Promise.resolve()
+    expect(diagnostic).toHaveBeenCalledWith(
+      'error handling event LOCAL_RATE_LIMIT_REACHED',
+      failure
+    )
+    errorSpy.mockRestore()
   })
 })
