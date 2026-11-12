@@ -15,7 +15,8 @@ import {
   OperationResponse,
   Origin,
   SignPayloadResponse,
-  SigningType
+  SigningType,
+  TransportType
 } from '@ecadlabs/beacon-types'
 import { RequestErrorResponse } from '../src/dapp-client/request-error'
 import { TzktBlockExplorer } from '../src/utils/tzkt-blockexplorer'
@@ -716,4 +717,215 @@ describe('event listener rejection', () => {
     )
     errorSpy.mockRestore()
   })
+})
+
+describe('toast opt-out', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  async function emitToastDefaults(handler: BeaconEventHandler): Promise<void> {
+    const terminal = { requestId: 'request', receivedAt: 1, walletInfo }
+    const context = { origin: Origin.P2P, id: 'peer' }
+    const blockExplorer = new TzktBlockExplorer()
+    for (const event of [
+      BeaconEvent.PERMISSION_REQUEST_SENT,
+      BeaconEvent.OPERATION_REQUEST_SENT,
+      BeaconEvent.SIGN_REQUEST_SENT,
+      BeaconEvent.BROADCAST_REQUEST_SENT,
+      BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT,
+      BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT
+    ] as const) {
+      await handler.emit(event, {
+        requestId: 'request',
+        requestType: BeaconMessageType.PermissionRequest,
+        transport: TransportType.P2P,
+        dispatchStage: 'transport',
+        sentAt: 1,
+        extraInfo: {},
+        walletInfo
+      })
+    }
+    for (const event of [
+      BeaconEvent.PERMISSION_REQUEST_ERROR,
+      BeaconEvent.OPERATION_REQUEST_ERROR,
+      BeaconEvent.SIGN_REQUEST_ERROR,
+      BeaconEvent.BROADCAST_REQUEST_ERROR,
+      BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR,
+      BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR
+    ] as const) {
+      await handler.emit(event, {
+        ...terminal,
+        errorMessages: {},
+        errorResponse: {
+          ...envelope,
+          type: BeaconMessageType.Error,
+          errorType: BeaconErrorType.ABORTED_ERROR
+        }
+      })
+    }
+    await handler.emit(BeaconEvent.PERMISSION_REQUEST_SUCCESS, {
+      ...terminal,
+      account,
+      blockExplorer,
+      connectionContext: context,
+      output: {
+        ...envelope,
+        type: BeaconMessageType.PermissionResponse,
+        address: account.address,
+        accountInfo: account,
+        network,
+        scopes: [],
+        walletType: 'implicit',
+        appMetadata: { name: 'Wallet', senderId: 'wallet' }
+      }
+    })
+    await handler.emit(BeaconEvent.OPERATION_REQUEST_SUCCESS, {
+      ...terminal,
+      account,
+      blockExplorer,
+      connectionContext: context,
+      output: {
+        ...envelope,
+        type: BeaconMessageType.OperationResponse,
+        transactionHash: 'operation'
+      }
+    })
+    await handler.emit(BeaconEvent.BROADCAST_REQUEST_SUCCESS, {
+      ...terminal,
+      network,
+      blockExplorer,
+      connectionContext: context,
+      output: {
+        ...envelope,
+        type: BeaconMessageType.BroadcastResponse,
+        transactionHash: 'operation'
+      }
+    })
+    await handler.emit(BeaconEvent.SIGN_REQUEST_SUCCESS, {
+      ...terminal,
+      connectionContext: context,
+      output: {
+        ...envelope,
+        type: BeaconMessageType.SignPayloadResponse,
+        signature: 'signature',
+        signingType: SigningType.MICHELINE
+      }
+    })
+    await handler.emit(BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS, {
+      ...terminal,
+      account,
+      blockExplorer,
+      connectionContext: context,
+      output: {
+        ...envelope,
+        type: BeaconMessageType.ProofOfEventChallengeResponse,
+        payloadHash: 'payload',
+        isAccepted: true
+      }
+    })
+    await handler.emit(BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS, {
+      ...terminal,
+      account,
+      blockExplorer,
+      connectionContext: context,
+      output: {
+        ...envelope,
+        type: BeaconMessageType.SimulatedProofOfEventChallengeResponse,
+        operationsList: 'W10=',
+        errorMessage: ''
+      }
+    })
+    await handler.emit(BeaconEvent.SHOW_PREPARE, { walletInfo })
+    await handler.emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
+      receivedAt: 1,
+      walletInfo,
+      extraInfo: {},
+      correlated: false
+    })
+    await handler.emit(BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS, terminal)
+    const lateMessage: OperationResponse = {
+      ...envelope,
+      type: BeaconMessageType.OperationResponse,
+      transactionHash: 'operation'
+    }
+    await handler.emit(BeaconEvent.LATE_RESPONSE_RECEIVED, {
+      kind: 'success',
+      requestId: 'request',
+      requestType: BeaconMessageType.OperationRequest,
+      message: lateMessage,
+      output: lateMessage,
+      transactionHash: 'operation',
+      connectionInfo: context,
+      walletInfo
+    })
+  }
+
+  it('suppresses every built-in toast without changing other handler instances', async () => {
+    const errors = vi.spyOn(Logger.prototype, 'error')
+    await emitToastDefaults(new BeaconEventHandler())
+    // Each valid event must really create a toast before testing its suppression.
+    expect(openToast).toHaveBeenCalledTimes(22)
+    expect(errors).not.toHaveBeenCalled()
+    vi.clearAllMocks()
+    await emitToastDefaults(new BeaconEventHandler({}, false, { enableToasts: false }))
+    expect(openToast).not.toHaveBeenCalled()
+    expect(errors).not.toHaveBeenCalled()
+    await emitToastDefaults(new BeaconEventHandler({}, false, { enableToasts: true }))
+    expect(openToast).toHaveBeenCalledTimes(22)
+    errors.mockRestore()
+  })
+
+  it('preserves pairing, alert errors and explicit UI cleanup', async () => {
+    const handler = new BeaconEventHandler({}, false, { enableToasts: false })
+    await handler.emit(BeaconEvent.PAIR_INIT, {
+      p2pPeerInfo: Promise.resolve('p2p'),
+      postmessagePeerInfo: Promise.resolve('extension'),
+      walletConnectPeerInfo: Promise.resolve('wc'),
+      networkType: NetworkType.MAINNET,
+      analytics: { track: vi.fn() },
+      abortedHandler: vi.fn()
+    })
+    expect(openAlert).toHaveBeenCalledTimes(1)
+    await handler.emit(BeaconEvent.PAIR_SUCCESS, {
+      id: 'peer',
+      name: 'Wallet',
+      publicKey: 'key',
+      version: '2',
+      type: 'p2p-pairing-response',
+      senderId: 'wallet',
+      relayServer: 'relay'
+    })
+    expect(closeAlert).toHaveBeenCalledTimes(1)
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'Connection failed')
+    expect(openAlert).toHaveBeenLastCalledWith({
+      title: 'Connection failed',
+      body: 'Please try again.'
+    })
+    await handler.emit(BeaconEvent.HIDE_UI, ['alert', 'toast'])
+    expect(closeAlert).toHaveBeenCalledTimes(2)
+    expect(closeToast).toHaveBeenCalledTimes(1)
+    expect(openToast).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])(
+    'keeps explicit handlers and subscribers when disableDefaultEvents is %s',
+    async (disableAll) => {
+      const custom = vi.fn(() => openToast({ body: 'Custom UI', state: 'prepare' }))
+      const subscriber = vi.fn()
+      const handler = new BeaconEventHandler(
+        {
+          [BeaconEvent.SHOW_PREPARE]: { handler: custom }
+        },
+        disableAll,
+        { enableToasts: false }
+      )
+      await handler.on(BeaconEvent.SHOW_PREPARE, subscriber)
+      const data = { walletInfo }
+      await handler.emit(BeaconEvent.SHOW_PREPARE, data)
+      expect(custom).toHaveBeenCalledWith(data, undefined)
+      expect(subscriber).toHaveBeenCalledWith(data, undefined)
+      expect(openToast).toHaveBeenCalledWith({ body: 'Custom UI', state: 'prepare' })
+      await handler.emit(BeaconEvent.GENERIC_ERROR, 'Connection failed')
+      expect(openAlert).toHaveBeenCalledTimes(disableAll ? 0 : 1)
+    }
+  )
 })

@@ -38,6 +38,7 @@ import {
   // EncryptPayloadResponseOutput,
   // EncryptionOperation
 } from '@ecadlabs/beacon-core'
+import type { DAppClientOptions } from './dapp-client/DAppClientOptions'
 import { BlockExplorer } from './utils/block-explorer'
 import { shortenString } from './utils/shorten-string'
 import { LateResponseInfo, RequestErrorResponse } from './dapp-client/request-error'
@@ -961,6 +962,32 @@ export const defaultEventCallbacks: {
   [BeaconEvent.UNKNOWN]: emptyHandler()
 }
 
+// These defaults create toasts. Pairing, modal errors and UI cleanup stay enabled.
+const toastEvents: readonly BeaconEvent[] = [
+  BeaconEvent.PERMISSION_REQUEST_SENT,
+  BeaconEvent.PERMISSION_REQUEST_SUCCESS,
+  BeaconEvent.PERMISSION_REQUEST_ERROR,
+  BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT,
+  BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS,
+  BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR,
+  BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT,
+  BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS,
+  BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR,
+  BeaconEvent.OPERATION_REQUEST_SENT,
+  BeaconEvent.OPERATION_REQUEST_SUCCESS,
+  BeaconEvent.OPERATION_REQUEST_ERROR,
+  BeaconEvent.SIGN_REQUEST_SENT,
+  BeaconEvent.SIGN_REQUEST_SUCCESS,
+  BeaconEvent.SIGN_REQUEST_ERROR,
+  BeaconEvent.BROADCAST_REQUEST_SENT,
+  BeaconEvent.BROADCAST_REQUEST_SUCCESS,
+  BeaconEvent.BROADCAST_REQUEST_ERROR,
+  BeaconEvent.ACKNOWLEDGE_RECEIVED,
+  BeaconEvent.LATE_RESPONSE_RECEIVED,
+  BeaconEvent.SHOW_PREPARE,
+  BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS
+]
+
 /**
  * @internalapi
  *
@@ -1036,10 +1063,13 @@ export class BeaconEventHandler {
         handler: BeaconEventHandlerFunction<BeaconEventType[key]>
       }
     } = {},
-    overrideAll?: boolean
+    overrideAll?: boolean,
+    uiOptions: DAppClientOptions['uiOptions'] = {}
   ) {
     if (overrideAll) {
       this.setAllHandlers()
+    } else if (uiOptions?.enableToasts === false) {
+      toastEvents.forEach((event) => this.setEventHandler(event))
     }
     this.overrideDefaults(eventsToOverride)
   }

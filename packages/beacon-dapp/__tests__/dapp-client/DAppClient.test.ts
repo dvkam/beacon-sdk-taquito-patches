@@ -1,4 +1,5 @@
 import type { Mock } from 'vitest'
+import { openToast } from '@ecadlabs/beacon-ui'
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
@@ -96,7 +97,8 @@ vi.mock('@ecadlabs/beacon-ui', () => ({
   isDesktop: vi.fn().mockReturnValue(false),
   isMobileOS: vi.fn().mockReturnValue(false),
   isIOS: vi.fn().mockReturnValue(false),
-  closeToast: vi.fn()
+  closeToast: vi.fn(),
+  openToast: vi.fn()
 }))
 
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
@@ -4796,5 +4798,23 @@ describe('DAppClient: basic unit tests', () => {
     await expect(read).resolves.toBeUndefined()
     release.resolve()
     await startup
+  })
+})
+
+describe('DAppClient toast configuration', () => {
+  it('passes uiOptions to the event handler used by showPrepare', async () => {
+    vi.mocked(openToast).mockClear()
+    const quiet = new DAppClient({ name: 'Quiet dApp', uiOptions: { enableToasts: false } })
+    const defaults = new DAppClient({ name: 'Default dApp' })
+    try {
+      await quiet.showPrepare()
+      expect(openToast).not.toHaveBeenCalled()
+      await defaults.showPrepare()
+      expect(openToast).toHaveBeenCalledTimes(1)
+      expect(openToast).toHaveBeenCalledWith(expect.objectContaining({ state: 'prepare' }))
+    } finally {
+      await quiet.destroy()
+      await defaults.destroy()
+    }
   })
 })

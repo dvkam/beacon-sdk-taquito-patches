@@ -245,6 +245,10 @@ Please create a PR and add your wallet in
 
 For iOS wallets, the wallet needs to define a custom URL scheme to support same-device functionality.
 
+## Notifications
+
+DApps that present their own request notifications can [disable built-in toasts](docs/ui-options.md) while keeping pairing and modal alerts.
+
 ## Development
 
 ```sh
