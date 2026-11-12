@@ -5,7 +5,14 @@ import {
   TransportType
 } from '@ecadlabs/beacon-types'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
-import { BeaconEvent, BeaconEventType } from '../../src/events'
+import { BeaconEvent, BeaconEventHandler, BeaconEventType } from '../../src/events'
+
+export function configureToasts(): void {
+  new DAppClient({ name: 'Custom notifications', uiOptions: { enableToasts: false } })
+  new BeaconEventHandler({}, false, { enableToasts: true })
+  // @ts-expect-error Toast configuration accepts a boolean, not a string.
+  new DAppClient({ name: 'Invalid option', uiOptions: { enableToasts: 'false' } })
+}
 
 // This fixture is checked by TypeScript, not just transpiled by Vitest.
 export const cleared: BeaconEventType[BeaconEvent.ACTIVE_ACCOUNT_SET] = undefined
