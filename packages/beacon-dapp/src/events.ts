@@ -14,6 +14,10 @@ import {
   ExtendedPostMessagePairingResponse,
   ExtendedP2PPairingResponse,
   AccountInfo,
+  BlockchainAccountInfo,
+  StoredAccountInfo,
+  BeaconMessageWrapper,
+  PermissionResponseV3,
   PermissionResponseOutput,
   OperationResponseOutput,
   BroadcastResponseOutput,
@@ -207,15 +211,22 @@ export type AcknowledgeInfo = {
  */
 export type ActiveTransportInfo = Readonly<Pick<ClientTransport, 'type' | 'connectionStatus'>>
 
+export type PermissionResponseInfo = {
+  blockExplorer: BlockExplorer
+  connectionContext: ConnectionContext
+  walletInfo: WalletInfo
+} & (
+  | { protocolVersion?: '2'; account: AccountInfo; output: PermissionResponseOutput }
+  | {
+      protocolVersion: '3'
+      account: BlockchainAccountInfo
+      output: BeaconMessageWrapper<PermissionResponseV3>
+    }
+)
+
 export interface BeaconEventType {
   [BeaconEvent.PERMISSION_REQUEST_SENT]: RequestSentInfo
-  [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: RequestResponseInfo & {
-    account: AccountInfo
-    output: PermissionResponseOutput
-    blockExplorer: BlockExplorer
-    connectionContext: ConnectionContext
-    walletInfo: WalletInfo
-  }
+  [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: RequestResponseInfo & PermissionResponseInfo
   [BeaconEvent.PERMISSION_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
@@ -291,7 +302,7 @@ export interface BeaconEventType {
   [BeaconEvent.ACKNOWLEDGE_RECEIVED]: AcknowledgeInfo
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: undefined
   [BeaconEvent.NO_PERMISSIONS]: undefined
-  [BeaconEvent.ACTIVE_ACCOUNT_SET]: AccountInfo | undefined
+  [BeaconEvent.ACTIVE_ACCOUNT_SET]: StoredAccountInfo | undefined
   [BeaconEvent.ACTIVE_TRANSPORT_SET]: ActiveTransportInfo | undefined
 
   [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: undefined
@@ -657,18 +668,18 @@ const showPairAlert = async (data: BeaconEventType[BeaconEvent.PAIR_INIT]): Prom
 const showPermissionSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.PERMISSION_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { output } = data
-
+  const address = data.protocolVersion === '3' ? data.account.address : data.output.address
   const actions: ToastAction[] = [
     {
       text: 'Address',
-      actionText: shortenString(output.address),
+      actionText: shortenString(address),
       isBold: true
     }
   ]
 
   // V3 accounts carry chain-specific permissions rather than the Tezos network/scope schema.
-  if (!('chainData' in data.account)) {
+  if (data.protocolVersion !== '3') {
+    const { output } = data
     actions.push({
       text: 'Network',
       actionText: `${output.network.type}`

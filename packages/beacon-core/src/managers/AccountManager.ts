@@ -1,6 +1,13 @@
-import { Storage, StorageKey, AccountInfo, BeaconMessage } from '@ecadlabs/beacon-types'
+import {
+  Storage,
+  StorageKey,
+  AccountInfo,
+  StoredAccountInfo,
+  BeaconMessage
+} from '@ecadlabs/beacon-types'
 import { StorageManager } from './StorageManager'
 import { PermissionValidator } from './PermissionValidator'
+import { decodeStoredAccount } from './stored-account'
 
 /**
  * @internalapi
@@ -14,32 +21,40 @@ export class AccountManager {
     this.storageManager = new StorageManager(storage, StorageKey.ACCOUNTS)
   }
 
-  public async getAccounts(): Promise<AccountInfo[]> {
-    return (await this.storageManager.getAll()) ?? []
+  public async getAccounts(): Promise<StoredAccountInfo[]> {
+    const accounts: unknown = await this.storageManager.getAll()
+    if (!Array.isArray(accounts)) {
+      throw new Error('Invalid stored account collection')
+    }
+
+    return Array.from(accounts, decodeStoredAccount)
   }
 
-  public async getAccount(accountIdentifier: string): Promise<AccountInfo | undefined> {
-    return this.storageManager.getOne((account) => account.accountIdentifier === accountIdentifier)
+  public async getAccount(accountIdentifier: string): Promise<StoredAccountInfo | undefined> {
+    return (await this.getAccounts()).find(
+      (account) => account.accountIdentifier === accountIdentifier
+    )
   }
 
-  public async addAccount(accountInfo: AccountInfo): Promise<void> {
+  public async addAccount(accountInfo: StoredAccountInfo): Promise<void> {
+    await this.getAccounts()
     return this.storageManager.addOne(
-      accountInfo,
+      decodeStoredAccount(accountInfo),
       (account) => account.accountIdentifier === accountInfo.accountIdentifier
     )
   }
 
   public async updateAccount(
     accountIdentifier: string,
-    accountInfo: Partial<AccountInfo>
-  ): Promise<AccountInfo | undefined> {
+    accountInfo: Partial<StoredAccountInfo>
+  ): Promise<StoredAccountInfo | undefined> {
     const account = await this.getAccount(accountIdentifier)
 
     if (!account) {
       return undefined
     }
 
-    const newAccount = { ...account, ...accountInfo }
+    const newAccount = decodeStoredAccount({ ...account, ...accountInfo })
     await this.storageManager.addOne(
       newAccount,
       (account) => account.accountIdentifier === accountIdentifier,
@@ -66,8 +81,15 @@ export class AccountManager {
   public async hasPermission(message: BeaconMessage): Promise<boolean> {
     return PermissionValidator.hasPermission(
       message,
-      this.getAccount.bind(this),
-      this.getAccounts.bind(this)
+      async (id) => {
+        const account = await this.getAccount(id)
+
+        return account?.network ? account : undefined
+      },
+      async () =>
+        (await this.getAccounts()).filter(
+          (account): account is AccountInfo => account.network !== undefined
+        )
     )
   }
 }

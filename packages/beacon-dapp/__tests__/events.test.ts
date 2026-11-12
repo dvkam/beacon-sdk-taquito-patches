@@ -194,6 +194,41 @@ describe('Phase 2A event wiring', () => {
       })
     )
   })
+  it('permission success shows a V3 account address without inventing Tezos network or scopes', async () => {
+    await defaultEventCallbacks[BeaconEvent.PERMISSION_REQUEST_SUCCESS]({
+      protocolVersion: '3',
+      account: {
+        ...account,
+        network: undefined,
+        walletType: undefined,
+        scopes: ['custom-scope'],
+        chainData: {}
+      },
+      walletInfo,
+      connectionContext: { origin: Origin.P2P, id: 'peer' },
+      output: {
+        ...envelope,
+        version: '3',
+        message: {
+          type: BeaconMessageType.PermissionResponse,
+          blockchainIdentifier: 'custom-chain',
+          blockchainData: {
+            appMetadata: { name: 'Wallet', senderId: 'wallet' },
+            scopes: ['custom-scope']
+          }
+        }
+      },
+      blockExplorer: new TzktBlockExplorer(),
+      requestId: envelope.id,
+      receivedAt: 1
+    })
+    expect(openToast).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        actions: [expect.objectContaining({ text: 'Address' })]
+      })
+    )
+  })
+
   it.each([BeaconEvent.OPERATION_REQUEST_SUCCESS, BeaconEvent.BROADCAST_REQUEST_SUCCESS] as const)(
     '%s links to the transaction explorer',
     async (event) => {
@@ -625,7 +660,6 @@ describe('transaction error details', () => {
   })
 })
 
-
 describe('event subscription cleanup', () => {
   it('removes only the subscribed callback and preserves defaults and other events', async () => {
     const handler = new BeaconEventHandler()
@@ -686,7 +720,6 @@ describe('event subscription cleanup', () => {
     expect(next).toHaveBeenCalledTimes(2)
   })
 })
-
 
 describe('event listener rejection', () => {
   afterEach(() => vi.restoreAllMocks())

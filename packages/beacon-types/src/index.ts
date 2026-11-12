@@ -38,7 +38,12 @@ import { MichelineMichelsonV1Expression } from './types/tezos/MichelineMichelson
 import { MichelsonPrimitives } from './types/tezos/MichelsonPrimitives'
 import { TezosTransactionParameters } from './types/tezos/TezosTransactionParameters'
 import { Origin } from './types/Origin'
-import { AccountInfo, AccountIdentifier } from './types/AccountInfo'
+import {
+  AccountInfo,
+  AccountIdentifier,
+  BlockchainAccountInfo,
+  StoredAccountInfo
+} from './types/AccountInfo'
 import { EncryptedExtensionMessage, ExtensionMessage } from './types/ExtensionMessage'
 import { ExtensionMessageTarget } from './types/ExtensionMessageTarget'
 import { TezosOperation } from './types/tezos/TezosOperation'
@@ -284,6 +289,8 @@ export {
   PermissionScope,
   Origin,
   AccountInfo,
+  BlockchainAccountInfo,
+  StoredAccountInfo,
   Threshold,
   SigningType,
   // EncryptionType,

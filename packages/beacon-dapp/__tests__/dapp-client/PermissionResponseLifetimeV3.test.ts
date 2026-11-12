@@ -248,7 +248,7 @@ describe('V3 permission response lifetime', () => {
     }
   }
 
-  async function begin() {
+  async function begin(responseChain = 'tezos', responseScopes: unknown = [PermissionScope.SIGN]) {
     const settled = vi.fn()
     const outcome = dapp
       .permissionRequest({
@@ -274,10 +274,10 @@ describe('V3 permission response lifetime', () => {
     if (!sent || typeof sent !== 'object' || !('id' in sent) || typeof sent.id !== 'string') {
       throw new Error('Missing request ID')
     }
-    const message: PermissionResponseV3 = {
+    const message = {
       type: BeaconMessageType.PermissionResponse,
-      blockchainIdentifier: 'tezos',
-      blockchainData: { appMetadata: metadata, scopes: [PermissionScope.SIGN] }
+      blockchainIdentifier: responseChain,
+      blockchainData: { appMetadata: metadata, scopes: responseScopes }
     }
     await transport.receive({ id: sent.id, senderId: peer.senderId, version: '3', message })
     await vi.advanceTimersByTimeAsync(0)
@@ -449,6 +449,103 @@ describe('V3 permission response lifetime', () => {
     expect(succeeded).toHaveBeenCalledTimes(1)
     expect(failed).not.toHaveBeenCalled()
     expect(await dapp.getActiveAccount()).toBeUndefined()
+  })
+
+  it('persists a chain-owned account and emits the original wrapped permission response', async () => {
+    const pending = await begin()
+    await expect(pending.outcome).resolves.toEqual({ value: pending.message })
+    const account = await dapp.getActiveAccount()
+    expect(account).toEqual({
+      accountIdentifier,
+      senderId: peer.senderId,
+      origin: { type: connectionInfo.origin, id: connectionInfo.id },
+      address: partialAccounts[0].address,
+      publicKey,
+      scopes: [PermissionScope.SIGN],
+      connectedAt: expect.any(Number),
+      chainData: pending.message.blockchainData,
+      blockchainIdentifier: 'tezos'
+    })
+    expect(await dapp.getAccounts()).toEqual([account])
+    expect(callback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ account }))
+    expect(succeeded).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        protocolVersion: '3',
+        account,
+        output: { id: pending.id, senderId: peer.senderId, version: '3', message: pending.message }
+      }),
+      undefined
+    )
+  })
+
+  it.each([
+    ['wrong blockchain', 'another-chain', [PermissionScope.SIGN]],
+    ['non-string scopes', 'tezos', [PermissionScope.SIGN, 7]]
+  ])('rejects %s before adapter dispatch or account persistence', async (_label, chain, scopes) => {
+    const accounts = vi.spyOn(blockchain, 'getAccountInfosFromPermissionResponse')
+    const pending = await begin(chain, scopes)
+    await expect(pending.outcome).resolves.toEqual({ error: expect.any(Error) })
+    expect(accounts).not.toHaveBeenCalled()
+    expect(callback).not.toHaveBeenCalled()
+    expect(succeeded).not.toHaveBeenCalled()
+    expect(await dapp.getAccounts()).toEqual([])
+    expect(await dapp.getActiveAccount()).toBeUndefined()
+  })
+
+  it('snapshots wallet grants before adapter awaits and isolates the returned response', async () => {
+    blockchain.getAccountInfosFromPermissionResponse = async (response) => {
+      await Promise.resolve()
+      response.blockchainIdentifier = 'mutated-chain'
+      response.blockchainData.scopes.push('injected-scope')
+      return partialAccounts
+    }
+    callback.mockImplementationOnce(async (input) => {
+      input.request.type = BeaconMessageType.OperationRequest
+      input.request.blockchainIdentifier = 'mutated-callback-chain'
+      if ('chainData' in input.account) {
+        input.account.scopes.push('injected-account-scope')
+        const chainData = input.account.chainData
+        if (
+          chainData !== null &&
+          typeof chainData === 'object' &&
+          'scopes' in chainData &&
+          Array.isArray(chainData.scopes)
+        ) {
+          chainData.scopes.push('injected-chain-scope')
+        }
+      }
+      if ('blockchainData' in input.output.message) {
+        input.output.message.blockchainData = { scopes: ['second-injection'] }
+      }
+    })
+    const pending = await begin()
+    await expect.soft(pending.outcome).resolves.toEqual({ value: pending.message })
+    expect(succeeded).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        protocolVersion: '3',
+        output: { id: pending.id, senderId: peer.senderId, version: '3', message: pending.message }
+      }),
+      undefined
+    )
+    expect(await dapp.getActiveAccount()).toEqual(
+      expect.objectContaining({
+        scopes: [PermissionScope.SIGN],
+        blockchainIdentifier: 'tezos',
+        chainData: pending.message.blockchainData
+      })
+    )
+  })
+
+  it('rejects an empty blockchain account list before persisting or selecting an account', async () => {
+    blockchain.getAccountInfosFromPermissionResponse = async () => []
+    const pending = await begin()
+    await expect(pending.outcome).resolves.toEqual({
+      error: new Error('No accounts returned by blockchain "tezos"')
+    })
+    expect(await dapp.getAccounts()).toEqual([])
+    expect(await dapp.getActiveAccount()).toBeUndefined()
+    expect(callback).not.toHaveBeenCalled()
+    expect(succeeded).not.toHaveBeenCalled()
   })
 
   it('keeps the V3 result when a success observer clears the account', async () => {
