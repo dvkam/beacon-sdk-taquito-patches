@@ -500,6 +500,8 @@ describe('V3 permission response lifetime', () => {
       return partialAccounts
     }
     callback.mockImplementationOnce(async (input) => {
+      input.request.type = BeaconMessageType.OperationRequest
+      input.request.blockchainIdentifier = 'mutated-callback-chain'
       if ('chainData' in input.account) {
         input.account.scopes.push('injected-account-scope')
         const chainData = input.account.chainData
@@ -518,6 +520,13 @@ describe('V3 permission response lifetime', () => {
     })
     const pending = await begin()
     await expect.soft(pending.outcome).resolves.toEqual({ value: pending.message })
+    expect(succeeded).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        protocolVersion: '3',
+        output: { id: pending.id, senderId: peer.senderId, version: '3', message: pending.message }
+      }),
+      undefined
+    )
     expect(await dapp.getActiveAccount()).toEqual(
       expect.objectContaining({
         scopes: [PermissionScope.SIGN],

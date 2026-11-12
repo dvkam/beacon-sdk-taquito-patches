@@ -19,6 +19,6 @@ AccountManager validates each stored record before exposing it. Invalid records 
 
 Validation establishes the account fields used by the SDK. It does not validate the contents of chainData or authenticate a wallet. Chain-owned scope strings cannot grant Tezos V2 permissions merely because their spelling matches a Tezos permission.
 
-V3 permission responses must match the requested blockchain and contain a dense array of string scopes before adapter dispatch. The SDK snapshots the response and isolates adapter callback inputs, so later callback mutation cannot change the granted permissions or returned response.
+V3 permission responses must match the requested blockchain and contain a dense array of string scopes before adapter dispatch. The SDK snapshots the response and copies the protocol request, account and response passed to adapter callbacks. Later callback mutation cannot change the permission-success event selection, granted permissions or returned response.
 
 A blockchain adapter returning no accounts now causes a descriptive error before account storage or selection. Permission request cancellation and rollback continue to own any asynchronous write.

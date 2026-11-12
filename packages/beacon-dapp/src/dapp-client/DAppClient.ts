@@ -2865,7 +2865,7 @@ export class DAppClient extends Client {
       const callbackWalletInfo = await this.getWalletInfo()
       owner.assertCurrent()
       await blockchain.handleResponse({
-        request,
+        request: structuredClone(request),
         account: structuredClone(accountInfo),
         output: structuredClone(permissionEnvelope),
         blockExplorer: this.blockExplorer,
