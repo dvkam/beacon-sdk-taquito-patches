@@ -174,11 +174,8 @@ it('leader prepares delegated requests and broadcasts their responses with the o
     signature: 'sig',
     signingType: SigningType.RAW
   }
-  // handleResponse accepts responses at runtime despite its request-only annotation.
-  await client['onBCMessageHandler']({
-    type: 'RESPONSE',
-    data: { message: response, connectionInfo }
-  })
+  // Wallet replies enter the response handler, not the follower-only tab channel.
+  await client['handleResponse'](response, connectionInfo)
   expect(channel.postMessage).toHaveBeenCalledWith({
     type: 'RESPONSE',
     id: request.id,

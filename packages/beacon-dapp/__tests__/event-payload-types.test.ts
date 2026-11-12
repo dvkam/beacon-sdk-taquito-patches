@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import ts from 'typescript'
 
-it.each(['event-payloads', 'message-observer'])(
+it.each(['event-payloads', 'message-observer', 'wire-responses'])(
   'type-checks public subscriber contract: %s',
   (fixture) => {
     const configPath = resolve('tsconfig.json')

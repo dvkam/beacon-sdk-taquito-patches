@@ -40,7 +40,6 @@ import {
   ExtendedPostMessagePairingResponse,
   SigningType,
   ExtendedPeerInfo,
-  Optional,
   ColorMode,
   IgnoredRequestInputProperties,
   WalletInfo,
@@ -51,7 +50,6 @@ import {
   BlockchainResponseV3,
   PermissionRequestV3,
   PermissionResponseV3,
-  BeaconBaseMessage,
   ExtendedWalletConnectPairingResponse,
   ProofOfEventChallengeRequest,
   ProofOfEventChallengeResponse,
@@ -150,15 +148,22 @@ import {
   LateResponseInfo,
   localError,
   ResponseMessage,
+  responseOutput,
   stampErrorOrigin,
   toRequestError
 } from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
 import { TabLifecycle } from './TabLifecycle'
 import { BeaconMessageRecord, MessageObserver } from './message-observer'
+import {
+  ForwardedBroadcastRequest,
+  ForwardedV2Request,
+  parseBroadcastMessage,
+  responseAppMetadata
+} from './broadcast-messages'
 
 interface RequestResponse {
-  message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage | BlockchainMessage>
+  message: ResponseMessage
   connectionInfo: ConnectionContext
 }
 interface RequestHandle {
@@ -272,6 +277,12 @@ type PreparedAccountSelection =
  * @category DApp
  */
 export class DAppClient extends Client {
+  declare protected handleResponse: (
+    message: ResponseMessage,
+    connectionInfo: ConnectionContext,
+    transportType?: TransportType
+  ) => void | Promise<void>
+
   /**
    * The description of the app
    */
@@ -548,7 +559,7 @@ export class DAppClient extends Client {
       })
 
     this.handleResponse = async (
-      message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>,
+      message: ResponseMessage,
       connectionInfo: ConnectionContext,
       transportType?: TransportType
     ): Promise<void> => {
@@ -575,7 +586,7 @@ export class DAppClient extends Client {
       const fromAdapter = transportType === TransportType.WALLETCONNECT
       const isV3WrappedMessage = message.version === '3' && 'message' in message
 
-      const typedMessage = isV3WrappedMessage ? message.message : (message as BeaconMessage)
+      const typedMessage = responseOutput(message)
 
       if (
         typedMessage.type === BeaconMessageType.ChangeAccountRequest ||
@@ -612,9 +623,7 @@ export class DAppClient extends Client {
         return
       }
 
-      let appMetadata: AppMetadata | undefined = isV3WrappedMessage
-        ? (typedMessage as unknown as PermissionResponseV3).blockchainData?.appMetadata
-        : (typedMessage as PermissionResponse).appMetadata
+      let appMetadata = responseAppMetadata(message)
 
       if (!appMetadata && isV3WrappedMessage) {
         const storedMetadata = await Promise.all([
@@ -871,27 +880,36 @@ export class DAppClient extends Client {
     await this.tabLifecycle.waitForPromotion()
   }
 
-  private async onBCMessageHandler(message: any) {
-    switch (message.type) {
-      case BeaconMessageType.PermissionRequest:
-      case BeaconMessageType.OperationRequest:
-      case BeaconMessageType.SignPayloadRequest:
-      case BeaconMessageType.BroadcastRequest:
-      case BeaconMessageType.ProofOfEventChallengeRequest:
-      case BeaconMessageType.SimulatedProofOfEventChallengeRequest:
-        this.prepareRequest(message)
+  private async onBCMessageHandler(value: unknown): Promise<void> {
+    const message = parseBroadcastMessage(value)
+    if (!message) {
+      return
+    }
+    switch (message.kind) {
+      case 'v2':
+      case 'v3':
+        this.prepareRequest(message).catch((error: unknown) =>
+          logger.warn('prepareRequest', error)
+        )
         break
-      case BeaconMessageType.BlockchainRequest:
-        this.prepareRequest(message, true)
+      case 'response': {
+        const request = this.requestTracker.get(message.id)
+        const late = this.timedOutRequests.get(message.id)
+        // Inter-tab replies belong only to this tab's follower requests.
+        if (request?.route !== 'Follower' && late?.route !== 'Follower') {
+          return
+        }
+        await this.handleResponse(message.message, message.connectionInfo)
         break
-      case 'RESPONSE':
-        this.handleResponse(message.data.message, message.data.connectionInfo)
-        break
-      case 'DISCONNECT':
+      }
+      case 'disconnect':
         await this.disconnect()
         break
-      default:
-        logger.error('onBCMessageHandler', 'message type not recognized', message)
+      default: {
+        const unmatched: never = message
+
+        return unmatched
+      }
     }
   }
 
@@ -1102,10 +1120,7 @@ export class DAppClient extends Client {
     return matchedPeer || matchedAccount
   }
 
-  private async prepareRequest(
-    message: { id: string; data: BeaconRequestInputMessage | BlockchainMessage },
-    isV3 = false
-  ): Promise<void> {
+  private async prepareRequest(message: ForwardedBroadcastRequest): Promise<void> {
     if (this.destroyed || !this.tabLifecycle.confirmLeader()) {
       return
     }
@@ -1133,14 +1148,10 @@ export class DAppClient extends Client {
       if (!this.isRequestCurrent(request.key)) {
         return
       }
-      if (isV3) {
-        await this.makeRequestV3(message.data as BlockchainMessage, message.id)
+      if (message.kind === 'v3') {
+        await this.makeRequestV3(message.data, message.id)
       } else {
-        await this.makeRequest<BeaconRequestInputMessage, BeaconMessage>(
-          message.data as BeaconRequestInputMessage,
-          false,
-          message.id
-        )
+        await this.makeRequest<ForwardedV2Request, BeaconMessage>(message.data, false, message.id)
       }
     } catch (error) {
       this.requestTracker.reject(request.key, error)
@@ -2882,7 +2893,7 @@ export class DAppClient extends Client {
     logger.time(true, logId)
     const res = (await this.checkMakeRequest())
       ? this.makeRequestV3<BlockchainRequestV3, BeaconMessageWrapper<BlockchainResponseV3>>(request)
-      : this.makeRequestBC<any, any>(request)
+      : this.makeRequestBC<BlockchainRequestV3, BeaconMessageWrapper<BlockchainResponseV3>>(request)
 
     let resolved
     try {
@@ -3931,8 +3942,8 @@ export class DAppClient extends Client {
    * @param skipResponse If true, the function return as soon as the message is sent
    */
 
-  private makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
-    requestInput: Optional<T, IgnoredRequestInputProperties>,
+  private makeRequest<T extends ForwardedV2Request, U extends BeaconMessage>(
+    requestInput: Omit<T, IgnoredRequestInputProperties>,
     skipResponse?: undefined | false,
     otherTabMessageId?: string,
     permissionOwner?: PermissionRequestOwner
@@ -3940,14 +3951,14 @@ export class DAppClient extends Client {
     message: U
     connectionInfo: ConnectionContext
   }>
-  private makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
-    requestInput: Optional<T, IgnoredRequestInputProperties>,
+  private makeRequest<T extends ForwardedV2Request>(
+    requestInput: Omit<T, IgnoredRequestInputProperties>,
     skipResponse: true,
     otherTabMessageId?: string,
     permissionOwner?: PermissionRequestOwner
   ): Promise<undefined>
-  private async makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
-    requestInput: Optional<T, IgnoredRequestInputProperties>,
+  private async makeRequest<T extends ForwardedV2Request, U extends BeaconMessage>(
+    requestInput: Omit<T, IgnoredRequestInputProperties>,
     skipResponse?: boolean,
     otherTabMessageId?: string,
     permissionOwner?: PermissionRequestOwner
@@ -4296,8 +4307,11 @@ export class DAppClient extends Client {
     return prepare() as Promise<{ message: U; connectionInfo: ConnectionContext }>
   }
 
-  private async makeRequestBC<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
-    request: Optional<T, IgnoredRequestInputProperties>,
+  private async makeRequestBC<
+    T extends BeaconRequestInputMessage | BlockchainRequestV3,
+    U extends BeaconMessage | BeaconMessageWrapper<BlockchainMessage>
+  >(
+    request: Omit<T, IgnoredRequestInputProperties>,
     permissionOwner?: PermissionRequestOwner
   ): Promise<{ message: U; connectionInfo: ConnectionContext } | undefined> {
     const route = this.tabLifecycle.followerSignal
@@ -4845,9 +4859,9 @@ export class DAppClient extends Client {
    * on the message type, so an error without errorType is marked too.
    */
   private attributeForwardedMessage(
-    message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>,
+    message: ResponseMessage,
     fromAdapter: boolean
-  ): BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage> {
+  ): ResponseMessage {
     return stampErrorOrigin(message, fromAdapter)
   }
 
