@@ -7,3 +7,28 @@ Restoration checks that the shared pointer still names the account and that the 
 `clearActiveAccount()` may keep initialized transports available for pairing. `disconnect()` retires the client's transports and allows a later connection. `destroy()` retires the instance permanently. Stopping a pending Matrix login or sync also cancels its continuation, so it cannot restart polling or clear a newer connection's shared state.
 
 Custom storage must deliver change notifications for writes from other clients. The storage interface has no conditional transaction operation, so it does not provide atomic ordering across clients using arbitrary asynchronous storage backends.
+
+
+## Storage change subscriptions
+
+`StorageChangeEvent` carries physical keys and serialized string values, including
+the key prefix used by the storage adapter. Listener return values are ignored;
+`LocalStorage` reports synchronous and asynchronous listener failures without
+waiting for listeners to finish or preventing later notifications.
+
+`LocalStorage` subscribes to changes from other documents sharing its local
+storage area. It ignores session storage events. A prefixed instance forwards
+only its physical `StorageKey` entries, plus notifications that the entire
+storage area was cleared. An empty key is an entry change, not a clear.
+
+`ChromeStorage` and `IndexedDBStorage` do not support external-change
+subscriptions. They now reject registration instead of resolving without
+registering a listener. Their read and write operations are unchanged. Callers must handle
+registration failures; the built-in DApp and wallet clients already do so. Use `LocalStorage` or a custom adapter with external-change
+notifications when cross-context account and peer synchronization is required.
+
+[Chrome's native change event](https://developer.chrome.com/docs/extensions/reference/api/storage#event-onChanged) includes the writing context and has no writer
+identifier. Forwarding it directly can cancel the client's own account update
+or duplicate peer events. IndexedDB has no native cross-context change event,
+and WalletConnect also writes its databases directly. Reliable support requires
+more than notifying only writes made through these adapters.

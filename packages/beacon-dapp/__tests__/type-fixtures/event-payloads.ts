@@ -185,3 +185,10 @@ export function clientCallbacks(
   communication.eventHandlers.get(ClientEvents.WC_ACK_NOTIFICATION)?.(TransportType.WALLETCONNECT)
   communication.eventHandlers.get(ClientEvents.TRANSPORT_STATUS)?.({ reason: 'relay_changed' })
 }
+
+// Existing object returns, void callbacks and async callbacks remain accepted.
+export const storageChangeListeners: import('@ecadlabs/beacon-types').StorageChangeListener[] = [
+  () => ({ legacy: true }),
+  () => {},
+  async () => {}
+]

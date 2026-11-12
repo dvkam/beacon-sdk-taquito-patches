@@ -6,7 +6,7 @@ import { normalizeParsedStoredValue } from './storage-normalization'
  *
  * A storage that can be used in chrome extensions
  */
-export class ChromeStorage implements Storage {
+export class ChromeStorage extends Storage {
   public static async isSupported(): Promise<boolean> {
     return (
       typeof window !== 'undefined' &&
@@ -43,17 +43,6 @@ export class ChromeStorage implements Storage {
         resolve()
       })
     })
-  }
-
-  public async subscribeToStorageChanged(
-    _callback: (arg: {
-      eventType: 'storageCleared' | 'entryModified'
-      key: string | null
-      oldValue: string | null
-      newValue: string | null
-    }) => {}
-  ): Promise<void> {
-    // TODO
   }
 
   public getPrefixedKey(key: string): string {

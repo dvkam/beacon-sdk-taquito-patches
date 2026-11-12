@@ -97,9 +97,13 @@ it('returns a storage key instead of throwing Method not implemented', async () 
   const storage = await initialized()
   expect(storage.getPrefixedKey(StorageKey.ACTIVE_ACCOUNT)).toBe(StorageKey.ACTIVE_ACCOUNT)
 })
-it('accepts a storage change subscription', async () => {
+it('rejects unsupported subscriptions while storage operations remain available', async () => {
   const storage = await initialized()
-  await expect(storage.subscribeToStorageChanged(() => ({}))).resolves.toBeUndefined()
+  await expect(storage.subscribeToStorageChanged(() => ({}))).rejects.toThrow(
+    'does not support change notifications'
+  )
+  await storage.set('still-usable', 'value')
+  expect(await storage.get('still-usable')).toBe('value')
 })
 
 it('finishes copying before fillStore resolves', async () => {
@@ -195,7 +199,6 @@ it('finishes initialization before opening the same database as a copy target', 
     await copying.catch(() => undefined)
   }
 })
-
 
 it('rejects a constraint failure and rolls back the complete copied transaction', async () => {
   const source = await initialized('constraint-source')
