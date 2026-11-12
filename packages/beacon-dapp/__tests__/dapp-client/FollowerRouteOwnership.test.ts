@@ -457,6 +457,64 @@ describe('Follower route ownership', () => {
     })
   })
 
+  it('ignores malformed or mismatched envelopes without consuming the follower request', async () => {
+    await create()
+    await create()
+    const pending = await begin(1)
+    const valid = response(pending.id)
+    const malformed: unknown[] = [
+      undefined,
+      null,
+      [],
+      { type: 'RESPONSE' },
+      { type: 'RESPONSE', id: pending.id, data: null },
+      { ...valid, data: { ...valid.data, message: null } },
+      { ...valid, data: { ...valid.data, message: [] } },
+      { ...valid, data: { ...valid.data, connectionInfo: null } },
+      { ...valid, data: { ...valid.data, connectionInfo: { origin: 'unknown', id: 'topic' } } },
+      { ...valid, data: { ...valid.data, connectionInfo: { origin: Origin.WALLETCONNECT } } },
+      { ...valid, id: 'other-request' },
+      {
+        ...valid,
+        data: { ...valid.data, message: { ...valid.data.message, id: 'other-request' } }
+      },
+      { ...valid, data: { ...valid.data, message: { ...valid.data.message, signature: [] } } },
+      {
+        ...valid,
+        data: {
+          ...valid.data,
+          message: {
+            id: pending.id,
+            version: '3',
+            senderId: 'wallet',
+            message: { type: BeaconMessageType.Disconnect }
+          }
+        }
+      }
+    ]
+    for (const message of malformed) {
+      deliver(1, message)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(pending.settled).not.toHaveBeenCalled()
+    }
+    // Older wallets can omit signingType. Do not invent it or reject their valid response.
+    deliver(1, {
+      ...valid,
+      data: {
+        ...valid.data,
+        message: {
+          id: pending.id,
+          version: '2',
+          senderId: 'wallet',
+          type: BeaconMessageType.SignPayloadResponse,
+          signature: 'legacy-signature'
+        }
+      }
+    })
+    expect(await pending.outcome).toMatchObject({ value: { signature: 'legacy-signature' } })
+    expect(await pending.outcome).not.toHaveProperty('value.signingType')
+  })
+
   it('accepts the existing response envelope once and ignores unrelated IDs', async () => {
     await create()
     const follower = await create()

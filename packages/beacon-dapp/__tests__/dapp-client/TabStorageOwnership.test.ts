@@ -180,7 +180,7 @@ async function respond(id: string) {
         signature: 'sig',
         signingType: SigningType.RAW
       },
-      connectionInfo: account.origin
+      connectionInfo: { origin: account.origin.type, id: account.origin.id }
     }
   })
 }

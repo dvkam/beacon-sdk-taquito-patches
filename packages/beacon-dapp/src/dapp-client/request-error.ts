@@ -62,9 +62,15 @@ export interface V3ResponsePayload {
   type: unknown
 }
 
-/** A response as it reaches the dApp: a V2 message, or a V3 envelope around one. @category DApp */
+/**
+ * A response as it reaches the dApp: V2 wire headers or a V3 envelope.
+ * Payload fields remain unverified until the relevant consumer narrows them. Older wallets
+ * can omit response fields such as signingType; routing must not invent those fields.
+ * @category DApp
+ */
 export type ResponseMessage =
   | BeaconMessage
+  | BeaconBaseMessage
   | WireErrorMessage
   | BeaconMessageWrapper<BeaconBaseMessage | BlockchainMessage | V3ResponsePayload>
 
@@ -151,7 +157,7 @@ const isV3Envelope = (
 ): message is BeaconMessageWrapper<BeaconBaseMessage | BlockchainMessage | V3ResponsePayload> =>
   'message' in message && message.version === '3'
 
-const answerOf = (message: ResponseMessage): ResponseOutput =>
+export const responseOutput = (message: ResponseMessage): ResponseOutput =>
   isV3Envelope(message) ? message.message : message
 
 // A wallet may send an error type this SDK does not know. It passes through, as it always has,
@@ -177,7 +183,7 @@ export const toRequestError = (
   message: ResponseMessage,
   trustClaimedOrigin: boolean
 ): RequestErrorResponse | undefined => {
-  const answer: unknown = answerOf(message)
+  const answer: unknown = responseOutput(message)
   if (!isErrorMessage(answer)) {
     return undefined
   }
@@ -258,7 +264,7 @@ export const classifyLateResponse = (
   return {
     kind: 'success',
     message,
-    output: answerOf(message),
+    output: responseOutput(message),
     transactionHash: transactionHashOf(message)
   }
 }

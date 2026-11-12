@@ -1,4 +1,4 @@
-import { LocalStorage } from '@ecadlabs/beacon-core'
+import { LocalStorage, Serializer } from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
   AccountInfo,
@@ -17,6 +17,7 @@ import {
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 import { BeaconEvent } from '../../src/events'
+import { ResponseMessage } from '../../src/dapp-client/request-error'
 
 const bus = vi.hoisted(() => ({
   endpoints: [] as {
@@ -260,11 +261,89 @@ describe('Delegated request lifetime', () => {
     await vi.advanceTimersByTimeAsync(0)
   }
 
-  async function receiveWallet(message: unknown) {
-    deliverTo(0, { type: 'RESPONSE', data: { message, connectionInfo } })
+  async function receiveWallet(message: ResponseMessage) {
+    // A wallet reply enters the response handler, not the follower-only tab channel.
+    await leader['handleResponse'](message, connectionInfo)
     await vi.advanceTimersByTimeAsync(0)
     await deliverResponses()
   }
+
+  it('does not let a tab response settle a request sent directly by this tab', async () => {
+    const pending = observe(
+      leader.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(transport.send).toHaveBeenCalledTimes(1)
+    const request = await new Serializer().deserialize(vi.mocked(transport.send).mock.calls[0][0])
+    if (
+      !request ||
+      typeof request !== 'object' ||
+      !('id' in request) ||
+      typeof request.id !== 'string'
+    ) {
+      throw new Error('Missing direct request')
+    }
+    const message = walletSuccess('2', request.id)
+    deliverTo(0, { type: 'RESPONSE', id: request.id, data: { message, connectionInfo } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(pending.settled).not.toHaveBeenCalled()
+    await receiveWallet(message)
+    expect(await pending.outcome).toHaveProperty('value.signature', 'completed-signature')
+  })
+
+  it('does not admit malformed forwarded requests', async () => {
+    ready.resolve(true)
+    const invalid = [
+      { type: BeaconMessageType.SignPayloadRequest, id: 'invalid', data: null },
+      { type: BeaconMessageType.SignPayloadRequest, id: 'invalid', data: [] },
+      {
+        type: BeaconMessageType.SignPayloadRequest,
+        id: 'invalid',
+        data: { type: BeaconMessageType.BroadcastRequest }
+      },
+      {
+        type: BeaconMessageType.BlockchainRequest,
+        id: 'invalid',
+        data: { type: BeaconMessageType.BlockchainRequest, blockchainIdentifier: [] }
+      }
+    ]
+    for (const message of invalid) deliverTo(0, message)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(transport.send).not.toHaveBeenCalled()
+    expect(bus.endpoints[0].sent).toEqual([])
+  })
+
+  it('keeps the leader headers and delegated ID when forwarded data spoofs them', async () => {
+    ready.resolve(true)
+    const pending = observe(
+      follower.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    const request = bus.endpoints[1].sent[0]
+    if (
+      !request ||
+      typeof request !== 'object' ||
+      !('id' in request) ||
+      typeof request.id !== 'string' ||
+      !('data' in request) ||
+      !request.data ||
+      typeof request.data !== 'object'
+    ) {
+      throw new Error('Missing forwarded request')
+    }
+    deliverTo(0, {
+      ...request,
+      data: { ...request.data, id: 'spoofed-id', version: 'invalid', senderId: 'spoofed-sender' }
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(transport.send).toHaveBeenCalledTimes(1)
+    const encoded = vi.mocked(transport.send).mock.calls[0][0]
+    const dispatched = await new Serializer().deserialize(encoded)
+    expect(dispatched).toMatchObject({ id: request.id, version: '2' })
+    expect(dispatched).not.toMatchObject({ senderId: 'spoofed-sender' })
+    await receiveWallet(walletSuccess('2', request.id))
+    expect(await pending.outcome).toHaveProperty('value.signature', 'completed-signature')
+  })
 
   it.each(['2', '3'] as const)(
     'finishes a V%s proxy task after forwarding a wallet response',
