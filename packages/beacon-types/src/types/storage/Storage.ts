@@ -1,6 +1,18 @@
 import { StorageKey } from './StorageKey'
 import { StorageKeyReturnType } from './StorageKeyReturnType'
 
+/** Change values use the same serialized representation as browser localStorage. */
+export interface StorageChangeEvent {
+  eventType: 'storageCleared' | 'entryModified'
+  /** The physical storage key, including any configured prefix. */
+  key: string | null
+  oldValue: string | null
+  newValue: string | null
+}
+
+/** Return values are ignored. Adapters must observe asynchronous listener failures. */
+export type StorageChangeListener = (event: StorageChangeEvent) => unknown
+
 /**
  * @internalapi
  *
@@ -37,18 +49,14 @@ export abstract class Storage {
   public abstract delete<K extends StorageKey>(key: K): Promise<void>
 
   /**
-   * This event will fire if the storage was modified by someone else, eg. on another tab
-   *
-   * @param callback The callback to be called when a storage value changes
+   * Subscribe to changes made by other contexts. Resolves after registration.
+   * Backends without external-change notifications reject the subscription;
+   * their read and write operations remain available.
    */
-  public abstract subscribeToStorageChanged(
-    callback: (arg: {
-      eventType: 'storageCleared' | 'entryModified'
-      key: string | null
-      oldValue: string | null
-      newValue: string | null
-    }) => {}
-  ): Promise<void>
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Keep the callback argument for Storage compatibility.
+  public subscribeToStorageChanged(_callback: StorageChangeListener): Promise<void> {
+    return Promise.reject(new Error('This storage backend does not support change notifications.'))
+  }
 
   /**
    * Get the key with the internal prefix

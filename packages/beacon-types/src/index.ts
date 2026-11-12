@@ -378,6 +378,7 @@ export { TransportStatus, TransportType }
 export * from './types/transport/TransportObservability'
 
 // Storage
+export type { StorageChangeEvent, StorageChangeListener } from './types/storage/Storage'
 export { Storage, StorageKey, StorageKeyReturnDefaults, StorageKeyReturnType }
 
 // Pairing

@@ -1,5 +1,13 @@
-import { Storage, StorageKey, StorageKeyReturnType } from '@ecadlabs/beacon-types'
+import {
+  Storage,
+  StorageChangeListener,
+  StorageKey,
+  StorageKeyReturnType
+} from '@ecadlabs/beacon-types'
+import { Logger } from '../utils/Logger'
 import { normalizeStoredValue } from './storage-normalization'
+
+const logger = new Logger('LocalStorage')
 
 /**
  * @internalapi
@@ -36,35 +44,33 @@ export class LocalStorage extends Storage {
     return Promise.resolve(localStorage.removeItem(this.getPrefixedKey(key)))
   }
 
-  public async subscribeToStorageChanged(
-    callback: (arg: {
-      eventType: 'storageCleared' | 'entryModified'
-      key: string | null
-      oldValue: string | null
-      newValue: string | null
-    }) => {}
-  ): Promise<void> {
-    window.addEventListener(
-      'storage',
-      (event) => {
-        if (!event.key) {
-          callback({
-            eventType: 'storageCleared',
-            key: null,
-            oldValue: null,
-            newValue: null
-          })
-        } else {
-          callback({
-            eventType: 'entryModified',
-            key: this.getPrefixedKey(event.key),
-            oldValue: event.oldValue,
-            newValue: event.newValue
-          })
-        }
-      },
-      false
-    )
+  public async subscribeToStorageChanged(callback: StorageChangeListener): Promise<void> {
+    const storageArea = window.localStorage
+    window.addEventListener('storage', (event) => {
+      if (event.storageArea !== storageArea) {
+        return
+      }
+      if (
+        event.key !== null &&
+        this.prefix &&
+        !Object.values(StorageKey).some((key) => this.getPrefixedKey(key) === event.key)
+      ) {
+        return
+      }
+      try {
+        const result = callback({
+          eventType: event.key === null ? 'storageCleared' : 'entryModified',
+          key: event.key,
+          oldValue: event.oldValue,
+          newValue: event.newValue
+        })
+        Promise.resolve(result).catch((error: unknown) =>
+          logger.warn('storage change callback', error)
+        )
+      } catch (error: unknown) {
+        logger.warn('storage change callback', error)
+      }
+    })
   }
 
   public getPrefixedKey(key: string): string {

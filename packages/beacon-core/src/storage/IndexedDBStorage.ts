@@ -255,19 +255,6 @@ export class IndexedDBStorage extends Storage {
     return key
   }
 
-  public subscribeToStorageChanged(
-    callback: (arg: {
-      eventType: 'storageCleared' | 'entryModified'
-      key: string | null
-      oldValue: string | null
-      newValue: string | null
-    }) => {}
-  ): Promise<void> {
-    logger.debug('subscribeToStorageEvent', callback)
-
-    return Promise.resolve()
-  }
-
   /**
    * Copies all key/value pairs from the source store into a target store.
    * @param targetDBName Name of the target database.
