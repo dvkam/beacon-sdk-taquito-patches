@@ -199,15 +199,10 @@ it('rejects requests whose sender has no stored app metadata', async () => {
 it('rejects an unknown V3 message in its handler', async () => {
   const config = setup()
   const message = { ...base, version: '3', message: { ...base, type: 'unknown' } }
-  // Malformed wire input is intentionally outside the protocol union.
   await expect(
-    IncomingRequestInterceptor['handleV3Message']({
-      ...config,
-      message: message as unknown as Parameters<
-        (typeof IncomingRequestInterceptor)['handleV3Message']
-      >[0]['message']
-    })
-  ).rejects.toThrow('Function not implemented.')
+    IncomingRequestInterceptor.intercept({ ...config, message })
+  ).rejects.toThrow('Unsupported V3 request type')
+  expect(config.interceptorCallback).not.toHaveBeenCalled()
 })
 
 it('normalizes legacy beaconId metadata before persisting and delivering it', async () => {
