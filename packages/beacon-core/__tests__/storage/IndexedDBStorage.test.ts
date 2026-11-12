@@ -195,3 +195,28 @@ it('finishes initialization before opening the same database as a copy target', 
     await copying.catch(() => undefined)
   }
 })
+
+
+it('rejects a constraint failure and rolls back the complete copied transaction', async () => {
+  const source = await initialized('constraint-source')
+  await source.set('first', { unique: 'duplicate' })
+  await source.set('second', { unique: 'duplicate' })
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('constraint-target', 1)
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore('values').createIndex('unique', 'unique', { unique: true })
+    }
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      request.result.close()
+      resolve()
+    }
+  })
+  const target = create('constraint-target', ['values'])
+  await target.set('retained', { unique: 'existing' })
+  await expect(source.fillStore('constraint-target', 'values')).rejects.toMatchObject({
+    name: 'ConstraintError'
+  })
+  await expect(target.getAllKeys()).resolves.toEqual(['retained'])
+  await expect(target.get('retained')).resolves.toEqual({ unique: 'existing' })
+})

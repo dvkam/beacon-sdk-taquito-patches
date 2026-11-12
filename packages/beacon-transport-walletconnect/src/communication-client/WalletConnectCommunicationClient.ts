@@ -2053,25 +2053,41 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
     const signClient = this.signClient
     this.clearState(keep)
-    if (notify) {
-      await this.notifyListeners(session.topic, {
-        type: BeaconMessageType.Disconnect,
-        id: await generateGUID()
-      })
+    let notificationFailure: { error: unknown } | undefined
+    try {
+      if (notify) {
+        await this.notifyListeners(session.topic, {
+          type: BeaconMessageType.Disconnect,
+          id: await generateGUID()
+        })
+      }
+    } catch (error: unknown) {
+      notificationFailure = { error }
     }
 
-    if (signClient) {
-      await this.withTimeout(
-        signClient.disconnect({
-          topic: session.topic,
-          reason: {
-            code: 0, // TODO: Use constants
-            message: 'Force new connection'
-          }
-        }),
-        WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
-        'WalletConnect active session disconnect timed out.'
-      )
+    try {
+      if (signClient) {
+        await this.withTimeout(
+          signClient.disconnect({
+            topic: session.topic,
+            reason: {
+              code: 0, // TODO: Use constants
+              message: 'Force new connection'
+            }
+          }),
+          WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
+          'WalletConnect active session disconnect timed out.'
+        )
+      }
+    } catch (error: unknown) {
+      if (!notificationFailure) {
+        throw error
+      }
+      // Preserve the original notification rejection without hiding cleanup failure.
+      logger.warn('closeActiveSession cleanup', getErrorDiagnostic(error))
+    }
+    if (notificationFailure) {
+      throw notificationFailure.error
     }
   }
 
