@@ -1,4 +1,4 @@
-import { Logger } from '@ecadlabs/beacon-core'
+import { ClientEvents, Logger } from '@ecadlabs/beacon-core'
 import { NetworkType } from '@ecadlabs/beacon-types'
 import { SessionTypes } from '@walletconnect/types'
 import { WalletConnectCommunicationClient } from '../../src/communication-client/WalletConnectCommunicationClient'
@@ -32,6 +32,14 @@ const mockRemote = {
     pairing: { events: { on: vi.fn() }, ping: vi.fn(async () => {}) }
   }
 }
+
+// esbuild does not inline const enums from built dependencies. Load the source enum.
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
+  ...(await vi.importActual<
+    typeof import('../../../beacon-core/src/transports/clients/ClientEvents')
+  >('../../../beacon-core/src/transports/clients/ClientEvents'))
+}))
 
 vi.mock('@walletconnect/sign-client', () => ({ default: { init: async () => mockRemote } }))
 // Match the SDK's USER_DISCONNECTED reason without loading its ESM-only crypto dependencies in JSDOM.
@@ -71,6 +79,7 @@ describe('WalletConnect restored-session failure containment', () => {
       writable: true,
       value: Math.floor(Date.now() / 1000) + 3600
     })
+    mockRemote.session.keys = ['restored-topic']
     mockRemote.ping.mockResolvedValue(undefined)
     mockRemote.extend.mockResolvedValue(undefined)
     mockRemote.disconnect.mockResolvedValue(undefined)
@@ -87,6 +96,33 @@ describe('WalletConnect restored-session failure containment', () => {
       async () => true
     )
   }
+
+  it.each([
+    { label: 'null', failure: null, closes: true },
+    { label: 'throwing message getter', failure: { get message(): string { throw new Error('getter failed') } }, closes: true },
+    { label: 'plain string', failure: 'Wallet rejected pairing', closes: false }
+  ])('contains a $label proposal rejection without abandoning recovery', async ({ failure, closes }) => {
+    mockRemote.session.keys = []
+    mockRemote.connect.mockResolvedValueOnce({
+      uri: 'wc:new-topic@2?symKey=key',
+      approval: () => Promise.reject(failure)
+    })
+    const instance = client()
+    const closeAlert = vi.fn()
+    const proposalError = vi.fn()
+    instance.eventHandlers.set(ClientEvents.CLOSE_ALERT, closeAlert)
+    instance.eventHandlers.set(ClientEvents.WC_ACK_NOTIFICATION, proposalError)
+    await instance.init()
+    await vi.waitFor(() => expect(closes ? closeAlert : proposalError).toHaveBeenCalledWith(
+      closes ? 'walletconnect' : 'error'
+    ))
+    expect(instance.currentSession()).toBeUndefined()
+    await expect(instance.init()).resolves.toEqual({
+      uri: 'wc:new-topic@2?symKey=key',
+      topic: 'new-topic'
+    })
+    expect(mockRemote.connect).toHaveBeenCalledTimes(2)
+  })
 
   it.each([
     { failure: null, diagnostic: null },
