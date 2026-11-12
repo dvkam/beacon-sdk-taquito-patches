@@ -141,6 +141,18 @@ describe('Wallet listener lifetime', () => {
     )
   })
 
+  it('recovers from a null connection rejection and delivers the next request once', async () => {
+    const { wallet, transport } = await create()
+    const connecting = vi.spyOn(transport, 'connect').mockRejectedValueOnce(null)
+    const received = vi.fn()
+    await wallet.connect(received)
+    expect(connecting).toHaveBeenCalledTimes(2)
+    expect(transport.connectionStatus).toBe(TransportStatus.CONNECTED)
+    const message = permission('after-null-retry')
+    await transport.deliver(message)
+    expect(received).toHaveBeenCalledExactlyOnceWith(message, context)
+  })
+
   it('routes later requests once to the callback supplied by repeated setup', async () => {
     const { wallet, transport } = await create()
     const first = vi.fn()

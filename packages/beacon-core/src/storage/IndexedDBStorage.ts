@@ -313,7 +313,8 @@ export class IndexedDBStorage extends Storage {
       await new Promise<void>((resolve, reject) => {
         const targetTransaction = targetDB.transaction(targetStoreName, 'readwrite')
         targetTransaction.oncomplete = () => resolve()
-        targetTransaction.onerror = () => reject(targetTransaction.error)
+        // Request errors bubble before transaction.error is set. The abort event
+        // reports the authoritative failure after the entire copy has rolled back.
         targetTransaction.onabort = () =>
           reject(targetTransaction.error ?? new Error('Copy aborted'))
         const targetStore = targetTransaction.objectStore(targetStoreName)

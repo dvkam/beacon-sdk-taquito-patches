@@ -143,6 +143,19 @@ describe('P2P startup ownership', () => {
     }
   })
 
+  it('contains a null room-join rejection without scheduling another join', async () => {
+    const { client, join } = await setup()
+    join.mockRejectedValue(null)
+    await client.start()
+    try {
+      await expect(client.tryJoinRooms('!current:relay.example')).resolves.toBeUndefined()
+      await vi.advanceTimersByTimeAsync(200)
+      expect(join).toHaveBeenCalledTimes(1)
+    } finally {
+      await client.stop()
+    }
+  })
+
   it.each(['success', 'failure'])(
     'aborts startup before held relay discovery reports %s',
     async (completion) => {

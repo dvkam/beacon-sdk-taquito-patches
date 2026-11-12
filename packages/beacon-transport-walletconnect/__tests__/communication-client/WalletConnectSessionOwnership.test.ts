@@ -1,4 +1,4 @@
-import { Serializer } from '@ecadlabs/beacon-core'
+import { Logger, Serializer } from '@ecadlabs/beacon-core'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import {
   BeaconErrorType,
@@ -9,6 +9,7 @@ import {
 import { WalletConnectCommunicationClient } from '../../src/communication-client/WalletConnectCommunicationClient'
 import {
   mockRemote,
+  account,
   mockApprovals,
   mockRequests,
   mockHandlers,
@@ -187,6 +188,28 @@ describe('WalletConnect session ownership', () => {
     await flush()
     expect(responses).toEqual([aborted('pending')])
   })
+
+  it.each([false, true])(
+    'disconnects despite a rejecting public listener, preserving both failures: cleanupRejects=%s',
+    async (cleanupRejects) => {
+      const failure = new Error('Application notification failed')
+      const cleanupFailure = new Error('SDK disconnect failed')
+      const warn = vi.spyOn(Logger.prototype, 'warn')
+      await client.getAccountOrPK()
+      await client.listenForEncryptedMessage('failing-notification', async () => {
+        throw failure
+      })
+      if (cleanupRejects) remote.disconnect.mockRejectedValueOnce(cleanupFailure)
+      await expect(client.closeActiveSession(account)).rejects.toBe(failure)
+      expect(remote.disconnect).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ topic: 'current' })
+      )
+      expect(client.currentSession()).toBeUndefined()
+      if (cleanupRejects) {
+        expect(warn).toHaveBeenCalledWith('closeActiveSession cleanup', 'SDK disconnect failed')
+      }
+    }
+  )
 
   it('keeps prior requests aborted when a declined approval restores the previous session', async () => {
     await sign('prior')
