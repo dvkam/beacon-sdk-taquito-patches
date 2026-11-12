@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events'
+import { ClientEvents, Logger } from '@ecadlabs/beacon-core'
 import { NetworkType } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { SessionTypes } from '@walletconnect/types'
@@ -5,6 +7,14 @@ import { WalletConnectCommunicationClient } from '../../src/communication-client
 
 const { initialize } = vi.hoisted(() => ({
   initialize: vi.fn<() => Promise<unknown>>()
+}))
+
+// Expose the source const enum for esbuild's dependency loader.
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
+  ...(await vi.importActual<
+    typeof import('../../../beacon-core/src/transports/clients/ClientEvents')
+  >('../../../beacon-core/src/transports/clients/ClientEvents'))
 }))
 
 vi.mock('@walletconnect/sign-client', () => ({ default: { init: initialize } }))
@@ -74,6 +84,7 @@ function session(topic: string): SessionTypes.Struct {
 
 function remote(topic: string) {
   const events = new Events()
+  const relayEvents = new EventEmitter()
   const sessions = new Map([[topic, session(topic)]])
   return {
     events,
@@ -108,9 +119,11 @@ function remote(topic: string) {
         ping: vi.fn(async (_input: { topic: string }) => {})
       },
       relayer: {
+        on: relayEvents.on.bind(relayEvents),
+        off: relayEvents.off.bind(relayEvents),
         transportClose: vi.fn(async () => {}),
         onProviderErrorHandler: (_error: Error): void | Promise<void> => {},
-        events: new Events(),
+        events: relayEvents,
         provider: { events: new Events(), connection: { events: new Events() } },
         subscriber: { events: new Events() }
       }
@@ -396,26 +409,68 @@ describe('WalletConnect startup ownership', () => {
     expect(client.currentSession()).toBeUndefined()
   })
 
-  it('ignores a provider callback retained from a closed client', async () => {
+  it('detaches a retired relayer and ignores a retained callback after replacement', async () => {
     await client.init()
-    const previousHandler = first.core.relayer.onProviderErrorHandler
+    const previousHandler = first.core.relayer.events.listeners('relayer_error')[0]
+    expect(first.core.relayer.events.listenerCount('relayer_error')).toBe(1)
     await client.close()
+    expect(first.core.relayer.events.listenerCount('relayer_error')).toBe(0)
     initialize.mockResolvedValue(second)
     await client.init()
-    await previousHandler(new Error('Previous relay reported an error'))
+    expect(second.core.relayer.events.listenerCount('relayer_error')).toBe(1)
+    previousHandler(new Error('Previous relay reported an error'))
+    first.core.relayer.events.emit('relayer_error', new Error('Late relay error'))
     await vi.advanceTimersByTimeAsync(0)
     expect.soft(client.currentSession()?.topic).toBe('second')
     expect.soft(second.disconnect).not.toHaveBeenCalled()
     expect.soft(second.core.relayer.transportClose).not.toHaveBeenCalled()
   })
 
-  it('closes the current session when its current provider reports an error', async () => {
+  it('closes on the public fatal-relay event without replacing the provider handler', async () => {
+    const providerHandler = first.core.relayer.onProviderErrorHandler
     await client.init()
-    await first.core.relayer.onProviderErrorHandler(new Error('Current relay reported an error'))
+    expect.soft(first.core.relayer.onProviderErrorHandler).toBe(providerHandler)
+    first.core.relayer.events.emit('relayer_error', new Error('Current relay reported an error'))
+    await vi.advanceTimersByTimeAsync(0)
     expect(client.currentSession()).toBeUndefined()
     expect(first.disconnect).toHaveBeenCalledTimes(1)
     expect(first.core.relayer.transportClose).toHaveBeenCalledTimes(1)
   })
+
+  it.each([
+    null,
+    {
+      get message(): string {
+        throw new Error('uninspectable error')
+      }
+    }
+  ])('still closes when a public relay error has no readable diagnostic: %p', async (failure) => {
+    await client.init()
+    first.core.relayer.events.emit('relayer_error', failure)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(client.currentSession()).toBeUndefined()
+    expect(first.disconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['throw', 'reject'] as const)(
+    'contains a JWT notification callback that can %s without preventing relay cleanup',
+    async (mode) => {
+      const failure = new Error('Notification failed')
+      const warn = vi.spyOn(Logger.prototype, 'warn')
+      const notify = vi.fn(() => {
+        if (mode === 'throw') throw failure
+        return Promise.reject(failure)
+      })
+      client.eventHandlers.set(ClientEvents.ON_RELAYER_ERROR, notify)
+      await client.init()
+      first.core.relayer.events.emit('relayer_error', new Error('JWT validation error'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(notify).toHaveBeenCalledExactlyOnceWith('walletconnect')
+      expect(warn).toHaveBeenCalledWith('relayer error callback', 'Notification failed')
+      expect(client.currentSession()).toBeUndefined()
+      expect(first.disconnect).toHaveBeenCalledTimes(1)
+    }
+  )
 
   it('keeps a later startup independent of an initializer released after stop', async () => {
     initialize

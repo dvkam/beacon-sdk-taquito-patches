@@ -53,6 +53,8 @@ vi.mock('@walletconnect/sign-client', () => ({
           pairing: { getPairings: vi.fn(() => []) },
           events: { removeAllListeners: vi.fn() },
           relayer: {
+            on: vi.fn(),
+            off: vi.fn(),
             transportClose: vi.fn(),
             events: { removeAllListeners: vi.fn() },
             provider: { events: { removeAllListeners: vi.fn() } },
@@ -103,6 +105,8 @@ const createResolvedSignClient = () => ({
     },
     events: { removeAllListeners: vi.fn() },
     relayer: {
+      on: vi.fn(),
+      off: vi.fn(),
       transportClose: vi.fn(),
       events: { removeAllListeners: vi.fn() },
       provider: {

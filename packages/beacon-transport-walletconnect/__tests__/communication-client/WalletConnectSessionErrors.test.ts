@@ -28,7 +28,7 @@ const mockRemote = {
   })),
   on: vi.fn(),
   core: {
-    relayer: {},
+    relayer: { on: vi.fn(), off: vi.fn() },
     pairing: { events: { on: vi.fn() }, ping: vi.fn(async () => {}) }
   }
 }
