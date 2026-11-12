@@ -1,5 +1,6 @@
 import {
   AccountInfo,
+  StoredAccountInfo,
   AcknowledgeResponse,
   BeaconMessageType,
   TransportType
@@ -23,8 +24,15 @@ export function subscribe(client: DAppClient): void {
     const unsafe: AccountInfo = account
     void unsafe
     if (account) {
-      const selected: AccountInfo = account
+      const selected: StoredAccountInfo = account
       void selected
+      // @ts-expect-error A selected account can belong to a non-Tezos blockchain.
+      const networkType: string = account.network.type
+      void networkType
+      if (account.network) {
+        const tezos: AccountInfo = account
+        void tezos
+      }
     }
   })
   void client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, (ack) => {
@@ -88,4 +96,22 @@ export function terminal(info: BeaconEventType[TerminalEvent]): void {
   const receivedAt: number = info.receivedAt
   void id
   void receivedAt
+}
+
+export function permission(info: BeaconEventType[BeaconEvent.PERMISSION_REQUEST_SUCCESS]): void {
+  if (info.protocolVersion === '3') {
+    const chain: string = info.output.message.blockchainIdentifier
+    const scopes: string[] = info.account.scopes
+    void chain
+    void scopes
+    // @ts-expect-error V3 output is the real envelope, not a fabricated V2 response.
+    void info.output.network.type
+  } else {
+    const networkType: string = info.output.network.type
+    const tezos: AccountInfo = info.account
+    void networkType
+    void tezos
+    // @ts-expect-error V2 output has its existing flat shape.
+    void info.output.message
+  }
 }

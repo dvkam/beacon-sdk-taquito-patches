@@ -2,7 +2,9 @@ import { PendingPairingRequests } from '@ecadlabs/beacon-core'
 import bs58check from 'bs58check'
 import {
   ConnectionContext,
+  StoredAccountInfo,
   AccountInfo,
+  BlockchainAccountInfo,
   TransportType,
   StorageKey,
   BeaconMessageType,
@@ -134,7 +136,8 @@ import {
   BeaconEventHandler,
   BeaconEventHandlerFunction,
   BeaconEventType,
-  InvalidAccountDeactivatedReason
+  InvalidAccountDeactivatedReason,
+  PermissionResponseInfo
 } from '../events'
 import { getLegacyPublicKey } from '../utils/legacy-public-key'
 import { InitializationAttempt } from './InitializationAttempt'
@@ -331,7 +334,7 @@ export class DAppClient extends Client {
    * The currently active account. For all requests that are associated to a specific request (operation request, signing request),
    * the active account is used to determine the network and destination wallet
    */
-  private _activeAccount: ExposedPromise<AccountInfo | undefined> = new ExposedPromise()
+  private _activeAccount: ExposedPromise<StoredAccountInfo | undefined> = new ExposedPromise()
 
   private activeAccountNotificationPending = false
 
@@ -383,7 +386,7 @@ export class DAppClient extends Client {
   private pendingAccountSelection:
     | {
         readonly transition: AbortSignal
-        readonly account: Pick<AccountInfo, 'accountIdentifier' | 'senderId'>
+        readonly account: Pick<StoredAccountInfo, 'accountIdentifier' | 'senderId'>
       }
     | undefined
 
@@ -422,7 +425,7 @@ export class DAppClient extends Client {
     return !this.destroyed && !transition.aborted && transition === this.accountTransition.signal
   }
 
-  private readonly activeAccountLoaded: Promise<AccountInfo | undefined>
+  private readonly activeAccountLoaded: Promise<StoredAccountInfo | undefined>
 
   private readonly storageValidated: Promise<void>
 
@@ -1880,7 +1883,7 @@ export class DAppClient extends Client {
   /**
    * Returns the active account
    */
-  public async getActiveAccount(): Promise<AccountInfo | undefined> {
+  public async getActiveAccount(): Promise<StoredAccountInfo | undefined> {
     this.assertNotDestroyed()
 
     return this._activeAccount.promise
@@ -1902,9 +1905,9 @@ export class DAppClient extends Client {
     return walletInfo.name.trim() ? walletInfo : undefined
   }
 
-  private resolveActiveAccount(account: AccountInfo | undefined): void {
+  private resolveActiveAccount(account: StoredAccountInfo | undefined): void {
     if (this._activeAccount.isSettled()) {
-      this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(account)
+      this._activeAccount = ExposedPromise.resolve<StoredAccountInfo | undefined>(account)
     } else {
       this._activeAccount.resolve(account)
     }
@@ -2033,12 +2036,12 @@ export class DAppClient extends Client {
    *
    * @param account The account that will be set as the active account
    */
-  public async setActiveAccount(account?: AccountInfo): Promise<void> {
+  public async setActiveAccount(account?: StoredAccountInfo): Promise<void> {
     await this.selectActiveAccount(account)
   }
 
   private async selectActiveAccount(
-    account?: AccountInfo,
+    account?: StoredAccountInfo,
     owner?: PermissionRequestOwner
   ): Promise<void> {
     const transition = this.beginAccountTransition(owner)
@@ -2046,7 +2049,7 @@ export class DAppClient extends Client {
   }
 
   private applyActiveAccount(
-    account: AccountInfo | undefined,
+    account: StoredAccountInfo | undefined,
     transition: AbortSignal,
     source: 'local' | 'storage'
   ): Promise<boolean> {
@@ -2087,7 +2090,7 @@ export class DAppClient extends Client {
   }
 
   private async commitActiveAccount(
-    account: AccountInfo | undefined,
+    account: StoredAccountInfo | undefined,
     transition: AbortSignal,
     source: 'local' | 'storage'
   ): Promise<boolean> {
@@ -2241,7 +2244,7 @@ export class DAppClient extends Client {
     return false
   }
 
-  private selectAccountTransport(account: AccountInfo): DAppInternalTransport | undefined {
+  private selectAccountTransport(account: StoredAccountInfo): DAppInternalTransport | undefined {
     switch (account.origin.type) {
       case Origin.EXTENSION:
         return this.postMessageTransport
@@ -2255,7 +2258,7 @@ export class DAppClient extends Client {
   }
 
   private async prepareAccountSelection(
-    account: AccountInfo | undefined,
+    account: StoredAccountInfo | undefined,
     transition: AbortSignal,
     source: 'local' | 'storage'
   ): Promise<PreparedAccountSelection> {
@@ -2295,7 +2298,7 @@ export class DAppClient extends Client {
     return { kind: 'ready', peer, transport }
   }
 
-  private async isStoredAccountCurrent(account: AccountInfo): Promise<boolean> {
+  private async isStoredAccountCurrent(account: StoredAccountInfo): Promise<boolean> {
     const [identifier, accounts] = await Promise.all([
       this.storage.get(StorageKey.ACTIVE_ACCOUNT),
       this.accountManager.getAccounts()
@@ -2308,7 +2311,7 @@ export class DAppClient extends Client {
   }
 
   private persistActiveAccount(
-    account: AccountInfo | undefined,
+    account: StoredAccountInfo | undefined,
     transition: AbortSignal,
     expectedIdentifier?: string
   ): Promise<void> {
@@ -2492,7 +2495,9 @@ export class DAppClient extends Client {
     if (!this.isCurrentAccountTransition(observedTransition)) {
       return undefined
     }
-    const matches = (account: Pick<AccountInfo, 'accountIdentifier' | 'senderId'> | undefined) =>
+    const matches = (
+      account: Pick<StoredAccountInfo, 'accountIdentifier' | 'senderId'> | undefined
+    ) =>
       account !== undefined &&
       (removed.accountIdentifiers.includes(account.accountIdentifier) ||
         removed.senderIds.includes(account.senderId))
@@ -2707,10 +2712,14 @@ export class DAppClient extends Client {
       return true
     }
 
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
 
     if (!activeAccount) {
       throw await this.sendInternalError('No active account set!')
+    }
+
+    if (!activeAccount.network) {
+      return false
     }
 
     const permissions = activeAccount.scopes
@@ -2786,13 +2795,15 @@ export class DAppClient extends Client {
 
   public async permissionRequest(input: PermissionRequestV3): Promise<PermissionResponseV3> {
     logger.log('permissionRequest', input)
-    const blockchain = this.blockchains.get(input.blockchainIdentifier)
+    const blockchainIdentifier = input.blockchainIdentifier
+    const blockchain = this.blockchains.get(blockchainIdentifier)
     if (!blockchain) {
-      throw new Error(`Blockchain "${input.blockchainIdentifier}" not supported by dAppClient`)
+      throw new Error(`Blockchain "${blockchainIdentifier}" not supported by dAppClient`)
     }
 
     const request: PermissionRequestV3 = {
       ...input,
+      blockchainIdentifier,
       type: BeaconMessageType.PermissionRequest,
       blockchainData: {
         ...input.blockchainData,
@@ -2812,21 +2823,40 @@ export class DAppClient extends Client {
       >(request, undefined, owner)
       owner.assertCurrent()
 
+      const permission = structuredClone(response.message)
+      if (permission.blockchainIdentifier !== blockchainIdentifier) {
+        throw new Error('Unexpected blockchain in V3 permission response')
+      }
+      const rawScopes: unknown = permission.blockchainData?.scopes
+      if (!Array.isArray(rawScopes)) {
+        throw new Error('Invalid scopes in V3 permission response')
+      }
+      const scopes: unknown[] = Array.from(rawScopes)
+      if (!scopes.every((scope): scope is string => typeof scope === 'string')) {
+        throw new Error('Invalid scopes in V3 permission response')
+      }
+      permission.blockchainData.scopes = scopes
+      const permissionEnvelope = { ...response, message: permission }
+
       const partialAccountInfos = await blockchain.getAccountInfosFromPermissionResponse(
-        response.message
+        structuredClone(permission)
       )
       owner.assertCurrent()
-      // V3 retains its chain-specific account shape at the legacy account-store boundary.
-      const accountInfo = {
-        accountIdentifier: partialAccountInfos[0].accountId,
+      const firstAccount = partialAccountInfos[0]
+      if (!firstAccount) {
+        throw new Error(`No accounts returned by blockchain "${blockchainIdentifier}"`)
+      }
+      const accountInfo: BlockchainAccountInfo = {
+        accountIdentifier: firstAccount.accountId,
         senderId: response.senderId,
         origin: { type: connectionInfo.origin, id: connectionInfo.id },
-        address: partialAccountInfos[0].address,
-        publicKey: partialAccountInfos[0].publicKey,
-        scopes: response.message.blockchainData.scopes,
+        address: firstAccount.address,
+        publicKey: firstAccount.publicKey,
+        scopes,
         connectedAt: new Date().getTime(),
-        chainData: response.message.blockchainData
-      } as unknown as AccountInfo
+        chainData: permission.blockchainData,
+        blockchainIdentifier: permission.blockchainIdentifier
+      }
 
       await this.persistPermissionAccount(accountInfo, owner)
       owner.assertCurrent()
@@ -2837,9 +2867,9 @@ export class DAppClient extends Client {
       await blockchain.handleResponse({
         request,
         account: accountInfo,
-        output: response,
+        output: structuredClone(permissionEnvelope),
         blockExplorer: this.blockExplorer,
-        connectionContext: connectionInfo,
+        connectionContext: { ...connectionInfo },
         walletInfo: callbackWalletInfo
       })
       owner.assertCurrent()
@@ -2849,15 +2879,8 @@ export class DAppClient extends Client {
         request,
         {
           account: accountInfo,
-          output: {
-            id: response.id,
-            senderId: response.senderId,
-            version: response.version,
-            type: BeaconMessageType.PermissionResponse,
-            address: partialAccountInfos[0].address,
-            network: { type: input.blockchainIdentifier },
-            scopes: []
-          } as unknown as PermissionResponseOutput,
+          protocolVersion: '3',
+          output: permissionEnvelope,
           blockExplorer: this.blockExplorer,
           connectionContext: connectionInfo,
           walletInfo
@@ -2865,7 +2888,7 @@ export class DAppClient extends Client {
         response
       )
 
-      return response.message
+      return permission
     })
   }
 
@@ -2878,7 +2901,7 @@ export class DAppClient extends Client {
 
     await blockchain.validateRequest(input)
 
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
     if (!activeAccount) {
       throw await this.sendInternalError('No active account!')
     }
@@ -3054,7 +3077,7 @@ export class DAppClient extends Client {
   public async requestProofOfEventChallenge(input: RequestProofOfEventChallengeInput) {
     const activeAccount = await this.getActiveAccount()
 
-    if (!activeAccount) {
+    if (!activeAccount || !activeAccount.network) {
       throw new Error('Please request permissions before doing a proof of event challenge')
     }
     if (
@@ -3126,7 +3149,7 @@ export class DAppClient extends Client {
   ) {
     const activeAccount = await this.getActiveAccount()
 
-    if (!activeAccount) {
+    if (!activeAccount || !activeAccount.network) {
       throw new Error('Please request permissions before doing a proof of event challenge')
     }
     if (
@@ -3203,7 +3226,7 @@ export class DAppClient extends Client {
     if (!input.payload) {
       throw await this.sendInternalError('Payload must be provided')
     }
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
     if (!activeAccount) {
       throw await this.sendInternalError('No active account!')
     }
@@ -3352,9 +3375,9 @@ export class DAppClient extends Client {
     if (!input.operationDetails) {
       throw await this.sendInternalError('Operation details must be provided')
     }
-    const activeAccount: AccountInfo | undefined = await this.getActiveAccount()
+    const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
 
-    if (!activeAccount) {
+    if (!activeAccount || !activeAccount.network) {
       throw await this.sendInternalError('No active account!')
     }
 
@@ -3637,7 +3660,7 @@ export class DAppClient extends Client {
         const actionCallback = async (): Promise<void> => {
           const operationRequest: OperationRequestInput = request as OperationRequestInput
           // if the account we requested is not available, we remove it locally
-          let accountInfo: AccountInfo | undefined
+          let accountInfo: StoredAccountInfo | undefined
           if (operationRequest.sourceAddress && operationRequest.network) {
             const accountIdentifier = await getAccountIdentifier(
               operationRequest.sourceAddress,
@@ -3713,13 +3736,7 @@ export class DAppClient extends Client {
   private async notifySuccess(
     request: { type: BeaconMessageType },
     response:
-      | {
-          account: AccountInfo
-          output: PermissionResponseOutput
-          blockExplorer: BlockExplorer
-          connectionContext: ConnectionContext
-          walletInfo: WalletInfo
-        }
+      | PermissionResponseInfo
       | {
           account: AccountInfo
           output: ProofOfEventChallengeResponse
@@ -3788,7 +3805,7 @@ export class DAppClient extends Client {
 
   private async getWalletInfo(
     peer?: PeerInfo,
-    account?: AccountInfo,
+    account?: StoredAccountInfo,
     readFromStorage: boolean = true,
     { updateStorage = true }: { updateStorage?: boolean } = {}
   ): Promise<WalletInfo> {
@@ -3887,7 +3904,7 @@ export class DAppClient extends Client {
     if (app) {
       let deeplink: string | undefined
       if (app.hasOwnProperty('links')) {
-        deeplink = (app as WebApp).links[selectedAccount?.network.type ?? this.network.type]
+        deeplink = (app as WebApp).links[selectedAccount?.network?.type ?? this.network.type]
       } else if (app.hasOwnProperty('deepLink')) {
         deeplink = (app as App).deepLink
       }
@@ -3903,7 +3920,7 @@ export class DAppClient extends Client {
     return walletInfo
   }
 
-  private async getPeer(account?: AccountInfo): Promise<PeerInfo | undefined> {
+  private async getPeer(account?: StoredAccountInfo): Promise<PeerInfo | undefined> {
     let peer: PeerInfo | undefined
 
     if (account) {
@@ -4632,7 +4649,7 @@ export class DAppClient extends Client {
   }
 
   private persistPermissionAccount(
-    account: AccountInfo,
+    account: StoredAccountInfo,
     owner: PermissionRequestOwner
   ): Promise<void> {
     return this.mutateAccounts(async () => {
