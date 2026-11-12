@@ -2866,7 +2866,7 @@ export class DAppClient extends Client {
       owner.assertCurrent()
       await blockchain.handleResponse({
         request,
-        account: accountInfo,
+        account: structuredClone(accountInfo),
         output: structuredClone(permissionEnvelope),
         blockExplorer: this.blockExplorer,
         connectionContext: { ...connectionInfo },

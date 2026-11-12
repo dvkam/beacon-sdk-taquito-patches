@@ -500,12 +500,24 @@ describe('V3 permission response lifetime', () => {
       return partialAccounts
     }
     callback.mockImplementationOnce(async (input) => {
+      if ('chainData' in input.account) {
+        input.account.scopes.push('injected-account-scope')
+        const chainData = input.account.chainData
+        if (
+          chainData !== null &&
+          typeof chainData === 'object' &&
+          'scopes' in chainData &&
+          Array.isArray(chainData.scopes)
+        ) {
+          chainData.scopes.push('injected-chain-scope')
+        }
+      }
       if ('blockchainData' in input.output.message) {
         input.output.message.blockchainData = { scopes: ['second-injection'] }
       }
     })
     const pending = await begin()
-    await expect(pending.outcome).resolves.toEqual({ value: pending.message })
+    await expect.soft(pending.outcome).resolves.toEqual({ value: pending.message })
     expect(await dapp.getActiveAccount()).toEqual(
       expect.objectContaining({
         scopes: [PermissionScope.SIGN],
