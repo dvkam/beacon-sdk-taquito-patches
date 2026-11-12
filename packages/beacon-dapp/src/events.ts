@@ -656,7 +656,7 @@ const showPermissionSuccessAlert = async (
 ): Promise<void> => {
   const { output } = data
 
-  const actions: any[] = [
+  const actions: ToastAction[] = [
     {
       text: 'Address',
       actionText: shortenString(output.address),
