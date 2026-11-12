@@ -67,6 +67,15 @@ export interface DAppClientOptions {
   disableDefaultEvents?: boolean
 
   /**
+   * Configure built-in UI. Custom event handlers and subscribers still run.
+   * disableDefaultEvents takes precedence and disables pairing and modal alerts too.
+   */
+  uiOptions?: {
+    /** Show built-in request toasts. Defaults to true; false preserves pairing and modal alerts. */
+    enableToasts?: boolean
+  }
+
+  /**
    * A list of matrix nodes to connect to. If a non-empty array is passed, the default options will be overwritten.
    * One node will be randomly selected based on the local keypair and the other nodes will be used as a fallback in case the primary node goes down.
    *

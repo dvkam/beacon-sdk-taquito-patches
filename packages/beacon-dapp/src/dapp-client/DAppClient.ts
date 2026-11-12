@@ -467,7 +467,11 @@ export class DAppClient extends Client {
 
     this.featuredWallets = config.featuredWallets
 
-    this.events = new BeaconEventHandler(config.eventHandlers, config.disableDefaultEvents ?? false)
+    this.events = new BeaconEventHandler(
+      config.eventHandlers,
+      config.disableDefaultEvents ?? false,
+      config.uiOptions
+    )
     this.blockExplorer = config.blockExplorer ?? new TzktBlockExplorer()
     this.network = config.network ?? { type: config.preferredNetwork ?? NetworkType.MAINNET }
     setColorMode(config.colorMode ?? ColorMode.LIGHT)
