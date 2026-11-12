@@ -114,6 +114,12 @@ function remote(restored?: SessionTypes.Struct) {
         disconnect: vi.fn(async () => {})
       },
       relayer: {
+        on(event: string, callback: (value: unknown) => void): void {
+          this.events.on(event, callback)
+        },
+        off(event: string, callback: (value: unknown) => void): void {
+          this.events.off(event, callback)
+        },
         onProviderErrorHandler: (_error: Error) => {},
         transportClose: vi.fn(async () => {}),
         events: new EventEmitter(),
