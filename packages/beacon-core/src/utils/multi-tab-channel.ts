@@ -47,7 +47,7 @@ export class MultiTabChannel {
     this.elector = createLeaderElection(this.channel)
   }
 
-  async init() {
+  public async init() {
     if (this.closed) {
       return
     }
@@ -150,11 +150,11 @@ export class MultiTabChannel {
     }
   }
 
-  isLeader(): boolean {
+  public isLeader(): boolean {
     return this.elector.isLeader
   }
 
-  async getLeadership() {
+  public async getLeadership() {
     if (this.closed) {
       return
     }
@@ -164,7 +164,7 @@ export class MultiTabChannel {
     }
   }
 
-  async hasLeader(): Promise<boolean> {
+  public async hasLeader(): Promise<boolean> {
     return this.elector.hasLeader()
   }
 
