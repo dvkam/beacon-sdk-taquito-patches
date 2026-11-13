@@ -7,6 +7,7 @@ import {
   BlockchainAccountInfo,
   TransportType,
   StorageKey,
+  StorageKeyReturnType,
   BeaconMessageType,
   PermissionScope,
   PermissionResponse,
@@ -208,6 +209,39 @@ interface TimedOutRequest {
 interface DetachableTransport {
   cancelRequest(id: string): void
   detachRequest(id: string): void
+}
+
+type StoredWalletSelection = NonNullable<StorageKeyReturnType[StorageKey.LAST_SELECTED_WALLET]>
+
+const isStoredWalletType = (value: unknown): value is StoredWalletSelection['type'] =>
+  value === 'extension' || value === 'mobile' || value === 'web' || value === 'desktop'
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const parseStoredWalletSelection = (
+  value: unknown
+): StorageKeyReturnType[StorageKey.LAST_SELECTED_WALLET] => {
+  if (!isRecord(value) || typeof value.key !== 'string' || !isStoredWalletType(value.type)) {
+    return undefined
+  }
+  if (value.name !== undefined && typeof value.name !== 'string') {
+    return undefined
+  }
+  if (value.icon !== undefined && typeof value.icon !== 'string') {
+    return undefined
+  }
+  if (value.url !== undefined && typeof value.url !== 'string') {
+    return undefined
+  }
+
+  return {
+    key: value.key,
+    ...(value.name !== undefined ? { name: value.name } : {}),
+    type: value.type,
+    icon: value.icon ?? '',
+    ...(value.url !== undefined ? { url: value.url } : {})
+  }
 }
 
 const createLazyPromise = <T>(factory: () => Promise<T>): PromiseLike<T> => {
@@ -2461,11 +2495,9 @@ export class DAppClient extends Client {
       if (!this.isCurrentAccountTransition(transition)) {
         return { kind: 'superseded' }
       }
-      if (!peer) {
-        peer = await this.getPeer(account)
-        if (!this.isCurrentAccountTransition(transition)) {
-          return { kind: 'superseded' }
-        }
+      peer = (await this.getPeer(account)) ?? peer
+      if (!this.isCurrentAccountTransition(transition)) {
+        return { kind: 'superseded' }
       }
     }
     if (source === 'storage' && !(await this.isStoredAccountCurrent(account))) {
@@ -4147,12 +4179,38 @@ export class DAppClient extends Client {
       .catch((emitError) => console.warn(emitError))
   }
 
-  private async getWalletInfoFromStorage() {
-    return await this.storage.get(StorageKey.LAST_SELECTED_WALLET)
+  private async getWalletInfoFromStorage(): Promise<
+    StorageKeyReturnType[StorageKey.LAST_SELECTED_WALLET]
+  > {
+    const stored = parseStoredWalletSelection(
+      await this.storage.get(StorageKey.LAST_SELECTED_WALLET)
+    )
+    if (stored) {
+      return stored
+    }
+
+    if (
+      typeof localStorage === 'undefined' ||
+      this.storage.getPrefixedKey(StorageKey.LAST_SELECTED_WALLET) ===
+        StorageKey.LAST_SELECTED_WALLET
+    ) {
+      return undefined
+    }
+
+    try {
+      const raw = localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)
+      if (!raw) {
+        return undefined
+      }
+
+      return parseStoredWalletSelection(JSON.parse(raw))
+    } catch {
+      return undefined
+    }
   }
 
   private async updateStorageWallet(walletInfo: WalletInfo) {
-    const wallet = await this.storage.get(StorageKey.LAST_SELECTED_WALLET)
+    const wallet = await this.getWalletInfoFromStorage()
 
     if (!wallet) {
       return
@@ -4173,34 +4231,15 @@ export class DAppClient extends Client {
 
     const selectedPeer = peer ? peer : await this.getPeer(selectedAccount)
 
-    let walletInfo: WalletInfo | undefined
+    let metadata: AppMetadata | undefined
     if (selectedAccount) {
-      walletInfo = await this.appMetadataManager.getAppMetadata(selectedAccount.senderId)
+      metadata = await this.appMetadataManager.getAppMetadata(selectedAccount.senderId)
     }
 
     let storageWallet
 
     if (readFromStorage) {
       storageWallet = await this.getWalletInfoFromStorage()
-    }
-
-    if (!walletInfo?.name.trim()) {
-      walletInfo = {
-        name:
-          selectedPeer?.name.trim() || storageWallet?.name?.trim() || storageWallet?.key.trim() || '',
-        icon: selectedPeer?.icon ?? storageWallet?.icon,
-        type: storageWallet?.type
-      }
-
-      if (updateStorage) {
-        this.updateStorageWallet(walletInfo).catch((error: unknown) =>
-          logger.warn('updateStorageWallet', error)
-        )
-      }
-    }
-
-    if (!walletInfo.name.trim()) {
-      return walletInfo
     }
 
     const lowerCaseCompare = (str1?: string, str2?: string): boolean => {
@@ -4211,7 +4250,48 @@ export class DAppClient extends Client {
       return false
     }
 
-    const getOrgName = (name: string) => name.split(/[_\s]+/)[0]
+    const getOrgName = (name?: string) => name?.trim().split(/[_\s]+/)[0]
+
+    const inferredPeerType: WalletInfo['type'] =
+      selectedAccount?.origin.type === Origin.EXTENSION ||
+      selectedPeer?.type === 'postmessage-pairing-response' ||
+      selectedPeer?.type === 'postmessage-pairing-request'
+        ? 'extension'
+        : undefined
+
+    const metadataName = metadata?.name.trim() ? metadata.name : undefined
+    const peerName = selectedPeer?.name.trim() || undefined
+    const storageWalletName = storageWallet?.name?.trim() || storageWallet?.key.trim() || undefined
+    const usedStorageWalletForName = !metadataName && !peerName && Boolean(storageWalletName)
+    const resolvedName = metadataName ?? peerName ?? storageWalletName ?? ''
+
+    const matchingStorageWallet =
+      storageWallet &&
+      (usedStorageWalletForName ||
+        lowerCaseCompare(selectedAccount?.walletKey?.trim(), storageWallet.key.trim()) ||
+        lowerCaseCompare(getOrgName(storageWallet.key), getOrgName(resolvedName)) ||
+        lowerCaseCompare(getOrgName(storageWallet.name), getOrgName(resolvedName)))
+        ? storageWallet
+        : undefined
+
+    const resolvedIcon = metadata?.icon ?? selectedPeer?.icon ?? matchingStorageWallet?.icon
+    const resolvedType = inferredPeerType ?? matchingStorageWallet?.type
+
+    const walletInfo: WalletInfo = {
+      name: resolvedName,
+      ...(resolvedIcon ? { icon: resolvedIcon } : {}),
+      ...(resolvedType ? { type: resolvedType } : {})
+    }
+
+    if (!metadataName && updateStorage) {
+      this.updateStorageWallet(walletInfo).catch((error: unknown) =>
+        logger.warn('updateStorageWallet', error)
+      )
+    }
+
+    if (!walletInfo.name.trim()) {
+      return walletInfo
+    }
 
     const apps: AppBase[] = [
       ...getiOSList(),
@@ -4259,7 +4339,9 @@ export class DAppClient extends Client {
       return { app: undefined, type: undefined }
     }
 
-    const { app, type } = storageWallet ? appTypeMap[storageWallet.type] : defaultType()
+    const preferredType = inferredPeerType ?? matchingStorageWallet?.type
+    const preferredMatch = preferredType ? appTypeMap[preferredType] : undefined
+    const { app, type } = preferredMatch?.app ? preferredMatch : defaultType()
 
     if (app) {
       let deeplink: string | undefined
@@ -4269,11 +4351,14 @@ export class DAppClient extends Client {
         deeplink = (app as App).deepLink
       }
 
+      const finalIcon = app.logo ?? walletInfo.icon
+      const finalType = inferredPeerType ?? type ?? walletInfo.type
+
       return {
-        name: app?.name ?? walletInfo.name,
-        icon: app?.logo ?? walletInfo.icon,
-        deeplink,
-        type
+        name: app.name ?? walletInfo.name,
+        ...(finalIcon ? { icon: finalIcon } : {}),
+        ...(deeplink ? { deeplink } : {}),
+        ...(finalType ? { type: finalType } : {})
       }
     }
 
@@ -4285,12 +4370,7 @@ export class DAppClient extends Client {
 
     if (account) {
       logger.log('getPeer', 'We have an account', account)
-      const postMessagePeers: ExtendedPostMessagePairingResponse[] =
-        (await this.postMessageTransport?.getPeers()) ?? []
-      const p2pPeers: ExtendedP2PPairingResponse[] = (await this.p2pTransport?.getPeers()) ?? []
-      const walletConnectPeers: ExtendedWalletConnectPairingResponse[] =
-        (await this.walletConnectTransport?.getPeers()) ?? []
-      const peers = [...postMessagePeers, ...p2pPeers, ...walletConnectPeers]
+      const peers = await this.getPeers()
 
       logger.log('getPeer', 'Found peers', peers, account)
 
@@ -5562,7 +5642,7 @@ export class DAppClient extends Client {
     logger.log('######## MESSAGE #######')
     logger.log('onNewAccount', message)
 
-    const walletKey = (await this.storage.get(StorageKey.LAST_SELECTED_WALLET))?.key
+    const walletKey = (await this.getWalletInfoFromStorage())?.key
 
     const accountInfo: AccountInfo = {
       accountIdentifier: await getAccountIdentifier(address, message.network),

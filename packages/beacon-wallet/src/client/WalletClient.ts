@@ -40,6 +40,7 @@ import {
   ExtendedPostMessagePairingRequest,
   P2PPairingRequest,
   ExtendedP2PPairingRequest,
+  WalletConnectPairingRequest,
   ExtendedWalletConnectPairingRequest,
   ResponseInputForRequest,
   PermissionRequestOutput,
@@ -82,6 +83,7 @@ import { WalletClientOptions } from './WalletClientOptions'
 const logger = new Logger('WalletClient')
 
 type DisconnectListener = (senderId: string) => void | Promise<void>
+type PermissionListener = (permissions: PermissionInfo[]) => void | Promise<void>
 
 /**
  * @publicapi
@@ -103,6 +105,9 @@ export class WalletClient extends Client {
   private readonly permissionManager: PermissionManager
   private readonly appMetadataManager: AppMetadataManager
   private readonly walletConnectOptions?: SignClientTypes.Options
+  private readonly isLeader?: () => boolean | Promise<boolean>
+  private p2pTransport: ClientTransport | undefined
+  private wcTransport: ClientTransport | undefined
   private connectionAttempt: Promise<void> | undefined
   private deliveryGeneration = Symbol('Wallet connection')
   private destroyed = false
@@ -120,9 +125,9 @@ export class WalletClient extends Client {
     (info: TransportStatusChangedInfo) => void | Promise<void>,
     () => void
   >()
-  private transportStatusUnsub: (() => void) | undefined
-  private activeObservedTransport: ClientTransport | undefined
+  private readonly transportStatusUnsubs = new Map<ClientTransport, () => void>()
   private readonly peerListeners = new Map<(event: WalletPeerEvent) => void, () => void>()
+  private readonly permissionListeners = new Map<PermissionListener, () => void>()
   private readonly knownPeerPublicKeys = new Set<string>()
   private readonly knownPeersByPublicKey = new Map<string, ExtendedPeerInfo>()
   private readonly peersSeeded: Promise<void>
@@ -134,6 +139,7 @@ export class WalletClient extends Client {
       ...config
     })
     this.walletConnectOptions = config.walletConnectOptions
+    this.isLeader = config.isLeader
     this.permissionManager = new PermissionManager(this.storage)
     this.appMetadataManager = new AppMetadataManager(this.storage)
     this.peersSeeded = this.seedKnownPeers()
@@ -142,14 +148,19 @@ export class WalletClient extends Client {
 
   private async seedKnownPeers(): Promise<void> {
     try {
-      const [p2pPeers, postMessagePeers] = await Promise.all([
+      const [p2pPeers, postMessagePeers, walletConnectPeers] = await Promise.all([
         this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET),
-        this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET)
+        this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET),
+        this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET)
       ])
       if (this.destroyed) {
         return
       }
-      const allPeers = [...(p2pPeers ?? []), ...(postMessagePeers ?? [])]
+      const allPeers = [
+        ...(p2pPeers ?? []),
+        ...(postMessagePeers ?? []),
+        ...(walletConnectPeers ?? [])
+      ]
       for (const peer of allPeers) {
         if (peer && peer.publicKey) {
           this.knownPeerPublicKeys.add(peer.publicKey)
@@ -166,20 +177,10 @@ export class WalletClient extends Client {
   }
 
   public async init(): Promise<TransportType> {
-    const keyPair = await this.keyPair // We wait for keypair here so the P2P Transport creation is not delayed and causing issues
-    if (this.walletConnectOptions) {
-      const wcTransport = new WalletWalletConnectTransport(
-        this.name,
-        keyPair,
-        this.storage,
-        this.walletConnectOptions,
-        this.iconUrl,
-        this.appUrl
-      )
-
-      return super.init(wcTransport)
+    if (this._transport.isResolved()) {
+      return (await this.transport).type
     }
-
+    const keyPair = await this.keyPair // We wait for keypair here so the P2P Transport creation is not delayed and causing issues
     const p2pTransport = new WalletP2PTransport(
       this.name,
       keyPair,
@@ -188,6 +189,24 @@ export class WalletClient extends Client {
       this.iconUrl,
       this.appUrl
     )
+    this.p2pTransport = p2pTransport
+    this.observeTransportStatus(p2pTransport)
+
+    if (this.walletConnectOptions) {
+      const wcTransport = new WalletWalletConnectTransport(
+        this.name,
+        keyPair,
+        this.storage,
+        this.walletConnectOptions,
+        this.iconUrl,
+        this.appUrl,
+        this.isLeader
+      )
+      this.wcTransport = wcTransport
+      this.observeTransportStatus(wcTransport)
+
+      return super.init(wcTransport)
+    }
 
     return super.init(p2pTransport)
   }
@@ -324,19 +343,40 @@ export class WalletClient extends Client {
   public override async destroy(): Promise<void> {
     this.destroyed = true
     this.deliveryGeneration = Symbol('Wallet connection')
-    if (this.transportStatusUnsub) {
-      this.transportStatusUnsub()
-      this.transportStatusUnsub = undefined
+    for (const unsub of this.transportStatusUnsubs.values()) {
+      unsub()
     }
-    this.activeObservedTransport = undefined
+    this.transportStatusUnsubs.clear()
     this.transportStatusListeners.clear()
     this.pendingRequestListeners.clear()
     this.peerListeners.clear()
+    this.permissionListeners.clear()
     this.disconnectListeners.clear()
     this.pendingRequests = []
     this.walletPendingRequests = []
     this.knownPeerPublicKeys.clear()
     this.knownPeersByPublicKey.clear()
+
+    const primaryTransport = this._transport.isResolved() ? this._transport.promiseResult : undefined
+    const extraP2P =
+      this.p2pTransport && this.p2pTransport !== primaryTransport ? this.p2pTransport : undefined
+    const extraWC =
+      this.wcTransport && this.wcTransport !== primaryTransport ? this.wcTransport : undefined
+    this.p2pTransport = undefined
+    this.wcTransport = undefined
+
+    if (extraP2P) {
+      await this.cleanup([extraP2P])
+      await extraP2P.disconnect()
+    }
+    if (extraWC) {
+      await this.cleanup([extraWC])
+      await extraWC.disconnect()
+      if ('doClientCleanup' in extraWC && typeof extraWC.doClientCleanup === 'function') {
+        await extraWC.doClientCleanup.call(extraWC)
+      }
+    }
+
     await super.destroy()
   }
 
@@ -491,34 +531,64 @@ export class WalletClient extends Client {
   }
 
   private async connectTransport(attempts: number, generation: symbol): Promise<void> {
-    const transport = await this.transport
+    const transports = await this.getActiveTransports()
     if (!this.ownsDelivery(generation)) {
       return
     }
-    if (attempts === 0) {
-      this.deliveryGeneration = Symbol('Wallet connection')
-      await this.cleanup([transport])
-
-      return
-    }
-    if (transport.connectionStatus !== TransportStatus.NOT_CONNECTED) {
-      return
-    }
-
-    try {
-      await this.addListener(transport)
-      if (!this.ownsDelivery(generation)) {
+    if (transports.length === 1) {
+      const [transport] = transports
+      if (!transport) {
         return
       }
-      await transport.connect()
-    } catch (error: unknown) {
-      if (!this.ownsDelivery(generation)) {
+      const connected = await this.connectSingleTransport(transport, attempts, generation)
+      if (!connected) {
+        if (this.ownsDelivery(generation)) {
+          this.deliveryGeneration = Symbol('Wallet connection')
+        }
+
         return
       }
-      logger.warn('_connect', error instanceof Error ? error.message : error)
-      await transport.disconnect()
       if (this.ownsDelivery(generation)) {
-        await this.connectTransport(attempts - 1, generation)
+        this._isConnected.resolve(true)
+      }
+
+      return
+    }
+
+    const results = transports.map((transport) =>
+      this.connectSingleTransport(transport, attempts, generation)
+    )
+    const anyConnected = await new Promise<boolean>((resolve) => {
+      let remaining = results.length
+      let settled = false
+      for (const promise of results) {
+        promise.then(
+          (ok) => {
+            remaining--
+            if (ok && !settled) {
+              settled = true
+              resolve(true)
+            } else if (remaining === 0 && !settled) {
+              settled = true
+              resolve(false)
+            }
+          },
+          () => {
+            remaining--
+            if (remaining === 0 && !settled) {
+              settled = true
+              resolve(false)
+            }
+          }
+        )
+      }
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    if (!anyConnected) {
+      if (this.ownsDelivery(generation)) {
+        this.deliveryGeneration = Symbol('Wallet connection')
       }
 
       return
@@ -527,6 +597,45 @@ export class WalletClient extends Client {
     if (this.ownsDelivery(generation)) {
       this._isConnected.resolve(true)
     }
+  }
+
+  private async connectSingleTransport(
+    transport: ClientTransport,
+    attempts: number,
+    generation: symbol
+  ): Promise<boolean> {
+    if (!this.ownsDelivery(generation)) {
+      return false
+    }
+    if (attempts === 0) {
+      await this.cleanup([transport])
+
+      return false
+    }
+    if (transport.connectionStatus !== TransportStatus.NOT_CONNECTED) {
+      return true
+    }
+
+    try {
+      await this.addListener(transport)
+      if (!this.ownsDelivery(generation)) {
+        return false
+      }
+      await transport.connect()
+    } catch (error: unknown) {
+      if (!this.ownsDelivery(generation)) {
+        return false
+      }
+      logger.warn('_connect', error instanceof Error ? error.message : error)
+      await transport.disconnect()
+      if (this.ownsDelivery(generation)) {
+        return this.connectSingleTransport(transport, attempts - 1, generation)
+      }
+
+      return false
+    }
+
+    return this.ownsDelivery(generation)
   }
 
   /**
@@ -566,6 +675,10 @@ export class WalletClient extends Client {
         await this.respondToMessage(response, matchedRequest[1])
       }
     })
+
+    if ('type' in message && message.type === BeaconMessageType.PermissionResponse) {
+      await this.emitPermissionsUpdated()
+    }
 
     this.pendingRequests = this.pendingRequests.filter(
       (pendingRequest) => pendingRequest[0].id !== message.id
@@ -630,11 +743,13 @@ export class WalletClient extends Client {
   }
 
   public async removeAppMetadata(senderId: string): Promise<void> {
-    return this.appMetadataManager.removeAppMetadata(senderId)
+    await this.appMetadataManager.removeAppMetadata(senderId)
+    await this.emitPermissionsUpdated()
   }
 
   public async removeAllAppMetadata(): Promise<void> {
-    return this.appMetadataManager.removeAllAppMetadata()
+    await this.appMetadataManager.removeAllAppMetadata()
+    await this.emitPermissionsUpdated()
   }
 
   public async getPermissions(): Promise<PermissionInfo[]> {
@@ -646,11 +761,13 @@ export class WalletClient extends Client {
   }
 
   public async removePermission(accountIdentifier: string, senderId: string): Promise<void> {
-    return this.permissionManager.removePermission(accountIdentifier, senderId)
+    await this.permissionManager.removePermission(accountIdentifier, senderId)
+    await this.emitPermissionsUpdated()
   }
 
   public async removeAllPermissions(): Promise<void> {
-    return this.permissionManager.removeAllPermissions()
+    await this.permissionManager.removeAllPermissions()
+    await this.emitPermissionsUpdated()
   }
 
   private async getPeerInfo(peer: PeerInfo): Promise<ExtendedPeerInfo> {
@@ -676,14 +793,16 @@ export class WalletClient extends Client {
         peer.relayServer,
         senderId
       )
-    } else if (peer instanceof ExtendedWalletConnectPairingRequest) {
+    } else if (peer instanceof WalletConnectPairingRequest) {
       return new ExtendedWalletConnectPairingRequest(
         peer.id,
         peer.name,
         peer.publicKey,
         peer.version,
         senderId,
-        peer.uri
+        peer.uri,
+        peer.icon,
+        peer.appUrl
       )
     } else {
       return {
@@ -693,10 +812,93 @@ export class WalletClient extends Client {
     }
   }
 
+  private async getActiveTransports(): Promise<ClientTransport[]> {
+    if (this.p2pTransport && this.wcTransport) {
+      return [this.p2pTransport, this.wcTransport]
+    }
+
+    return [await this.transport]
+  }
+
+  private isWalletConnectPeer(peer: PeerInfo): boolean {
+    if (peer instanceof WalletConnectPairingRequest) {
+      return true
+    }
+    if (
+      peer.type === 'walletconnect-pairing-request' ||
+      peer.type === 'walletconnect-pairing-response'
+    ) {
+      return true
+    }
+
+    return 'uri' in peer && typeof peer.uri === 'string'
+  }
+
+  private isP2PPeer(peer: PeerInfo): boolean {
+    if (peer instanceof P2PPairingRequest) {
+      return true
+    }
+    if (peer.type === 'p2p-pairing-request' || peer.type === 'p2p-pairing-response') {
+      return true
+    }
+
+    return 'relayServer' in peer && typeof peer.relayServer === 'string'
+  }
+
+  private async getTransportForPeer(peer: PeerInfo): Promise<ClientTransport> {
+    if (this.p2pTransport && this.wcTransport) {
+      if (this.isWalletConnectPeer(peer)) {
+        return this.wcTransport
+      }
+      if (this.isP2PPeer(peer)) {
+        return this.p2pTransport
+      }
+      const wcPeers = await this.wcTransport.getPeers()
+      if (
+        wcPeers.some(
+          (wcPeer) =>
+            wcPeer.publicKey === peer.publicKey ||
+            ('senderId' in peer &&
+              typeof peer.senderId === 'string' &&
+              wcPeer.senderId === peer.senderId)
+        )
+      ) {
+        return this.wcTransport
+      }
+
+      return this.p2pTransport
+    }
+
+    return this.transport
+  }
+
+  private async getTransportForConnectionContext(
+    connectionContext?: ConnectionContext
+  ): Promise<ClientTransport> {
+    if (this.p2pTransport && this.wcTransport && connectionContext) {
+      if (connectionContext.origin === Origin.WALLETCONNECT) {
+        return this.wcTransport
+      }
+      if (connectionContext.origin === Origin.P2P) {
+        return this.p2pTransport
+      }
+    }
+
+    return this.transport
+  }
+
   /**
    * Return all known peers without blocking when no transport is initialized yet
    */
   public override async getPeers(): Promise<ExtendedPeerInfo[]> {
+    if (this.p2pTransport && this.wcTransport) {
+      const [activeP2PPeers, activeWcPeers] = await Promise.all([
+        this.p2pTransport.getPeers(),
+        this.wcTransport.getPeers()
+      ])
+
+      return [...activeP2PPeers, ...activeWcPeers]
+    }
     if (this._transport.isResolved() || this.transport !== this._transport.promise) {
       return (await this.transport).getPeers()
     }
@@ -716,7 +918,8 @@ export class WalletClient extends Client {
    */
   public async addPeer(peer: PeerInfo, sendPairingResponse: boolean = true): Promise<void> {
     const extendedPeer = await this.getPeerInfo(peer)
-    await (await this.transport).addPeer(extendedPeer, sendPairingResponse)
+    const transport = await this.getTransportForPeer(extendedPeer)
+    await transport.addPeer(extendedPeer, sendPairingResponse)
     this.knownPeerPublicKeys.add(peer.publicKey)
     this.knownPeersByPublicKey.set(peer.publicKey, extendedPeer)
     this.emitPeerEvent({
@@ -732,7 +935,8 @@ export class WalletClient extends Client {
   ): Promise<void> {
     const extendedPeer =
       this.knownPeersByPublicKey.get(peer.publicKey) ?? (await this.getPeerInfo(peer))
-    await (await this.transport).removePeer(peer)
+    const transport = await this.getTransportForPeer(extendedPeer)
+    await transport.removePeer(peer)
 
     this.knownPeerPublicKeys.delete(peer.publicKey)
     this.knownPeersByPublicKey.delete(peer.publicKey)
@@ -741,7 +945,7 @@ export class WalletClient extends Client {
     await this.removePermissionsForPeers([peer])
 
     if (sendDisconnectToPeer) {
-      await this.sendDisconnectToPeer(peer)
+      await this.sendDisconnectToPeer(peer, transport)
     }
 
     this.emitPeerEvent({
@@ -752,8 +956,15 @@ export class WalletClient extends Client {
   }
 
   public async removeAllPeers(sendDisconnectToPeers: boolean = false): Promise<void> {
-    const peers = await (await this.transport).getPeers()
-    await (await this.transport).removeAllPeers()
+    const transports = await this.getActiveTransports()
+    const peerGroups = await Promise.all(
+      transports.map(async (transport) => ({
+        transport,
+        peers: await transport.getPeers()
+      }))
+    )
+    const peers = peerGroups.flatMap((group) => group.peers)
+    await Promise.all(transports.map((transport) => transport.removeAllPeers()))
 
     for (const peer of peers) {
       this.knownPeerPublicKeys.delete(peer.publicKey)
@@ -777,7 +988,9 @@ export class WalletClient extends Client {
     await this.removePermissionsForPeers(peers)
 
     if (sendDisconnectToPeers) {
-      const disconnectPromises = peers.map((peer) => this.sendDisconnectToPeer(peer))
+      const disconnectPromises = peerGroups.flatMap(({ transport, peers: groupPeers }) =>
+        groupPeers.map((peer) => this.sendDisconnectToPeer(peer, transport))
+      )
 
       await Promise.all(disconnectPromises)
     }
@@ -811,6 +1024,9 @@ export class WalletClient extends Client {
       (permissionInfo) => permissionInfo.accountIdentifier
     )
     await this.permissionManager.removePermissions(permissionIdentifiersToRemove)
+    if (permissionIdentifiersToRemove.length > 0) {
+      await this.emitPermissionsUpdated()
+    }
   }
 
   /**
@@ -851,18 +1067,18 @@ export class WalletClient extends Client {
     connectionContext: ConnectionContext
   ): Promise<void> {
     const serializedMessage: string = await new Serializer().serialize(response)
+    const transport = await this.getTransportForConnectionContext(connectionContext)
     if (connectionContext) {
       const peerInfos = await this.getPeers()
       const peer = peerInfos.find((peerInfo) => peerInfo.publicKey === connectionContext.id)
-      await (await this.transport).send(serializedMessage, peer)
+      await transport.send(serializedMessage, peer)
     } else {
-      await (await this.transport).send(serializedMessage)
+      await transport.send(serializedMessage)
     }
   }
 
   private async disconnect(senderId: string) {
-    const transport = await this.transport
-    const peers = await transport.getPeers()
+    const peers = await this.getPeers()
     const peer = peers.find((peerEl) => {
       if (!('senderId' in peerEl)) {
         return false
@@ -1010,6 +1226,27 @@ export class WalletClient extends Client {
         health: 'ok'
       }
     }
+    if (this.p2pTransport && this.wcTransport) {
+      const transports = [this.wcTransport, this.p2pTransport]
+      const status = transports.some((t) => t.connectionStatus === TransportStatus.CONNECTED)
+        ? TransportStatus.CONNECTED
+        : transports.some((t) => t.connectionStatus === TransportStatus.SECONDARY_TAB_CONNECTED)
+          ? TransportStatus.SECONDARY_TAB_CONNECTED
+          : transports.some((t) => t.connectionStatus === TransportStatus.CONNECTING)
+            ? TransportStatus.CONNECTING
+            : TransportStatus.NOT_CONNECTED
+      const health = transports.some((t) => t.health === 'degraded') ? 'degraded' : 'ok'
+      const activeTransport =
+        transports.find((t) => t.connectionStatus === status) ?? this.wcTransport
+      const relayServer = this.p2pTransport.relayServer ?? this.wcTransport.relayServer
+
+      return {
+        transport: activeTransport.type,
+        status,
+        health,
+        ...(relayServer ? { relayServer } : {})
+      }
+    }
     const transport = await this.transport
 
     return {
@@ -1021,6 +1258,9 @@ export class WalletClient extends Client {
   }
 
   public async getSelectedMatrixNode(): Promise<string | undefined> {
+    if (this.p2pTransport?.relayServer) {
+      return this.p2pTransport.relayServer
+    }
     if (this._transport.isResolved() || this.transport !== this._transport.promise) {
       const transport = await this.transport
       if (transport.relayServer) {
@@ -1043,6 +1283,38 @@ export class WalletClient extends Client {
     return storedNode
   }
 
+  private getWalletConnectTransport(): WalletWalletConnectTransport | undefined {
+    if (this.wcTransport instanceof WalletWalletConnectTransport) {
+      return this.wcTransport
+    }
+    const primary = this._transport.isResolved() ? this._transport.promiseResult : undefined
+    if (primary instanceof WalletWalletConnectTransport) {
+      return primary
+    }
+
+    return undefined
+  }
+
+  public async openRelayer(relayUrl?: string): Promise<void> {
+    if (this.destroyed) {
+      return
+    }
+    const wcTransport = this.getWalletConnectTransport()
+    if (wcTransport) {
+      await wcTransport.openRelayer(relayUrl)
+    }
+  }
+
+  public async closeRelayer(): Promise<void> {
+    if (this.destroyed) {
+      return
+    }
+    const wcTransport = this.getWalletConnectTransport()
+    if (wcTransport) {
+      await wcTransport.closeRelayer()
+    }
+  }
+
   public subscribeToTransportStatus(
     listener: (info: TransportStatusChangedInfo) => void | Promise<void>
   ): () => void {
@@ -1051,6 +1323,12 @@ export class WalletClient extends Client {
       return existing
     }
 
+    if (this.p2pTransport) {
+      this.observeTransportStatus(this.p2pTransport)
+    }
+    if (this.wcTransport) {
+      this.observeTransportStatus(this.wcTransport)
+    }
     if (this._transport.isResolved() || this.transport !== this._transport.promise) {
       this.transport
         .then((transport) => {
@@ -1076,21 +1354,30 @@ export class WalletClient extends Client {
   protected override async setTransport(transport?: ClientTransport): Promise<void> {
     await super.setTransport(transport)
     if (transport) {
+      if (transport.type === TransportType.P2P) {
+        this.p2pTransport = transport
+      } else if (transport.type === TransportType.WALLETCONNECT) {
+        this.wcTransport = transport
+      }
       this.observeTransportStatus(transport)
+    } else {
+      this.p2pTransport = undefined
+      this.wcTransport = undefined
     }
   }
 
   private observeTransportStatus(transport: ClientTransport): void {
-    if (this.activeObservedTransport === transport) {
+    if (this.transportStatusUnsubs.has(transport)) {
       return
     }
-    if (this.transportStatusUnsub) {
-      this.transportStatusUnsub()
-      this.transportStatusUnsub = undefined
+    for (const [observed, unsub] of this.transportStatusUnsubs.entries()) {
+      if (observed.type === transport.type && observed !== transport) {
+        unsub()
+        this.transportStatusUnsubs.delete(observed)
+      }
     }
-    this.activeObservedTransport = transport
     if (typeof transport.addStatusListener === 'function') {
-      this.transportStatusUnsub = transport.addStatusListener((info) => {
+      const unsub = transport.addStatusListener((info) => {
         if (this.destroyed) {
           return
         }
@@ -1104,6 +1391,7 @@ export class WalletClient extends Client {
           }
         }
       })
+      this.transportStatusUnsubs.set(transport, unsub)
     }
   }
 
@@ -1165,6 +1453,7 @@ export class WalletClient extends Client {
         ...(account.verificationType ? { verificationType: account.verificationType } : {})
       }
       await this.permissionManager.addPermission(permission)
+      await this.emitPermissionsUpdated()
     }
 
     const requestMessage: ChangeAccountRequest = {
@@ -1183,7 +1472,7 @@ export class WalletClient extends Client {
     }
 
     const serialized = await new Serializer().serialize(requestMessage)
-    const transport = await this.transport
+    const transport = await this.getTransportForPeer(peer)
     await transport.send(serialized, peer)
   }
 
@@ -1213,6 +1502,49 @@ export class WalletClient extends Client {
       } catch (error) {
         logger.error('peer listener', error)
       }
+    }
+  }
+
+  public subscribeToPermissions(listener: PermissionListener): () => void {
+    const existing = this.permissionListeners.get(listener)
+    if (existing) {
+      return existing
+    }
+
+    const unsubscribe = (): void => {
+      if (this.permissionListeners.get(listener) === unsubscribe) {
+        this.permissionListeners.delete(listener)
+      }
+    }
+    this.permissionListeners.set(listener, unsubscribe)
+
+    return unsubscribe
+  }
+
+  private notifyPermissionListeners(permissions: PermissionInfo[]): void {
+    if (this.destroyed) {
+      return
+    }
+    for (const listener of Array.from(this.permissionListeners.keys())) {
+      try {
+        Promise.resolve(listener(permissions)).catch((error) => {
+          logger.error('permission listener', error)
+        })
+      } catch (error) {
+        logger.error('permission listener', error)
+      }
+    }
+  }
+
+  private async emitPermissionsUpdated(): Promise<void> {
+    if (this.destroyed || this.permissionListeners.size === 0) {
+      return
+    }
+    try {
+      const permissions = await this.getPermissions()
+      this.notifyPermissionListeners(permissions)
+    } catch (error) {
+      logger.error('emitPermissionsUpdated', error)
     }
   }
 
@@ -1255,6 +1587,21 @@ export class WalletClient extends Client {
         source: 'storage'
       })
     }
+
+    this.notifyPermissionListeners([])
+  }
+
+  private parsePermissionsFromStorage(raw: string | null): PermissionInfo[] | undefined {
+    if (raw === null) {
+      return []
+    }
+    try {
+      const parsed = JSON.parse(raw)
+
+      return Array.isArray(parsed) ? parsed : undefined
+    } catch {
+      return undefined
+    }
   }
 
   private parsePeersFromStorage(raw: string | null): ExtendedPeerInfo[] {
@@ -1287,7 +1634,7 @@ export class WalletClient extends Client {
           (this._transport.isResolved() || this.transport !== this._transport.promise)
         ) {
           try {
-            const transport = await this.transport
+            const transport = this.p2pTransport ?? (await this.transport)
             if (this.destroyed) {
               return
             }
@@ -1353,8 +1700,34 @@ export class WalletClient extends Client {
         const postMessageKey = this.storage.getPrefixedKey(
           StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
         )
+        const walletConnectKey = this.storage.getPrefixedKey(
+          StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET
+        )
+        const permissionKey = this.storage.getPrefixedKey(StorageKey.PERMISSION_LIST)
+        const appMetadataKey = this.storage.getPrefixedKey(StorageKey.APP_METADATA_LIST)
 
-        if (event.key !== p2pKey && event.key !== postMessageKey) {
+        if (event.key === permissionKey) {
+          const parsedPermissions = this.parsePermissionsFromStorage(event.newValue)
+          if (parsedPermissions !== undefined) {
+            this.notifyPermissionListeners(parsedPermissions)
+          } else {
+            await this.emitPermissionsUpdated()
+          }
+
+          return
+        }
+
+        if (event.key === appMetadataKey) {
+          await this.emitPermissionsUpdated()
+
+          return
+        }
+
+        if (
+          event.key !== p2pKey &&
+          event.key !== postMessageKey &&
+          event.key !== walletConnectKey
+        ) {
           return
         }
 
