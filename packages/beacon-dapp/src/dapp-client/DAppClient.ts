@@ -4176,7 +4176,7 @@ export class DAppClient extends Client {
         requestId: message.id,
         receivedAt: this.responseReceivedAt.get(message) ?? Date.now()
       })
-      .catch((emitError) => console.warn(emitError))
+      .catch((emitError) => logger.warn('request success event', emitError))
   }
 
   private async getWalletInfoFromStorage(): Promise<
