@@ -1,6 +1,15 @@
 import { getDebugEnabled } from '../debug'
 
+export interface LoggerDiagnostic {
+  readonly level: 'log' | 'warn' | 'error'
+  readonly service: string
+  readonly method: string
+  readonly args: readonly unknown[]
+}
+
 export interface LoggerInterface {
+  /** Optional structured diagnostic sink; legacy sinks use their existing severity method. */
+  diagnostic?(diagnostic: LoggerDiagnostic): void | Promise<void>
   debug(method: string, ...args: unknown[]): void
   log(method: string, ...args: unknown[]): void
   warn(method: string, ...args: unknown[]): void
@@ -9,18 +18,28 @@ export interface LoggerInterface {
   timeLog(method: string, ...args: unknown[]): void
 }
 
+const emitDiagnostic = (diagnostic: LoggerDiagnostic): void => {
+  console[diagnostic.level](...diagnostic.args)
+}
+
 /**
  * The logger that is used internally
  */
 export class InternalLogger implements LoggerInterface {
-  constructor() {}
-
   public debug(name: string, method: string, ...args: unknown[]): void {
     this._log('debug', name, method, args)
   }
 
   public log(name: string, method: string, ...args: unknown[]): void {
     this._log('log', name, method, args)
+  }
+
+  public diagnostic(diagnostic: LoggerDiagnostic): void | Promise<void> {
+    // Existing subclasses may replace the severity sink without knowing about diagnostics.
+    if (this[diagnostic.level] !== InternalLogger.prototype[diagnostic.level]) {
+      return this[diagnostic.level](diagnostic.service, diagnostic.method, diagnostic.args)
+    }
+    emitDiagnostic(diagnostic)
   }
 
   public warn(name: string, method: string, ...args: unknown[]): void {
@@ -32,7 +51,11 @@ export class InternalLogger implements LoggerInterface {
   }
 
   public time(start: boolean, label?: string | undefined): void {
-    start ? console.time(label) : console.timeEnd(label)
+    if (start) {
+      console.time(label)
+    } else {
+      console.timeEnd(label)
+    }
   }
 
   public timeLog(method: string, ...args: unknown[]): void {
@@ -78,12 +101,10 @@ export class InternalLogger implements LoggerInterface {
         console.log(...data)
     }
     console.groupEnd()
-
-    // echo.group(echo.asWarning(`[BEACON] ${message}`))
-    // echo.log(echo.asWarning(`[${this.name}]`), echo.asAlert(`(${method})`), ...args)
-    // echo.groupEnd()
   }
 }
+
+let logger: LoggerInterface = new InternalLogger()
 
 export class Logger implements LoggerInterface {
   private readonly name: string
@@ -118,10 +139,27 @@ export class Logger implements LoggerInterface {
 }
 
 const loggerWrapper: LoggerInterface = new Logger('')
-let logger: LoggerInterface = new InternalLogger()
 
 export const setLogger = (newLogger: LoggerInterface): void => {
   logger = newLogger
 }
 
 export const getLogger = (): LoggerInterface => loggerWrapper
+
+/** Report a required diagnostic without changing the ordinary debug-logging policy. */
+export const reportDiagnostic = (diagnostic: LoggerDiagnostic): void => {
+  const currentLogger = logger
+  try {
+    const report = currentLogger.diagnostic?.bind(currentLogger)
+    // Legacy severity methods are typed void, but JavaScript sinks may return a promise.
+    const completion: unknown = report
+      ? report(diagnostic)
+      : currentLogger[diagnostic.level](diagnostic.service, diagnostic.method, diagnostic.args)
+    if (completion !== undefined) {
+      Promise.resolve(completion).catch(() => emitDiagnostic(diagnostic))
+    }
+  } catch {
+    // A failing custom sink must not replace or silently lose the original diagnostic.
+    emitDiagnostic(diagnostic)
+  }
+}

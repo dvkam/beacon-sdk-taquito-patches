@@ -8,6 +8,7 @@ import {
 } from '@ecadlabs/beacon-utils'
 import { PostMessagePairingRequest, PostMessagePairingResponse } from '@ecadlabs/beacon-types'
 import { BEACON_VERSION } from '../../constants'
+import { reportDiagnostic } from '../../utils/Logger'
 import { CommunicationClient } from './CommunicationClient'
 
 /**
@@ -26,7 +27,14 @@ export abstract class MessageBasedClient extends CommunicationClient {
     keyPair: KeyPair
   ) {
     super(keyPair)
-    this.init().catch(console.error)
+    this.init().catch((error: unknown) =>
+      reportDiagnostic({
+        level: 'error',
+        service: 'MessageBasedClient',
+        method: 'init',
+        args: [error]
+      })
+    )
   }
 
   /**
@@ -90,14 +98,14 @@ export abstract class MessageBasedClient extends CommunicationClient {
    * @param payload
    */
   protected async decryptMessage(senderPublicKey: string, payload: string): Promise<string> {
-    const sharedKey = await this.createCryptoBoxServer(senderPublicKey, this.keyPair!)
+    const sharedKey = await this.createCryptoBoxServer(senderPublicKey, this.getKeyPair())
 
     const hexPayload = Buffer.from(payload, 'hex')
 
     if (hexPayload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
       try {
         return await decryptCryptoboxPayload(hexPayload, sharedKey.receive)
-      } catch (decryptionError) {
+      } catch {
         /* NO-OP. We try to decode every message, but some might not be addressed to us. */
       }
     }
@@ -112,7 +120,7 @@ export abstract class MessageBasedClient extends CommunicationClient {
    * @param message
    */
   protected async encryptMessage(recipientPublicKey: string, message: string): Promise<string> {
-    const sharedKey = await this.createCryptoBoxClient(recipientPublicKey, this.keyPair!)
+    const sharedKey = await this.createCryptoBoxClient(recipientPublicKey, this.getKeyPair())
 
     return encryptCryptoboxPayload(message, sharedKey.send)
   }

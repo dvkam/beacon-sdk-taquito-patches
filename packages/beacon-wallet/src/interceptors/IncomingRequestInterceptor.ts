@@ -184,7 +184,8 @@ export class IncomingRequestInterceptor {
         break
       default:
         logger.log('intercept', 'Message not handled')
-        assertNever(message)
+        message satisfies never
+        throw new Error('Function not implemented.')
     }
   }
 
@@ -232,7 +233,4 @@ export class IncomingRequestInterceptor {
         throw new Error('Unsupported V3 request type')
     }
   }
-}
-function assertNever(_message: never) {
-  throw new Error('Function not implemented.')
 }

@@ -1,4 +1,3 @@
-import { PendingPairingRequests } from '@ecadlabs/beacon-core'
 import bs58check from 'bs58check'
 import {
   ConnectionContext,
@@ -61,11 +60,6 @@ import {
   ChangeAccountRequest,
   DisconnectMessage,
   PeerInfoType,
-  App,
-  AppBase,
-  DesktopApp,
-  ExtensionApp,
-  WebApp,
   SimulatedProofOfEventChallengeRequestInput,
   SimulatedProofOfEventChallengeRequest,
   SimulatedProofOfEventChallengeResponse,
@@ -84,6 +78,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import {
   Client,
+  PendingPairingRequests,
   type ClientTransport,
   AppMetadataManager,
   Serializer,
@@ -91,6 +86,7 @@ import {
   getAccountIdentifier,
   getSenderId,
   Logger,
+  reportDiagnostic,
   ClientEvents,
   StorageValidator,
   MultiTabChannel,
@@ -153,6 +149,7 @@ import { getLegacyPublicKey } from '../utils/legacy-public-key'
 import { InitializationAttempt } from './InitializationAttempt'
 import { InitializationLifecycle } from './InitializationLifecycle'
 import { PairingAttempt } from './PairingAttempt'
+import { resolveWalletMetadata, enrichWalletInfo } from './WalletMetadata'
 import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import {
@@ -2331,10 +2328,11 @@ export class DAppClient extends Client {
     }
 
     if (!activeAccountAlreadyCleared && !this.isGetActiveAccountHandled) {
-      console.warn(
-        `An active account has been received, but no active subscription was found for BeaconEvent.ACTIVE_ACCOUNT_SET.
-        For more information, visit: https://docs.walletbeacon.io/guides/migration-guide`
-      )
+      reportDiagnostic({
+        level: 'warn', service: 'DAppClient', method: 'commitActiveAccount',
+        args: [`An active account has been received, but no active subscription was found for BeaconEvent.ACTIVE_ACCOUNT_SET.
+        For more information, visit: https://docs.walletbeacon.io/guides/migration-guide`]
+      })
     }
 
     if (!account) {
@@ -3722,9 +3720,10 @@ export class DAppClient extends Client {
     // Add error message for deprecation of network
     // TODO: Remove when we remove deprecated preferredNetwork
     if (input.network !== undefined && this.network.type !== input.network?.type) {
-      console.error(
-        '[BEACON] The network specified in the DAppClient constructor does not match the network set in the broadcast request. Please set the network in the constructor. Setting it during the Broadcast Request is deprecated.'
-      )
+      reportDiagnostic({
+        level: 'error', service: 'DAppClient', method: 'requestBroadcast',
+        args: ['[BEACON] The network specified in the DAppClient constructor does not match the network set in the broadcast request. Please set the network in the constructor. Setting it during the Broadcast Request is deprecated.']
+      })
     }
 
     const request: BroadcastRequestInput = {
@@ -4176,7 +4175,7 @@ export class DAppClient extends Client {
         requestId: message.id,
         receivedAt: this.responseReceivedAt.get(message) ?? Date.now()
       })
-      .catch((emitError) => console.warn(emitError))
+      .catch((emitError) => logger.warn('request success event', emitError))
   }
 
   private async getWalletInfoFromStorage(): Promise<
@@ -4242,48 +4241,14 @@ export class DAppClient extends Client {
       storageWallet = await this.getWalletInfoFromStorage()
     }
 
-    const lowerCaseCompare = (str1?: string, str2?: string): boolean => {
-      if (str1 && str2) {
-        return str1.toLowerCase() === str2.toLowerCase()
-      }
+    const { walletInfo, inferredPeerType, hasMetadataName } = resolveWalletMetadata({
+      metadata,
+      peer: selectedPeer,
+      account: selectedAccount,
+      storageWallet
+    })
 
-      return false
-    }
-
-    const getOrgName = (name?: string) => name?.trim().split(/[_\s]+/)[0]
-
-    const inferredPeerType: WalletInfo['type'] =
-      selectedAccount?.origin.type === Origin.EXTENSION ||
-      selectedPeer?.type === 'postmessage-pairing-response' ||
-      selectedPeer?.type === 'postmessage-pairing-request'
-        ? 'extension'
-        : undefined
-
-    const metadataName = metadata?.name.trim() ? metadata.name : undefined
-    const peerName = selectedPeer?.name.trim() || undefined
-    const storageWalletName = storageWallet?.name?.trim() || storageWallet?.key.trim() || undefined
-    const usedStorageWalletForName = !metadataName && !peerName && Boolean(storageWalletName)
-    const resolvedName = metadataName ?? peerName ?? storageWalletName ?? ''
-
-    const matchingStorageWallet =
-      storageWallet &&
-      (usedStorageWalletForName ||
-        lowerCaseCompare(selectedAccount?.walletKey?.trim(), storageWallet.key.trim()) ||
-        lowerCaseCompare(getOrgName(storageWallet.key), getOrgName(resolvedName)) ||
-        lowerCaseCompare(getOrgName(storageWallet.name), getOrgName(resolvedName)))
-        ? storageWallet
-        : undefined
-
-    const resolvedIcon = metadata?.icon ?? selectedPeer?.icon ?? matchingStorageWallet?.icon
-    const resolvedType = inferredPeerType ?? matchingStorageWallet?.type
-
-    const walletInfo: WalletInfo = {
-      name: resolvedName,
-      ...(resolvedIcon ? { icon: resolvedIcon } : {}),
-      ...(resolvedType ? { type: resolvedType } : {})
-    }
-
-    if (!metadataName && updateStorage) {
+    if (!hasMetadataName && updateStorage) {
       this.updateStorageWallet(walletInfo).catch((error: unknown) =>
         logger.warn('updateStorageWallet', error)
       )
@@ -4293,76 +4258,14 @@ export class DAppClient extends Client {
       return walletInfo
     }
 
-    const apps: AppBase[] = [
-      ...getiOSList(),
-      ...getWebList(),
-      ...getDesktopList(),
-      ...getExtensionList()
-    ].filter((app: AppBase) =>
-      lowerCaseCompare(getOrgName(app.key), getOrgName(walletInfo.name))
-    )
-
-    // TODO: Remove once all wallets send the icon?
-    const mobile = (apps as App[]).find(
-      (app) => app.universalLink || app.key.includes('ios') || app.key.includes('mobile')
-    )
-    const browser = (apps as WebApp[]).find((app) => app.links)
-    const desktop = (apps as DesktopApp[]).find((app) => app.downloadLink)
-    const extension = (apps as ExtensionApp[]).find((app) => app.id)
-
-    const appTypeMap = {
-      extension: { app: extension, type: 'extension' },
-      desktop: { app: desktop, type: 'desktop' },
-      mobile: { app: mobile, type: 'mobile' },
-      web: { app: browser, type: 'web' }
-    } satisfies {
-      [Kind in NonNullable<WalletInfo['type']>]: { app: AppBase | undefined; type: Kind }
-    }
-
-    const defaultType = (): {
-      app: AppBase | undefined
-      type: 'extension' | 'mobile' | 'web' | 'desktop' | undefined
-    } => {
-      if (isBrowser(window) && browser) {
-        return { app: browser, type: 'web' }
-      }
-      if (isDesktop(window) && desktop) {
-        return { app: desktop, type: 'desktop' }
-      }
-      if (isBrowser(window) && extension) {
-        return { app: extension, type: 'extension' }
-      }
-      if (mobile) {
-        return { app: mobile, type: 'mobile' }
-      }
-
-      return { app: undefined, type: undefined }
-    }
-
-    const preferredType = inferredPeerType ?? matchingStorageWallet?.type
-    const preferredMatch = preferredType ? appTypeMap[preferredType] : undefined
-    const { app, type } = preferredMatch?.app ? preferredMatch : defaultType()
-
-    if (app) {
-      let deeplink: string | undefined
-      if (app.hasOwnProperty('links')) {
-        deeplink = (app as WebApp).links[selectedAccount?.network?.type ?? this.network.type]
-      } else if (app.hasOwnProperty('deepLink')) {
-        deeplink = (app as App).deepLink
-      }
-
-      const finalIcon = app.logo ?? walletInfo.icon
-      const finalType = inferredPeerType ?? type ?? walletInfo.type
-
-      return {
-        name: app.name ?? walletInfo.name,
-        ...(finalIcon ? { icon: finalIcon } : {}),
-        ...(deeplink ? { deeplink } : {}),
-        ...(finalType ? { type: finalType } : {})
-      }
-    }
-
-    return walletInfo
+    return enrichWalletInfo({
+      walletInfo,
+      inferredPeerType,
+      apps: [...getiOSList(), ...getWebList(), ...getDesktopList(), ...getExtensionList()],
+      network: selectedAccount?.network?.type ?? this.network.type,
+      isBrowser: () => isBrowser(window),
+      isDesktop: () => isDesktop(window)
+    })
   }
 
   private async getPeer(account?: StoredAccountInfo): Promise<PeerInfo | undefined> {
