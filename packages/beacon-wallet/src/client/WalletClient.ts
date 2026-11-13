@@ -59,6 +59,7 @@ import {
   Origin
 } from '@ecadlabs/beacon-types'
 import type { SignClientTypes } from '@walletconnect/types'
+import { REGIONS_AND_SERVERS } from '@ecadlabs/beacon-transport-matrix'
 import {
   buildPermissionResponse,
   buildOperationResponse,
@@ -912,6 +913,38 @@ export class WalletClient extends Client {
     return [...(p2pPeers ?? []), ...(postMessagePeers ?? []), ...(walletConnectPeers ?? [])]
   }
 
+  public async getPeer(publicKeyOrSenderId: string): Promise<ExtendedPeerInfo | undefined> {
+    await this.peersSeeded
+    const peers = await this.getPeers()
+    for (const peer of peers) {
+      const extended =
+        'senderId' in peer && typeof peer.senderId === 'string'
+          ? peer
+          : (this.knownPeersByPublicKey.get(peer.publicKey) ?? (await this.getPeerInfo(peer)))
+      if (
+        extended.publicKey === publicKeyOrSenderId ||
+        extended.senderId === publicKeyOrSenderId
+      ) {
+        return extended
+      }
+    }
+    const byPublicKey = this.knownPeersByPublicKey.get(publicKeyOrSenderId)
+    if (byPublicKey) {
+      return byPublicKey
+    }
+    for (const knownPeer of this.knownPeersByPublicKey.values()) {
+      if (knownPeer.senderId === publicKeyOrSenderId) {
+        return knownPeer
+      }
+    }
+
+    return undefined
+  }
+
+  public async hasPeer(publicKeyOrSenderId: string): Promise<boolean> {
+    return (await this.getPeer(publicKeyOrSenderId)) !== undefined
+  }
+
   /**
    * Add a new peer to the known peers
    * @param peer The new peer to add
@@ -942,7 +975,7 @@ export class WalletClient extends Client {
     this.knownPeersByPublicKey.delete(peer.publicKey)
     this.evictPendingRequestsForPeer(extendedPeer)
 
-    await this.removePermissionsForPeers([peer])
+    await this.removePermissionsForPeers([extendedPeer])
 
     if (sendDisconnectToPeer) {
       await this.sendDisconnectToPeer(peer, transport)
@@ -1024,6 +1057,34 @@ export class WalletClient extends Client {
       (permissionInfo) => permissionInfo.accountIdentifier
     )
     await this.permissionManager.removePermissions(permissionIdentifiersToRemove)
+
+    const uniqueSenderIds = Array.from(new Set(peerIdsToRemove))
+    if (uniqueSenderIds.length > 0) {
+      const remainingPeers = await this.getPeers()
+      const activeSenderIds = new Set<string>()
+      for (const remainingPeer of remainingPeers) {
+        if ('senderId' in remainingPeer && typeof remainingPeer.senderId === 'string') {
+          activeSenderIds.add(remainingPeer.senderId)
+        } else {
+          const knownPeer = this.knownPeersByPublicKey.get(remainingPeer.publicKey)
+          if (knownPeer?.senderId) {
+            activeSenderIds.add(knownPeer.senderId)
+          }
+        }
+      }
+      for (const remainingPermission of permissions) {
+        if (!permissionIdentifiersToRemove.includes(remainingPermission.accountIdentifier)) {
+          activeSenderIds.add(remainingPermission.senderId)
+          activeSenderIds.add(remainingPermission.appMetadata.senderId)
+        }
+      }
+      for (const senderId of uniqueSenderIds) {
+        if (!activeSenderIds.has(senderId)) {
+          await this.appMetadataManager.removeAppMetadata(senderId)
+        }
+      }
+    }
+
     if (permissionIdentifiersToRemove.length > 0) {
       await this.emitPermissionsUpdated()
     }
@@ -1273,11 +1334,15 @@ export class WalletClient extends Client {
       return undefined
     }
 
-    if (this.matrixNodes && typeof this.matrixNodes === 'object') {
-      const configuredServers = Object.values(this.matrixNodes).flatMap((servers) => servers ?? [])
-      if (configuredServers.length > 0) {
-        return configuredServers.includes(storedNode) ? storedNode : undefined
-      }
+    const effectiveMatrixNodes =
+      this.matrixNodes && typeof this.matrixNodes === 'object'
+        ? { ...REGIONS_AND_SERVERS, ...this.matrixNodes }
+        : REGIONS_AND_SERVERS
+    const configuredServers = Object.values(effectiveMatrixNodes).flatMap(
+      (servers) => servers ?? []
+    )
+    if (configuredServers.length > 0) {
+      return configuredServers.includes(storedNode) ? storedNode : undefined
     }
 
     return storedNode

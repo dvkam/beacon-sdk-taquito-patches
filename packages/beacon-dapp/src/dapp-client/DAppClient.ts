@@ -168,7 +168,11 @@ import {
 } from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
 import { TabLifecycle } from './TabLifecycle'
-import { BeaconMessageRecord, MessageObserver } from './message-observer'
+import {
+  BeaconMessageRecord,
+  isValidIncomingResponseMessage,
+  MessageObserver
+} from './message-observer'
 import {
   ForwardedBroadcastRequest,
   ForwardedV2Request,
@@ -649,17 +653,13 @@ export class DAppClient extends Client {
     ): Promise<void> => {
       const receivedAt = Date.now()
       // Inter-tab forwarding has no source transport and is not a wire observation.
-      if (transportType !== undefined) {
-        const senderId =
-          message !== null &&
-          typeof message === 'object' &&
-          'senderId' in message &&
-          typeof message.senderId === 'string'
-            ? message.senderId
-            : undefined
-        this.messageObserver.notify('incoming', transportType, message, senderId)
-      }
+      this.messageObserver.notifyIncoming(transportType, message)
       if (this.destroyed) {
+        return
+      }
+      if (!isValidIncomingResponseMessage(message)) {
+        this.messageObserver.notifyIncoming(transportType, message, 'invalid')
+
         return
       }
       if (!this.responseReceivedAt.has(message)) {
@@ -685,6 +685,7 @@ export class DAppClient extends Client {
           } as ChangeAccountRequest | DisconnectMessage,
           connectionInfo
         )
+        this.messageObserver.notifyIncoming(transportType, message, 'handled')
 
         return
       }
@@ -692,6 +693,7 @@ export class DAppClient extends Client {
       // Taken before any await, so concurrent duplicates find the entry only once.
       const timedOut = this.takeLateResponse(message, typedMessage.type, fromAdapter)
       if (timedOut) {
+        this.messageObserver.notifyIncoming(transportType, message, 'stale')
         await this.reportLateResponse(message.id, timedOut, message, connectionInfo, fromAdapter)
 
         return
@@ -705,6 +707,8 @@ export class DAppClient extends Client {
         typedMessage.type === BeaconMessageType.PermissionResponse
       if (preparing) {
         if (!this.requestTracker.beginPreparation(request.key)) {
+          this.messageObserver.notifyIncoming(transportType, message, 'unknown-request')
+
           return
         }
         this.clearPendingRequestAckTimer(message.id, request.key)
@@ -743,6 +747,7 @@ export class DAppClient extends Client {
         // The deadline can fire while V3 metadata loads. The response is then late, not unknown.
         const late = this.takeLateResponse(message, typedMessage.type, fromAdapter)
         if (late) {
+          this.messageObserver.notifyIncoming(transportType, message, 'stale')
           await this.reportLateResponse(message.id, late, message, connectionInfo, fromAdapter)
 
           return
@@ -752,6 +757,7 @@ export class DAppClient extends Client {
           type: typedMessage.type,
           connectionInfo
         })
+        this.messageObserver.notifyIncoming(transportType, message, 'unknown-request')
 
         return
       }
@@ -772,11 +778,13 @@ export class DAppClient extends Client {
             connectionInfo
           })
         }
+        this.messageObserver.notifyIncoming(transportType, message, 'handled')
 
         return
       }
 
       if (typedMessage.type === BeaconMessageType.Acknowledge) {
+        this.messageObserver.notifyIncoming(transportType, message, 'handled')
         if (!this.requestTracker.acknowledge(request.key)) {
           return
         }
@@ -825,6 +833,7 @@ export class DAppClient extends Client {
                 version: '2'
               })
             )
+            this.messageObserver.notifyIncoming(transportType, message, 'handled')
 
             return
           }
@@ -835,6 +844,7 @@ export class DAppClient extends Client {
       } else {
         this.requestTracker.resolve(request.key, { message, connectionInfo })
       }
+      this.messageObserver.notifyIncoming(transportType, message, 'handled')
     }
 
     this.storageValidated = this.storageValidator
