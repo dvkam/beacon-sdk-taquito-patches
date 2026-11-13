@@ -1,4 +1,3 @@
-import { PendingPairingRequests } from '@ecadlabs/beacon-core'
 import bs58check from 'bs58check'
 import {
   ConnectionContext,
@@ -84,6 +83,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import {
   Client,
+  PendingPairingRequests,
   type ClientTransport,
   AppMetadataManager,
   Serializer,

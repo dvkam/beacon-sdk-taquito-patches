@@ -80,6 +80,11 @@ const isFlatChainShape = (
 
 const logger = new Logger('OutgoingResponseInterceptor')
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- The never parameter enforces exhaustive handling; its runtime value is intentionally unused.
+function assertNever(_message: never): never {
+  throw new Error('Function not implemented.')
+}
+
 /**
  * @internalapi
  *
@@ -273,7 +278,4 @@ export class OutgoingResponseInterceptor {
         assertNever(message)
     }
   }
-}
-function assertNever(_message: never) {
-  throw new Error('Function not implemented.')
 }
