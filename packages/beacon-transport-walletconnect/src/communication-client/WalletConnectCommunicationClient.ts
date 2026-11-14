@@ -830,7 +830,6 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     this.ping().catch((error: unknown) => logger.debug('ping', getErrorDiagnostic(error)))
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   public async sendMessage(encoded: string, _peer?: unknown): Promise<void> {
     const generation = this.requestGeneration
     const topic = this.session?.topic ?? ''

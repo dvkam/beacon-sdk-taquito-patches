@@ -7,10 +7,10 @@ After `npm ci --include=optional`, run `npm run prebuild` and
 `packages/*/src`. Every per-file, per-rule count must stay at or below
 `scripts/lint-baseline.json`. Missing entries allow zero findings. Reductions
 pass without changing the baseline, so independent cleanup branches can merge.
-The baseline records measured findings at the current target branch, including
-existing TSX debt. It does not disable rules or exempt touched TSX lines.
-Remove allowances for resolved findings when recording the next baseline; retain
-findings from cleanup PRs that have not merged yet.
+The baseline is empty after the source cleanup. Every source file is expected
+to have zero findings. The baseline does not disable rules or exempt touched
+lines. Unused suppression comments are errors; retain a suppression only while
+it addresses a real finding and document any compatibility requirement.
 
 The command also rejects findings on added or modified lines against the merge
 base with `LINT_BASE_REF`, which defaults to `origin/taquito-patches`. This catches
@@ -31,3 +31,10 @@ with that limitation in mind.
 
 Run the CLI contract tests with
 `node --test scripts/__tests__/lint-new-findings.test.js`.
+
+The source gate does not select package tests, test setup/helpers, end-to-end
+tests, scripts or build-tool configuration. Those files need an explicit lint
+policy that preserves intentional negative type fixtures and declared test
+utilities. Running Vitest, Node tests or Playwright does not establish lint or
+static typecheck coverage. Test and tooling typechecking is tracked separately
+in [issue #209](https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues/209).

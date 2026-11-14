@@ -1,4 +1,3 @@
-/* eslint-disable prefer-arrow/prefer-arrow-functions */
 import { randomBytes } from '@stablelib/random'
 
 /**
@@ -11,5 +10,3 @@ export async function generateGUID(): Promise<string> {
     .map((subbuf) => Buffer.from(subbuf).toString('hex'))
     .join('-')
 }
-
-/* eslint-enable prefer-arrow/prefer-arrow-functions */
