@@ -130,11 +130,14 @@ describe('Wallet peer sender IDs', () => {
     }
   })
 
-  it('aligns wallet peer storage keys and getPeers() return types with ExtendedPeerInfo', () => {
+  it('checks wallet peer storage and correlated response types', () => {
     const diagnostics = typeCheckInline(`
       import {
         WalletClient,
         StorageKey,
+        buildOperationResponse,
+        type OperationRequestOutput,
+        type PermissionRequestOutput,
         type StorageKeyReturnType,
         type ExtendedPeerInfo,
         type ExtendedP2PPairingRequest,
@@ -162,6 +165,22 @@ describe('Wallet peer sender IDs', () => {
         await wallet.removePeer(first)
         await wallet.removeAppMetadata(first.senderId)
         return first.senderId
+      }
+
+      export function checkWalletResponseTypes(
+        wallet: WalletClient,
+        operationRequest: OperationRequestOutput,
+        permissionRequest: PermissionRequestOutput
+      ): void {
+        const response = buildOperationResponse(operationRequest, 'hash')
+        wallet.respond<OperationRequestOutput>(response)
+        wallet.respond(response, operationRequest)
+
+        // @ts-expect-error An operation response cannot answer a permission request.
+        wallet.respond<PermissionRequestOutput>(response)
+
+        // @ts-expect-error The response and explicit request must have matching types.
+        wallet.respond(response, permissionRequest)
       }
     `)
     expect(diagnostics).toBe('')

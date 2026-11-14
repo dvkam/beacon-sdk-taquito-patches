@@ -66,6 +66,11 @@ export default [
     files: ['packages/*/__tests__/**/*.js'],
     languageOptions: { globals: Object.fromEntries(['it', 'test', 'expect', 'describe', 'vi', 'beforeEach', 'afterEach', 'beforeAll', 'afterAll'].map(name => [name, 'readonly'])) }
   },
+  {
+    // This consumer test exercises the SDK's own package exports.
+    files: ['packages/beacon-sdk/__tests__/node-import.test.mjs'],
+    settings: { 'import/internal-regex': '^@ecadlabs/beacon-sdk(?:/|$)' }
+  },
   ...readdirSync(resolve(root, 'packages'), { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => ({

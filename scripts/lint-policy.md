@@ -37,8 +37,10 @@ non-source JavaScript and TypeScript separately with `eslint.tooling.config.mjs`
 It covers package tests, helpers, mocks, setup, end-to-end tests, root and package
 configuration, scripts, and consumer/type fixtures. Generated output, source,
 examples and documentation are outside that profile. It has zero allowances:
-syntax/correctness and dependency findings fail, including warnings. Intentional
-compiler-only paths and consumer self-imports have explained local exceptions.
+syntax/correctness and dependency findings fail, including warnings. The SDK
+consumer test treats its own package references as internal; other external
+imports still need declared dependencies. Response-correlation negative cases
+run through the existing compiler-backed wallet contract test.
 
 Tooling may use devDependencies declared by its own package or the workspace
 root, never declarations borrowed from sibling packages. Production dependency
