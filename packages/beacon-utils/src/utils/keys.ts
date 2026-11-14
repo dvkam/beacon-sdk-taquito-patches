@@ -1,4 +1,3 @@
-/* eslint-disable prefer-arrow/prefer-arrow-functions */
 
 /**
  * A helper function to improve typings of object keys

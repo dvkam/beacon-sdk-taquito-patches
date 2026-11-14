@@ -6,25 +6,23 @@ const path = require('node:path')
 const { ESLint } = require('eslint')
 
 const eslint = new ESLint({ cwd: path.resolve(__dirname, '../..') })
-const legacyRule = 'prefer-arrow/prefer-arrow-functions'
 
-test('legacy arrow suppression comments remain valid in existing source files', async () => {
-  const reports = await eslint.lintFiles([
-    'packages/beacon-utils/src/utils/keys.ts',
-    'packages/beacon-utils/src/utils/crypto.ts',
-    'packages/beacon-utils/src/utils/generate-uuid.ts',
-    'packages/beacon-core/src/utils/assert-never.ts',
-    'packages/beacon-core/src/managers/StorageManager.ts'
-  ])
+test('unused suppressions fail while a required console exception remains valid', async () => {
+  const filePath = 'packages/beacon-core/src/debug.ts'
+  const [unused] = await eslint.lintText(
+    '// eslint-disable-next-line no-console\nexport const value = 1\n',
+    { filePath }
+  )
+  assert.equal(unused.errorCount, 1)
+  assert.equal(unused.messages.length, 1)
+  assert.match(unused.messages[0].message, /Unused eslint-disable directive/)
+  assert.equal(unused.messages[0].severity, 2)
 
-  assert.equal(reports.length, 5)
-  for (const report of reports) {
-    // Existing ordinary lint findings are outside this configuration migration.
-    const configurationFindings = report.messages.filter(
-      (message) => message.fatal || message.ruleId === null || message.ruleId === legacyRule
-    )
-    assert.deepEqual(configurationFindings, [], report.filePath)
-  }
+  const [required] = await eslint.lintText(
+    '// eslint-disable-next-line no-console\nconsole.warn("required diagnostic")\n',
+    { filePath }
+  )
+  assert.deepEqual(required.messages, [])
 })
 
 test('only underscore-prefixed arguments are exempt from unused-variable findings', async () => {

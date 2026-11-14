@@ -584,7 +584,6 @@ const showErrorToast = async (
         closeToast()
         openAlert({
           title: error.title,
-          // eslint-disable-next-line @typescript-eslint/unbound-method
           body: error.fullDescription.description,
           data: error.fullDescription.data,
           buttons
