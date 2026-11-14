@@ -60,3 +60,16 @@ test('only underscore-prefixed arguments are exempt from unused-variable finding
     ]
   )
 })
+
+
+test('tooling imports accept owner and root dependencies without borrowing sibling declarations', async () => {
+  const tooling = new ESLint({ cwd: path.resolve(__dirname, '../..'), overrideConfigFile: 'eslint.tooling.config.mjs' })
+  const [shared, owned, sibling] = await Promise.all([
+    tooling.lintText("import { test } from 'vitest'\n", { filePath: 'packages/beacon-core/__tests__/debug.test.ts' }),
+    tooling.lintText("import QRCode from 'qrcode'\n", { filePath: 'packages/beacon-ui/__tests__/components/info.test.tsx' }),
+    tooling.lintText("import QRCode from 'qrcode'\n", { filePath: 'packages/beacon-core/__tests__/debug.test.ts' })
+  ])
+  assert.deepEqual(shared[0].messages, [])
+  assert.deepEqual(owned[0].messages, [])
+  assert.deepEqual(sibling[0].messages.map(({ ruleId }) => ruleId), ['import/no-extraneous-dependencies'])
+})

@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest'
 import {
   BeaconMessageType,
   BeaconErrorType,
-  RequestErrorResponse
+  RequestErrorResponse,
+  isBeaconError as isBeaconErrorFromTypes,
+  isRequestErrorResponse as isRequestErrorResponseFromTypes,
+  isTezosRpcError as isTezosRpcErrorFromTypes
 } from '@ecadlabs/beacon-types'
 import {
   BeaconError,
@@ -23,11 +26,6 @@ import {
   isRequestErrorResponse,
   isTezosRpcError
 } from '../../src'
-import {
-  isBeaconError as isBeaconErrorFromTypes,
-  isRequestErrorResponse as isRequestErrorResponseFromTypes,
-  isTezosRpcError as isTezosRpcErrorFromTypes
-} from '@ecadlabs/beacon-types'
 
 describe('BeaconError hierarchy and runtime behavior', () => {
   const errorMappings: Array<{

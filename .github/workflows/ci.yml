@@ -60,6 +60,9 @@ jobs:
           fi
           ./scripts/npm11.sh run lint:new
 
+      - name: Lint tests and tooling
+        run: ./scripts/npm11.sh run lint:tooling
+
       - name: Run script tests
         run: node --test scripts/__tests__/*.test.js
 
