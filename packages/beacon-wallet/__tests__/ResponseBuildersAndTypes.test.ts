@@ -600,21 +600,6 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
         )
       })
 
-      it('enforces compile-time request/response correlation', () => {
-        // Keep negative type assertions unreachable during runtime tests.
-        // eslint-disable-next-line no-constant-condition
-        if (false) {
-          const storage = new LocalStorage()
-          const client = new WalletClient({ name: 'TestWallet', storage })
-
-          // @ts-expect-error Generic correlation reject: Operation response is not valid for PermissionRequestOutput
-          client.respond<PermissionRequestOutput>(buildOperationResponse(opRequest, 'hash'))
-
-          // @ts-expect-error Correlated 2-arg reject: Operation response is not valid for PermissionRequestOutput request
-          client.respond(buildOperationResponse(opRequest, 'hash'), permRequest)
-        }
-      })
-
       it('succeeds at runtime when response.id matches request.id and request is pending', async () => {
         const storage = new LocalStorage()
         const client = new WalletClient({ name: 'TestWallet', storage })

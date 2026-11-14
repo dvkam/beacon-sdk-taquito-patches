@@ -70,19 +70,29 @@ test('tooling imports accept owner and root dependencies without borrowing sibli
       cwd: path.resolve(__dirname, '../..'),
       overrideConfigFile: true,
       overrideConfig: {
-        files: ['**/*.{ts,tsx}'],
+        files: ['**/*.{js,mjs,cjs,ts,tsx}'],
+        settings: config.settings ?? {},
         plugins: { import: config.plugins.import },
         rules: { 'import/no-extraneous-dependencies': config.rules['import/no-extraneous-dependencies'] }
       }
     })
     return policy.lintText(source, { filePath })
   }
-  const [shared, owned, sibling] = await Promise.all([
+  const sdkFixture = 'packages/beacon-sdk/__tests__/node-import.test.mjs'
+  const [shared, owned, sibling, selfImport, selfRequire, sdkExternal, foreignSelfImport] = await Promise.all([
     lintImport("import { test } from 'vitest'\n", 'packages/beacon-core/__tests__/debug.test.ts'),
     lintImport("import QRCode from 'qrcode'\n", 'packages/beacon-ui/__tests__/components/info.test.tsx'),
-    lintImport("import QRCode from 'qrcode'\n", 'packages/beacon-core/__tests__/debug.test.ts')
+    lintImport("import QRCode from 'qrcode'\n", 'packages/beacon-core/__tests__/debug.test.ts'),
+    lintImport("import { Serializer } from '@ecadlabs/beacon-sdk'\n", sdkFixture),
+    lintImport("const sdk = require('@ecadlabs/beacon-sdk')\n", sdkFixture),
+    lintImport("import QRCode from 'qrcode'\n", sdkFixture),
+    lintImport("import { Serializer } from '@ecadlabs/beacon-sdk'\n", 'packages/beacon-core/__tests__/debug.test.ts')
   ])
   assert.deepEqual(shared[0].messages, [])
   assert.deepEqual(owned[0].messages, [])
-  assert.deepEqual(sibling[0].messages.map(({ ruleId }) => ruleId), ['import/no-extraneous-dependencies'])
+  assert.deepEqual(selfImport[0].messages, [])
+  assert.deepEqual(selfRequire[0].messages, [])
+  for (const report of [sibling, sdkExternal, foreignSelfImport]) {
+    assert.deepEqual(report[0].messages.map(({ ruleId }) => ruleId), ['import/no-extraneous-dependencies'])
+  }
 })
