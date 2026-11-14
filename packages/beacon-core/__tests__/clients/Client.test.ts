@@ -57,6 +57,12 @@ class TestClient extends Client {
   public clear(transport: TestTransport): Promise<void> {
     return this.cleanup([transport])
   }
+
+  public disconnectPeer(peer: PeerInfo, transport: TestTransport): Promise<void> {
+    this._beaconId.resolve('0'.repeat(64))
+
+    return this.sendDisconnectToPeer(peer, transport)
+  }
 }
 
 describe('Client transport subscription', () => {
@@ -187,5 +193,40 @@ describe('Client transport subscription', () => {
     await client.clear(transport)
     await transport.deliver('serialized-message', context)
     expect(handler).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Disconnect dialect', () => {
+  beforeEach(() => {
+    ;(windowRef as any).beaconCreatedClientInstance = false
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    ;(windowRef as any).beaconCreatedClientInstance = false
+  })
+
+  it.each([
+    ['1', '1'],
+    ['2', '2'],
+    ['3', '2'],
+    ['4', '2'],
+    ['10', '2']
+  ])('sends a flat disconnect to a version %s peer labelled %s', async (peerVersion, expected) => {
+    const storage = new LocalStorage('client-disconnect-dialect-test')
+    const transport = new TestTransport(storage)
+    const client = new TestClient({ name: 'test', storage }, vi.fn())
+    const serialize = vi.spyOn(Serializer.prototype, 'serialize').mockResolvedValue('payload')
+    const send = vi.spyOn(transport, 'send').mockResolvedValue(undefined)
+    const outgoing = vi.spyOn(client as any, 'onOutgoingMessage')
+    const peer = { id: 'peer', version: peerVersion } as PeerInfo
+
+    await client.disconnectPeer(peer, transport)
+
+    const message = serialize.mock.calls[0][0] as Record<string, unknown>
+    expect(outgoing.mock.calls[0][0]).toBe(message)
+    expect(message).toMatchObject({ version: expected, type: BeaconMessageType.Disconnect })
+    expect(message).not.toHaveProperty('message')
+    expect(send).toHaveBeenCalledWith('payload', peer)
   })
 })

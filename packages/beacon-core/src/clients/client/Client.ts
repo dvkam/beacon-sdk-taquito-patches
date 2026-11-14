@@ -22,6 +22,18 @@ import type { ClientTransport } from '../../transports/ClientTransport'
 import { Serializer } from '../../Serializer'
 import { ClientOptions } from './ClientOptions'
 
+/**
+ * The version label for a flat Disconnect message.
+ *
+ * A flat message is the version 2 dialect and has no `message` field. `@airgap/beacon-wallet`
+ * routes a message labelled exactly '3' to its envelope branch, and `@tezos-x/octez.connect-wallet`
+ * routes any integer label of 3 or more there. Both then read `message.message.type`, which
+ * throws for a flat message, so the wallet never processes the disconnect. The flat label avoids
+ * that and is also accepted by the ecadlabs wallet and dApp.
+ */
+const flatDisconnectVersion = (peerVersion: string): string =>
+  /^\d+$/.test(peerVersion) && Number(peerVersion) >= 3 ? '2' : peerVersion
+
 interface TransportCleanupTarget {
   readonly type: TransportType
   removeListener(
@@ -364,7 +376,7 @@ export abstract class Client extends BeaconClient {
   protected async sendDisconnectToPeer(peer: PeerInfo, transport?: ClientTransport): Promise<void> {
     const request: DisconnectMessage = {
       id: await generateGUID(),
-      version: peer.version,
+      version: flatDisconnectVersion(peer.version),
       senderId: await getSenderId(await this.beaconId),
       type: BeaconMessageType.Disconnect
     }
