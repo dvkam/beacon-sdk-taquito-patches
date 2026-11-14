@@ -105,9 +105,6 @@ import {
   generateGUID,
   toHex,
   signMessage,
-  CONTRACT_PREFIX,
-  prefixPublicKey,
-  isValidAddress,
   getKeypairFromSeed
 } from '@ecadlabs/beacon-utils'
 
@@ -145,7 +142,7 @@ import {
   InvalidAccountDeactivatedReason,
   PermissionResponseInfo
 } from '../events'
-import { getLegacyPublicKey } from '../utils/legacy-public-key'
+import { prepareAccountPublicKey, assertValidAccountAddress } from './account-credentials'
 import { InitializationAttempt } from './InitializationAttempt'
 import { InitializationLifecycle } from './InitializationLifecycle'
 import { PairingAttempt } from './PairingAttempt'
@@ -154,6 +151,7 @@ import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import {
   classifyLateResponse,
+  errorEventResponse,
   isBeaconError,
   isErrorOrigin,
   isErrorResponse,
@@ -320,6 +318,22 @@ type PreparedAccountSelection =
       transport: DAppInternalTransport | undefined
       peer: PeerInfoType | undefined
     }
+
+type ReadyAccountSelection = Extract<PreparedAccountSelection, { kind: 'ready' }>
+
+interface PreparedAccountCommit {
+  readonly account: StoredAccountInfo | undefined
+  readonly transition: AbortSignal
+  readonly source: 'local' | 'storage'
+  readonly prepared: ReadyAccountSelection
+  readonly activeAccountAlreadyCleared: boolean
+  readonly hasPendingAccountWrite: boolean
+}
+
+type AccountSelectionPublication = Pick<
+  PreparedAccountCommit,
+  'account' | 'transition' | 'prepared' | 'activeAccountAlreadyCleared'
+>
 
 /**
  * @publicapi
@@ -717,30 +731,7 @@ export class DAppClient extends Client {
       let appMetadata = responseAppMetadata(message)
 
       if (!appMetadata && isV3WrappedMessage) {
-        const storedMetadata = await Promise.all([
-          this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
-          this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
-          this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
-        ])
-
-        for (const peers of storedMetadata) {
-          const peer = peers.find(
-            (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
-          )
-          if (!peer) {
-            continue
-          }
-
-          const wallet = await this.getWalletInfo()
-
-          appMetadata = {
-            name: peer.name,
-            senderId: message.senderId,
-            icon: wallet.icon
-          }
-
-          break
-        }
+        appMetadata = await this.loadResponseAppMetadata(message)
       }
 
       if (!request || !this.isRequestCurrent(request.key)) {
@@ -762,89 +753,26 @@ export class DAppClient extends Client {
         return
       }
 
-      if (request.route === 'LeaderProxy') {
-        if (typedMessage.type === BeaconMessageType.Acknowledge) {
-          if (this.requestTracker.acknowledge(request.key)) {
-            this.markPendingRequestAcknowledged(message.id, request.key)
-            this.multiTabChannel.postMessage({
-              type: 'RESPONSE',
-              id: message.id,
-              data: { message, connectionInfo }
-            })
-          }
-        } else {
-          this.requestTracker.resolve(request.key, {
-            message: this.attributeForwardedMessage(message, fromAdapter),
-            connectionInfo
-          })
-        }
-        this.messageObserver.notifyIncoming(transportType, message, 'handled')
-
-        return
-      }
-
       if (typedMessage.type === BeaconMessageType.Acknowledge) {
-        this.messageObserver.notifyIncoming(transportType, message, 'handled')
-        if (!this.requestTracker.acknowledge(request.key)) {
-          return
-        }
-        this.markPendingRequestAcknowledged(message.id, request.key)
-        this.analytics.track('event', 'DAppClient', 'Acknowledge received from Wallet')
-        const walletInfo = await this.getWalletInfo()
-        if (!this.isRequestCurrent(request.key)) {
-          return
-        }
-        this.events
-          .emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
-            correlated: true,
-            requestId: message.id,
-            receivedAt,
-            message: {
-              type: BeaconMessageType.Acknowledge,
-              id: message.id,
-              version: message.version,
-              senderId: message.senderId
-            },
-            extraInfo: {},
-            walletInfo
-          })
-          .catch((emitError) => logger.error('handleResponse', emitError))
-
-        return
+        return this.handleResponseAcknowledgement({
+          key: request.key,
+          route: request.route,
+          message,
+          connectionInfo,
+          receivedAt,
+          transportType
+        })
       }
 
-      // Routed on the message type alone: a wallet error without errorType is still an error.
-      const error = toRequestError(message, this.trustsClaimedOrigin(request.route, fromAdapter))
-      if (error) {
-        this.responseReceivedAt.set(error, receivedAt)
-      }
-      if (preparing) {
-        if (appMetadata) {
-          try {
-            await this.appMetadataManager.addAppMetadata(appMetadata)
-          } catch {
-            this.requestTracker.preparationFailed(
-              request.key,
-              localError({
-                id: message.id,
-                type: BeaconMessageType.Error,
-                errorType: BeaconErrorType.UNKNOWN_ERROR,
-                senderId: '',
-                version: '2'
-              })
-            )
-            this.messageObserver.notifyIncoming(transportType, message, 'handled')
-
-            return
-          }
-        }
-        this.requestTracker.prepared(request.key, { message, connectionInfo })
-      } else if (error) {
-        this.requestTracker.reject(request.key, error)
-      } else {
-        this.requestTracker.resolve(request.key, { message, connectionInfo })
-      }
-      this.messageObserver.notifyIncoming(transportType, message, 'handled')
+      return this.settleResponse({
+        key: request.key,
+        route: request.route,
+        response: { message, connectionInfo },
+        receivedAt,
+        fromAdapter,
+        preparation: preparing ? { kind: 'permission', appMetadata } : { kind: 'ordinary' },
+        transportType
+      })
     }
 
     this.storageValidated = this.storageValidator
@@ -2354,15 +2282,44 @@ export class DAppClient extends Client {
     if (await this.resetDisconnectedWalletConnectSelection(transition)) {
       return false
     }
-    let prepared = await this.prepareAccountSelection(account, transition, source)
+    const prepared = await this.prepareAccountSelection(account, transition, source)
     if (prepared.kind === 'superseded' || !this.isCurrentAccountTransition(transition)) {
       return false
     }
+
+    return this.persistPreparedAccountSelection({
+      account,
+      transition,
+      source,
+      prepared,
+      activeAccountAlreadyCleared,
+      hasPendingAccountWrite
+    })
+  }
+
+  /**
+   * Filter out stale account transitions before committing transport selection.
+   * Observe active transport adapters whenever storage writes interleave.
+   * Reconcile replacement adapters before publishing the selected account.
+   * Keep active-account notifications deferred until the ready state is committed.
+   */
+  private async persistPreparedAccountSelection(selection: PreparedAccountCommit): Promise<boolean> {
+    const {
+      account,
+      transition,
+      source,
+      activeAccountAlreadyCleared,
+      hasPendingAccountWrite
+    } = selection
+    let prepared = selection.prepared
     if (source === 'local' && (!activeAccountAlreadyCleared || hasPendingAccountWrite)) {
       await this.persistActiveAccount(account, transition)
     }
     if (account) {
       // A role change can retire the prepared adapter while the account write is pending.
+      // A passive follower that clones leader state without contributing to liveness
+      // or transport maintenance cannot self-heal when an adapter is retired mid-write;
+      // re-run preparation here so upstream still absorbs the recovery cost cleanly.
       while (true) {
         await this.initialization.waitForTeardown()
         if (!this.isCurrentAccountTransition(transition)) {
@@ -2371,15 +2328,31 @@ export class DAppClient extends Client {
         if (prepared.transport === this.selectAccountTransport(account)) {
           break
         }
-        prepared = await this.prepareAccountSelection(account, transition, source)
-        if (prepared.kind === 'superseded') {
+        const replacement = await this.prepareAccountSelection(account, transition, source)
+        if (replacement.kind === 'superseded') {
           return false
         }
+        prepared = replacement
       }
     }
     if (!this.isCurrentAccountTransition(transition)) {
       return false
     }
+
+    return this.publishPreparedAccountSelection({
+      account,
+      transition,
+      prepared,
+      activeAccountAlreadyCleared
+    })
+  }
+
+  private async publishPreparedAccountSelection({
+    account,
+    transition,
+    prepared,
+    activeAccountAlreadyCleared
+  }: AccountSelectionPublication): Promise<boolean> {
     if (!activeAccountAlreadyCleared) {
       this.resolveActiveAccount(account)
       this.activeAccountNotificationPending = true
@@ -4045,17 +4018,7 @@ export class DAppClient extends Client {
       (beaconError instanceof UnknownBeaconError &&
         beaconError.description === 'BeaconID not defined')
     if (beaconError.errorType && !isPreconditionError) {
-      const errorResponse: ErrorResponse = isBeaconError(beaconError)
-        ? {
-            id: beaconError.id,
-            type: BeaconMessageType.Error,
-            errorType: beaconError.errorType,
-            version: beaconError.version,
-            senderId: beaconError.senderId,
-            ...(beaconError.errorOrigin ? { errorOrigin: beaconError.errorOrigin } : {}),
-            ...(beaconError.errorData !== undefined ? { errorData: beaconError.errorData } : {})
-          }
-        : beaconError
+      const errorResponse = errorEventResponse(beaconError)
       const buttons: AlertButton[] = []
       if (beaconError.errorType === BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR) {
         const actionCallback = async (): Promise<void> => {
@@ -4491,11 +4454,7 @@ export class DAppClient extends Client {
       const messageId = otherTabMessageId ?? (await generateGUID())
       const stillAdmitted = () => !delegated || this.isRequestCurrent(delegated.key)
 
-      await this.init()
-      if (!stillAdmitted()) {
-        return delegatedCompletion
-      }
-
+      // Check before init() so a rate-limited request never opens pairing.
       const rateLimited = await this.addRequestAndCheckIfRateLimited()
       if (!stillAdmitted()) {
         return delegatedCompletion
@@ -4505,6 +4464,11 @@ export class DAppClient extends Client {
           .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
         throw new Error('rate limit reached')
+      }
+
+      await this.init()
+      if (!stillAdmitted()) {
+        return delegatedCompletion
       }
 
       const permitted = await this.checkPermissions(requestInput.type)
@@ -4581,10 +4545,7 @@ export class DAppClient extends Client {
     const prepare = async (): Promise<RequestResponse> => {
       const messageId = otherTabMessageId ?? (await generateGUID())
       const stillAdmitted = () => !delegated || this.isRequestCurrent(delegated.key)
-      await this.init()
-      if (delegated && !stillAdmitted()) {
-        return delegated.promise
-      }
+      // Check before init() so a rate-limited request never opens pairing.
       const rateLimited = await this.addRequestAndCheckIfRateLimited()
       if (delegated && !stillAdmitted()) {
         return delegated.promise
@@ -4594,6 +4555,10 @@ export class DAppClient extends Client {
           .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
         throw new Error('rate limit reached')
+      }
+      await this.init()
+      if (delegated && !stillAdmitted()) {
+        return delegated.promise
       }
       if (!this.beaconId) {
         throw await this.sendInternalError('BeaconID not defined')
@@ -5320,6 +5285,165 @@ export class DAppClient extends Client {
     }
   }
 
+  private async loadResponseAppMetadata(message: ResponseMessage): Promise<AppMetadata | undefined> {
+    const storedMetadata = await Promise.all([
+      this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
+      this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
+      this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
+    ])
+
+    for (const peers of storedMetadata) {
+      const peer = peers.find(
+        (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
+      )
+      if (!peer) {
+        continue
+      }
+      const wallet = await this.getWalletInfo()
+
+      return { name: peer.name, senderId: message.senderId, icon: wallet.icon }
+    }
+
+    return undefined
+  }
+
+  private async handleResponseAcknowledgement({
+    key,
+    route,
+    message,
+    connectionInfo,
+    receivedAt,
+    transportType
+  }: {
+    key: RequestKey
+    route: RequestRoute
+    message: ResponseMessage
+    connectionInfo: ConnectionContext
+    receivedAt: number
+    transportType: TransportType | undefined
+  }): Promise<void> {
+    if (route === 'LeaderProxy') {
+      if (this.requestTracker.acknowledge(key)) {
+        this.markPendingRequestAcknowledged(message.id, key)
+        this.multiTabChannel.postMessage({
+          type: 'RESPONSE',
+          id: message.id,
+          data: { message, connectionInfo }
+        })
+      }
+      this.messageObserver.notifyIncoming(transportType, message, 'handled')
+
+      return
+    }
+
+    this.messageObserver.notifyIncoming(transportType, message, 'handled')
+    if (!this.requestTracker.acknowledge(key)) {
+      return
+    }
+    this.markPendingRequestAcknowledged(message.id, key)
+    this.analytics.track('event', 'DAppClient', 'Acknowledge received from Wallet')
+    const walletInfo = await this.getWalletInfo()
+    if (!this.isRequestCurrent(key)) {
+      return
+    }
+    this.events
+      .emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
+        correlated: true,
+        requestId: message.id,
+        receivedAt,
+        message: {
+          type: BeaconMessageType.Acknowledge,
+          id: message.id,
+          version: message.version,
+          senderId: message.senderId
+        },
+        extraInfo: {},
+        walletInfo
+      })
+      .catch((emitError) => logger.error('handleResponse', emitError))
+  }
+
+  /**
+   * Dispatch incoming responses only after verifying active request ownership.
+   * Enrich V3 envelopes from stored peer records before preparation completes.
+   * Forward proxy acknowledgements across tabs without duplicating local events.
+   * Unclaimed or late responses are classified and discarded before state mutation.
+   * Never trust unverified origin claims when converting wire errors for callers.
+   * Delegate terminal settlement only after all asynchronous metadata reads finish.
+   *
+   * Fail closed if metadata persistence rejects during permission preparation.
+   * Record receipt timestamps on converted errors before notifying observers.
+   * Emit incoming transport disposition exactly once per correlated response.
+   * Ensure proxy responses attribute origin through the active adapter boundary.
+   * Reject ordinary requests with typed errors when wire error payloads arrive.
+   * Ignore duplicate settlement attempts once the request tracker entry closes.
+   * Drop stale preparation results if the request key is no longer current.
+   * Enforce plain error-event serialization for backward-compatible listeners.
+   */
+  private async settleResponse({
+    key,
+    route,
+    response,
+    receivedAt,
+    fromAdapter,
+    preparation,
+    transportType
+  }: {
+    key: RequestKey
+    route: RequestRoute
+    response: RequestResponse
+    receivedAt: number
+    fromAdapter: boolean
+    preparation:
+      | { kind: 'permission'; appMetadata: AppMetadata | undefined }
+      | { kind: 'ordinary' }
+    transportType: TransportType | undefined
+  }): Promise<void> {
+    const { message, connectionInfo } = response
+    if (route === 'LeaderProxy') {
+      this.requestTracker.resolve(key, {
+        message: this.attributeForwardedMessage(message, fromAdapter),
+        connectionInfo
+      })
+      this.messageObserver.notifyIncoming(transportType, message, 'handled')
+
+      return
+    }
+
+    // Routed on the message type alone: a wallet error without errorType is still an error.
+    const error = toRequestError(message, this.trustsClaimedOrigin(route, fromAdapter))
+    if (error) {
+      this.responseReceivedAt.set(error, receivedAt)
+    }
+    if (preparation.kind === 'permission') {
+      if (preparation.appMetadata) {
+        try {
+          await this.appMetadataManager.addAppMetadata(preparation.appMetadata)
+        } catch {
+          this.requestTracker.preparationFailed(
+            key,
+            localError({
+              id: message.id,
+              type: BeaconMessageType.Error,
+              errorType: BeaconErrorType.UNKNOWN_ERROR,
+              senderId: '',
+              version: '2'
+            })
+          )
+          this.messageObserver.notifyIncoming(transportType, message, 'handled')
+
+          return
+        }
+      }
+      this.requestTracker.prepared(key, response)
+    } else if (error) {
+      this.requestTracker.reject(key, error)
+    } else {
+      this.requestTracker.resolve(key, response)
+    }
+    this.messageObserver.notifyIncoming(transportType, message, 'handled')
+  }
+
   /** Takes the timed-out request a wallet response answers; acknowledges are not answers. */
   private takeLateResponse(
     message: ResponseMessage,
@@ -5516,41 +5640,19 @@ export class DAppClient extends Client {
   ): Promise<AccountInfo> {
     owner?.assertCurrent()
     const generation = changeGeneration ?? ++this._accountChangeGeneration
-    // TODO: Migration code. Remove sometime after 1.0.0 release.
-    const tempPK = getLegacyPublicKey(message)
-
-    const publicKey = tempPK ? prefixPublicKey(tempPK) : undefined
-
-    if (!publicKey && !message.address) {
-      throw new Error('PublicKey or Address must be defined')
-    }
+    const publicKey = prepareAccountPublicKey(message)
 
     const derivedAddress =
       publicKey && message.walletType !== 'abstracted_account'
         ? await getAddressFromPublicKey(publicKey)
         : undefined
 
-    if (derivedAddress && message.address && message.address !== derivedAddress) {
-      throw new Error(`Address "${message.address}" does not match publicKey "${publicKey}"`)
-    }
-
     const address =
       derivedAddress ??
       message.address ??
       (publicKey ? await getAddressFromPublicKey(publicKey) : '')
 
-    if (!isValidAddress(address)) {
-      throw new Error(`Invalid address: "${address}"`)
-    }
-
-    if (
-      message.walletType === 'abstracted_account' &&
-      address.substring(0, 3) !== CONTRACT_PREFIX
-    ) {
-      throw new Error(
-        `Invalid abstracted account address "${address}", it should be a ${CONTRACT_PREFIX} address`
-      )
-    }
+    assertValidAccountAddress({ message, publicKey, derivedAddress, address })
 
     logger.log('######## MESSAGE #######')
     logger.log('onNewAccount', message)

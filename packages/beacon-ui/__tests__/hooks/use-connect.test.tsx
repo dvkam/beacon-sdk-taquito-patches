@@ -1,11 +1,16 @@
 import type { Mock } from 'vitest'
 import { renderHook, act, cleanup, waitFor } from '@testing-library/react'
-import useConnect from '../../src/ui/alert/hooks/useConnect'
+import { useConnect } from '../../src/ui/alert/hooks/useConnect'
 import { StorageKey, ExtensionMessageTarget, NetworkType } from '@ecadlabs/beacon-types'
-import { windowRef } from '@ecadlabs/beacon-core'
+import { reportDiagnostic, windowRef } from '@ecadlabs/beacon-core'
 import { getDefaultLogo } from '../../src/ui/alert/getDefautlLogo'
 import { type MergedWallet, OSLink } from '../../src/utils/wallets'
 import { AlertState } from '../../src/ui/common'
+
+vi.mock('@ecadlabs/beacon-core', async (importActual) => ({
+  ...(await importActual<typeof import('@ecadlabs/beacon-core')>()),
+  reportDiagnostic: vi.fn()
+}))
 
 vi.mock('../../src/utils/get-tzip10-link', () => ({
   getTzip10Link: vi.fn().mockReturnValue('https://example.com/tzip10')
@@ -24,6 +29,16 @@ global.window.URL.createObjectURL = vi.fn()
 // Mock window.open properly
 const windowOpenMock = vi.fn()
 
+// Hook state renders must retain the same immutable resolved payload inputs.
+const resolvedPayloads = new Map<string, Promise<string>>()
+const resolvedPayload = (value: string): Promise<string> => {
+  const previous = resolvedPayloads.get(value)
+  if (previous) return previous
+  const payload = Promise.resolve(value)
+  resolvedPayloads.set(value, payload)
+  return payload
+}
+
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
   let reject!: (reason?: unknown) => void
@@ -36,6 +51,7 @@ const deferred = <T,>() => {
 }
 
 beforeEach(() => {
+  resolvedPayloads.clear()
   window.open = windowOpenMock
   localStorage.clear()
 })
@@ -58,9 +74,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -82,9 +98,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -129,9 +145,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -143,9 +159,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -181,9 +197,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve(postPayload),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload(postPayload),
         wallets,
         onCloseHandler
       )
@@ -194,9 +210,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -250,9 +266,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -263,9 +279,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -298,9 +314,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve(p2pPayload),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload(p2pPayload),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -311,9 +327,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -351,9 +367,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -364,9 +380,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -403,9 +419,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc:topic@2?symKey=abc&relay-protocol=irn'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc:topic@2?symKey=abc&relay-protocol=irn'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -416,9 +432,9 @@ describe('useConnect hook', () => {
         title: 'wc test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -448,8 +464,8 @@ describe('useConnect hook', () => {
       useConnect(
         false,
         wcPayload.promise,
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -461,9 +477,9 @@ describe('useConnect hook', () => {
         title: 'wc web fallback test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
       await Promise.resolve()
@@ -498,9 +514,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('invalid-wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('invalid-wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -511,9 +527,9 @@ describe('useConnect hook', () => {
         title: 'wc invalid test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -541,9 +557,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -554,9 +570,9 @@ describe('useConnect hook', () => {
         title: 'final test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -585,9 +601,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('invalid-wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('invalid-wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -599,9 +615,9 @@ describe('useConnect hook', () => {
           title: 'new tab test',
           pairingPayload: {
             networkType: NetworkType.GHOSTNET,
-            p2pSyncCode: Promise.resolve('test'),
-            postmessageSyncCode: Promise.resolve('test'),
-            walletConnectSyncCode: Promise.resolve('test')
+            p2pSyncCode: resolvedPayload('test'),
+            postmessageSyncCode: resolvedPayload('test'),
+            walletConnectSyncCode: resolvedPayload('test')
           }
         },
         newTabWallet
@@ -630,9 +646,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve(''),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload(''),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -679,9 +695,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve(wcPayload),
-        Promise.resolve(testUri), // Use testUri as the p2pPayload value
-        Promise.resolve('post-payload'),
+        resolvedPayload(wcPayload),
+        resolvedPayload(testUri), // Use testUri as the p2pPayload value
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -709,9 +725,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('initial-wc'),
-        Promise.resolve('initial-p2p'),
-        Promise.resolve('initial-post'),
+        resolvedPayload('initial-wc'),
+        resolvedPayload('initial-p2p'),
+        resolvedPayload('initial-post'),
         wallets,
         onCloseHandler
       )
@@ -764,9 +780,9 @@ describe('useConnect persisted wallet display names', () => {
       const { result } = renderHook(() =>
         useConnect(
           false,
-          Promise.resolve('wc-payload'),
-          Promise.resolve('p2p-payload'),
-          Promise.resolve('post-payload'),
+          resolvedPayload('wc-payload'),
+          resolvedPayload('p2p-payload'),
+          resolvedPayload('post-payload'),
           new Map([[wallet.id, wallet]]),
           vi.fn()
         )
@@ -811,9 +827,9 @@ describe('useConnect persisted wallet display names', () => {
       const { result } = renderHook(() =>
         useConnect(
           false,
-          Promise.resolve('wc-payload'),
-          Promise.resolve('p2p-payload'),
-          Promise.resolve('post-payload'),
+          resolvedPayload('wc-payload'),
+          resolvedPayload('p2p-payload'),
+          resolvedPayload('post-payload'),
           new Map([[candidate.id, candidate]]),
           vi.fn()
         )
@@ -840,12 +856,13 @@ describe('useConnect persisted wallet display names', () => {
     async (corruptValue) => {
       const mobileWallet: MergedWallet = {
         ...wallet,
-        links: {
-          ios: 'https://wallet.test/app'
-        }
+        links: ['', 'https://wallet.test/app']
       }
+      const dispatchEventSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, 'dispatchEvent')
+        .mockReturnValue(true)
       const getItemSpy = vi
-        .spyOn(Object.getPrototypeOf(localStorage), 'getItem')
+        .spyOn(Storage.prototype, 'getItem')
         .mockImplementation((key: string) =>
           key === StorageKey.LAST_SELECTED_WALLET ? corruptValue : null
         )
@@ -854,9 +871,9 @@ describe('useConnect persisted wallet display names', () => {
         const { result } = renderHook(() =>
           useConnect(
             false,
-            Promise.resolve('wc-payload'),
-            Promise.resolve('p2p-payload'),
-            Promise.resolve('post-payload'),
+            resolvedPayload('wc-payload'),
+            resolvedPayload('p2p-payload'),
+            resolvedPayload('post-payload'),
             new Map([[mobileWallet.id, mobileWallet]]),
             vi.fn()
           )
@@ -869,7 +886,268 @@ describe('useConnect persisted wallet display names', () => {
         ).resolves.not.toThrow()
       } finally {
         getItemSpy.mockRestore()
+        dispatchEventSpy.mockRestore()
       }
     }
   )
+})
+
+describe('useConnect launch lifetime', () => {
+  const webWallet: MergedWallet = {
+    id: 'web-wallet',
+    key: 'web_wallet',
+    name: 'Web Wallet',
+    image: 'wallet.png',
+    descriptions: [],
+    types: ['web'],
+    links: ['https://wallet.example'],
+    supportedInteractionStandards: ['beacon']
+  }
+  const config = {
+    title: 'Pair wallet',
+    pairingPayload: {
+      networkType: NetworkType.GHOSTNET,
+      p2pSyncCode: resolvedPayload('unused'),
+      postmessageSyncCode: resolvedPayload('unused'),
+      walletConnectSyncCode: resolvedPayload('unused')
+    }
+  }
+
+  it('opens an isolated placeholder synchronously and keeps the blocked-popup fallback', async () => {
+    const pairing = deferred<string>()
+    const tab = { opener: {}, location: { href: '' }, close: vi.fn() }
+    window.open = vi.fn().mockReturnValueOnce(tab).mockReturnValue(null)
+    const { result } = renderHook(() =>
+      useConnect(
+        false,
+        resolvedPayload('unused'),
+        pairing.promise,
+        resolvedPayload('unused'),
+        new Map([[webWallet.id, webWallet]]),
+        vi.fn()
+      )
+    )
+    let launch!: Promise<void>
+    act(() => {
+      launch = result.current[7](webWallet.id, config)
+    })
+    expect(window.open).toHaveBeenCalledWith('', '_blank')
+    expect(tab.opener).toBeNull()
+    expect(tab.location.href).toBe('')
+    await act(async () => {
+      pairing.resolve('pairing-code')
+      await launch
+    })
+    await waitFor(() => expect(tab.location.href).toBe('https://example.com/tzip10'))
+    expect(result.current[1]).toBe(false)
+    expect(tab.close).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current[8](config, webWallet)
+    })
+    expect(window.open).toHaveBeenLastCalledWith('https://example.com/tzip10', '_blank', 'noopener')
+  })
+
+  it.each(['Beacon web', 'WalletConnect web', 'extension', 'desktop'] as const)(
+    'consumes a rejected %s preparation, clears loading and closes only unused tabs',
+    async (path) => {
+      const pending = deferred<string>()
+      const error = new Error('preparation failed')
+      const selected: MergedWallet = {
+        ...webWallet,
+        types: path === 'extension' ? ['extension'] : path === 'desktop' ? ['desktop'] : ['web'],
+        supportedInteractionStandards:
+          path === 'WalletConnect web' ? ['wallet_connect'] : ['beacon']
+      }
+      const tab = { opener: {}, location: { href: '' }, close: vi.fn() }
+      window.open = vi.fn().mockReturnValue(tab)
+      const { result } = renderHook(() =>
+        useConnect(
+          false,
+          path === 'WalletConnect web' ? pending.promise : resolvedPayload('unused'),
+          path === 'Beacon web' || path === 'desktop' ? pending.promise : resolvedPayload('unused'),
+          path === 'extension' ? pending.promise : resolvedPayload('unused'),
+          new Map([[selected.id, selected]]),
+          vi.fn()
+        )
+      )
+      let launch!: Promise<void>
+      if (path === 'extension' || path === 'desktop') {
+        await act(async () => {
+          await result.current[7](selected.id, { title: 'Select' })
+        })
+        act(() => {
+          launch = path === 'extension' ? result.current[11]() : result.current[13]()
+        })
+      } else {
+        act(() => {
+          launch = result.current[7](selected.id, config)
+        })
+      }
+      await act(async () => {
+        pending.reject(error)
+        await launch
+      })
+      expect(result.current[1]).toBe(false)
+      expect(tab.location.href).toBe('')
+      expect(tab.close).toHaveBeenCalledTimes(path.endsWith('web') ? 1 : 0)
+      expect(reportDiagnostic).toHaveBeenCalledTimes(1)
+      expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ args: [error] }))
+      if (path === 'WalletConnect web') expect(result.current[6]).toBe(false)
+    }
+  )
+
+  it('keeps a handed-off wallet tab open when persisting the selection fails', async () => {
+    const tab = { opener: {}, location: { href: '' }, close: vi.fn() }
+    window.open = vi.fn().mockReturnValue(tab)
+    const error = new Error('storage unavailable')
+    const setItem = vi
+      .spyOn(Object.getPrototypeOf(localStorage), 'setItem')
+      .mockImplementation(() => {
+        throw error
+      })
+    try {
+      const { result, unmount } = renderHook(() =>
+        useConnect(
+          false,
+          resolvedPayload('unused'),
+          resolvedPayload('code'),
+          resolvedPayload('unused'),
+          new Map([[webWallet.id, webWallet]]),
+          vi.fn()
+        )
+      )
+      await act(async () => {
+        await result.current[8](config, webWallet)
+      })
+      unmount()
+      expect(tab.location.href).toBe('https://example.com/tzip10')
+      expect(tab.close).not.toHaveBeenCalled()
+      expect(result.current[1]).toBe(false)
+      expect(reportDiagnostic).toHaveBeenCalledTimes(1)
+      expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ args: [error] }))
+    } finally {
+      setItem.mockRestore()
+    }
+  })
+
+  it.each(['resolve', 'reject'] as const)(
+    'keeps a newer wallet selection loading when an older launch will %s',
+    async (outcome) => {
+      const oldPairing = deferred<string>()
+      const newPairing = deferred<string>()
+      const newerWallet: MergedWallet = {
+        ...webWallet,
+        id: 'new-wallet',
+        key: 'new_wallet',
+        types: ['ios', 'web'],
+        supportedInteractionStandards: ['wallet_connect']
+      }
+      const tab = { opener: {}, location: { href: '' }, close: vi.fn() }
+      window.open = vi.fn().mockReturnValue(tab)
+      const { result } = renderHook(() =>
+        useConnect(
+          false,
+          newPairing.promise,
+          oldPairing.promise,
+          resolvedPayload('unused'),
+          new Map([
+            [webWallet.id, webWallet],
+            [newerWallet.id, newerWallet]
+          ]),
+          vi.fn()
+        )
+      )
+      let oldLaunch!: Promise<void>
+      let newLaunch!: Promise<void>
+      act(() => {
+        oldLaunch = result.current[7](webWallet.id, config)
+      })
+      act(() => {
+        newLaunch = result.current[7](newerWallet.id, config)
+      })
+      await act(async () => {
+        if (outcome === 'resolve') oldPairing.resolve('old-code')
+        else oldPairing.reject(new Error('old failure'))
+        await oldLaunch
+      })
+      expect(tab.close).toHaveBeenCalledTimes(1)
+      expect(tab.location.href).toBe('')
+      expect(result.current[0]).toEqual(newerWallet)
+      expect(result.current[1]).toBe(true)
+      expect(JSON.parse(localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)!).key).toBe(
+        'new_wallet'
+      )
+      await act(async () => {
+        newPairing.resolve('wc:new@2?symKey=abc&relay-protocol=irn')
+        await newLaunch
+      })
+      expect(result.current[2]).toBe('wc:new@2?symKey=abc&relay-protocol=irn')
+      expect(result.current[1]).toBe(false)
+    }
+  )
+
+  it.each(['back', 'unmount'] as const)(
+    'abandons an unused web tab on %s and ignores its late payload',
+    async (exit) => {
+      const pairing = deferred<string>()
+      const tab = { opener: {}, location: { href: '' }, close: vi.fn() }
+      window.open = vi.fn().mockReturnValue(tab)
+      const { result, unmount } = renderHook(() =>
+        useConnect(
+          false,
+          resolvedPayload('unused'),
+          pairing.promise,
+          resolvedPayload('unused'),
+          new Map([[webWallet.id, webWallet]]),
+          vi.fn()
+        )
+      )
+      let launch!: Promise<void>
+      act(() => {
+        launch = result.current[7](webWallet.id, config)
+      })
+      if (exit === 'back') act(() => result.current[15](AlertState.TOP_WALLETS))
+      else unmount()
+      const stored = localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)
+      expect(tab.close).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        pairing.resolve('late-code')
+        await launch
+      })
+      expect(tab.location.href).toBe('')
+      expect(localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)).toBe(stored)
+      if (exit === 'back') expect(result.current[1]).toBe(false)
+    }
+  )
+
+  it('awaits and consumes an async close rejection from an empty mobile payload', async () => {
+    const closing = deferred<void>()
+    const error = new Error('close failed')
+    const onClose = vi.fn(() => closing.promise)
+    const mobileWallet: MergedWallet = { ...webWallet, types: ['ios'], links: [] }
+    const { result } = renderHook(() =>
+      useConnect(
+        false,
+        resolvedPayload('unused'),
+        resolvedPayload(''),
+        resolvedPayload('unused'),
+        new Map([[mobileWallet.id, mobileWallet]]),
+        onClose
+      )
+    )
+    let launch!: Promise<void>
+    await act(async () => {
+      launch = result.current[9](mobileWallet)
+      await Promise.resolve()
+    })
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(result.current[1]).toBe(true)
+    await act(async () => {
+      closing.reject(error)
+      await launch
+    })
+    expect(result.current[1]).toBe(false)
+    expect(reportDiagnostic).toHaveBeenCalledTimes(1)
+    expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ args: [error] }))
+  })
 })

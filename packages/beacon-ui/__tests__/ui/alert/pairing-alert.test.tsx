@@ -1,30 +1,35 @@
+import { reportDiagnostic } from '@ecadlabs/beacon-core'
 import type { Mock } from 'vitest'
 import { act, render, screen, fireEvent, RenderResult } from '@testing-library/react'
 import { NetworkType, StorageKey } from '@ecadlabs/beacon-types'
-import PairingAlert from '../../../src/ui/alert/components/pairing-alert'
-import { ConfigurableAlertProps } from '../../../src/ui/common'
+import { PairingAlert } from '../../../src/ui/alert/components/pairing-alert'
+import type { ComponentProps } from 'react'
+type PairingAlertProps = ComponentProps<typeof PairingAlert>
+
+vi.mock('@ecadlabs/beacon-core', async (importActual) => ({
+  ...(await importActual<typeof import('@ecadlabs/beacon-core')>()),
+  reportDiagnostic: vi.fn()
+}))
 
 // --- Mocks for hooks and platform utilities ---
-import useIsMobile from '../../../src/ui/alert/hooks/useIsMobile'
-import useWallets from '../../../src/ui/alert/hooks/useWallets'
-import useConnect from '../../../src/ui/alert/hooks/useConnect'
+import { useIsMobile } from '../../../src/ui/alert/hooks/useIsMobile'
+import { useWallets } from '../../../src/ui/alert/hooks/useWallets'
+import { useConnect } from '../../../src/ui/alert/hooks/useConnect'
 
 vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
-  default: vi.fn()
+  useIsMobile: vi.fn()
 }))
 vi.mock('../../../src/ui/alert/hooks/useWallets', () => ({
-  __esModule: true,
-  default: vi.fn()
+  useWallets: vi.fn()
 }))
 vi.mock('../../../src/ui/alert/hooks/useConnect', () => ({
-  __esModule: true,
-  default: vi.fn()
+  useConnect: vi.fn()
 }))
 
 // Updated Alert mock: explicitly remove closeOnBackdropClick so it isn’t passed to the DOM
 vi.mock('../../../src/components/alert', () => ({
-  default: (props: any) => {
+  Alert: (props: any) => {
     const {
       pairingPayload,
       featuredWallets,
@@ -48,7 +53,7 @@ vi.mock('../../../src/components/alert', () => ({
 
 // Other mocks
 vi.mock('../../../src/components/info', () => ({
-  default: (props: any) => (
+  Info: (props: any) => (
     <div data-testid="info">
       <div>{props.title}</div>
       <div>{props.description}</div>
@@ -67,10 +72,10 @@ vi.mock('../../../src/components/info', () => ({
   )
 }))
 vi.mock('../../../src/components/pair-other', () => ({
-  default: () => <div data-testid="pair-other">PairOther</div>
+  PairOther: () => <div data-testid="pair-other">PairOther</div>
 }))
 vi.mock('../../../src/components/top-wallets', () => ({
-  default: (props: any) => (
+  TopWallets: (props: any) => (
     <div data-testid="top-wallets">
       TopWallets
       {props.otherWallets && (
@@ -82,10 +87,10 @@ vi.mock('../../../src/components/top-wallets', () => ({
   )
 }))
 vi.mock('../../../src/components/wallets', () => ({
-  default: () => <div data-testid="wallets">Wallets</div>
+  Wallets: () => <div data-testid="wallets">Wallets</div>
 }))
 vi.mock('../../../src/components/qr', () => ({
-  default: (props: any) => (
+  QR: (props: any) => (
     <div data-testid="qr">
       QR: {props.code} - isMobile: {props.isMobile ? 'true' : 'false'}
     </div>
@@ -124,7 +129,7 @@ const walletHookResult = {
   availableExtensions: [{ id: 'wallet1', name: 'Wallet One' }]
 }
 
-const defaultProps: ConfigurableAlertProps = {
+const defaultProps: PairingAlertProps = {
   open: true,
   title: 'Test',
   onClose: vi.fn(),
@@ -163,11 +168,12 @@ const defaultUseConnect = [
   vi.fn(), // handleUpdateQRCode
   vi.fn(), // handleShowMoreContent
   vi.fn(), // handleDisplayQRExtra
-  vi.fn() // handleIsLoading
+  vi.fn(), // handleIsLoading
+  vi.fn() // cancelPendingLaunch
 ]
 
 // Helper function to render PairingAlert and wait for async effects
-async function renderPairingAlert(props: ConfigurableAlertProps): Promise<RenderResult> {
+async function renderPairingAlert(props: PairingAlertProps): Promise<RenderResult> {
   let rendered: RenderResult | undefined
   await act(async () => {
     rendered = render(<PairingAlert {...props} />)
@@ -188,6 +194,33 @@ describe('PairingAlert Component', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  test.each(['success', 'reject'])('restarts sole-wallet pairing on each payload change without handler churn: %s', async (outcome) => {
+    const failure = new Error('unexpected auto-start rejection')
+    const first = vi.fn().mockResolvedValue(undefined)
+    const latest = vi.fn().mockImplementation(() => outcome === 'reject' ? Promise.reject(failure) : Promise.resolve())
+    const initial = [...defaultUseConnect]
+    initial[7] = first
+    ;(useConnect as Mock).mockReturnValue(initial)
+    const view = await renderPairingAlert(defaultProps)
+    expect(first).toHaveBeenCalledTimes(1)
+    const changedHandler = [...initial]
+    changedHandler[7] = latest
+    ;(useConnect as Mock).mockReturnValue(changedHandler)
+    await act(async () => view.rerender(<PairingAlert {...defaultProps} title="Unrelated render" />))
+    expect(latest).not.toHaveBeenCalled()
+    let payload = pairingPayload
+    for (const field of ['walletConnectSyncCode', 'p2pSyncCode', 'postmessageSyncCode'] as const) {
+      payload = { ...payload, [field]: Promise.resolve('replacement') }
+      await act(async () => view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} />))
+    }
+    expect(latest).toHaveBeenCalledTimes(3)
+    await act(async () => view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} open={false} />))
+    expect(latest).toHaveBeenCalledTimes(3)
+    await act(async () => view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} />))
+    expect(latest).toHaveBeenCalledTimes(4)
+    expect(reportDiagnostic).toHaveBeenCalledTimes(outcome === 'reject' ? 4 : 0)
   })
 
   // --- Install State Tests ---
@@ -215,8 +248,11 @@ describe('PairingAlert Component', () => {
       connectReturn[3] = 'install'
       connectReturn[2] = 'QR_CODE_123'
       ;(useConnect as Mock).mockReturnValue(connectReturn)
-      await renderPairingAlert(defaultProps)
-      expect(screen.getByTestId('qr')).toHaveTextContent('QR: QR_CODE_123 - isMobile: false')
+      const view = await renderPairingAlert(defaultProps)
+      const qr = screen.getByTestId('qr')
+      expect(qr).toHaveTextContent('QR: QR_CODE_123 - isMobile: false')
+      await act(async () => view.rerender(<PairingAlert {...defaultProps} title="Unrelated render" />))
+      expect(screen.getByTestId('qr')).toBe(qr)
     })
 
     test('renders QR component with isMobile true when wallet.types length equals 1', async () => {
@@ -409,7 +445,7 @@ describe('PairingAlert Component', () => {
   // --- QRCode LocalStorage Side Effect Tests ---
   describe('QRCode LocalStorage Side Effect', () => {
     test('sets LAST_SELECTED_WALLET when selecting a wallet and rendering its QR code', async () => {
-      const { default: realUseConnect } = await vi.importActual<
+      const { useConnect: realUseConnect } = await vi.importActual<
         typeof import('../../../src/ui/alert/hooks/useConnect')
       >('../../../src/ui/alert/hooks/useConnect')
       vi.mocked(useConnect).mockImplementation(realUseConnect)
