@@ -1,6 +1,7 @@
 import { readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import tsParser from '@typescript-eslint/parser'
+import tsPlugin from '@typescript-eslint/eslint-plugin'
 import importPlugin from 'eslint-plugin-import'
 import globals from 'globals'
 
@@ -53,6 +54,14 @@ export default [
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: { parser: tsParser }
+  },
+  {
+    files: ['**/*.{ts,tsx}'],
+    // These files contain compiler-only calls and never run as tests.
+    ignores: ['**/type-fixtures/**', 'test-fixtures/client-options/**'],
+    languageOptions: { parserOptions: { project: './tsconfig.json', tsconfigRootDir: root } },
+    plugins: { '@typescript-eslint': tsPlugin },
+    rules: { '@typescript-eslint/no-floating-promises': 'error', '@typescript-eslint/await-thenable': 'error' }
   },
   {
     files: ['**/*.{js,cjs}'],

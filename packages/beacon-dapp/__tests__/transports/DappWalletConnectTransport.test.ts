@@ -247,7 +247,7 @@ describe('WalletConnect pairing approval ownership', () => {
         return
       }
       if (outcome === 'Matrix selection') {
-        selectMatrix({
+        await selectMatrix({
           id: 'matrix',
           type: 'p2p-pairing-response',
           name: 'Matrix wallet',

@@ -831,12 +831,12 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
 
       let p2pPeerCallback: ((peer: ExtendedP2PPairingResponse) => Promise<boolean> | void) | undefined
       vi.spyOn(postMessageTransport, 'connect').mockImplementation(async () => {
-        postMessageTransport['updateConnectionStatus']({ status: TransportStatus.CONNECTED })
+        await postMessageTransport['updateConnectionStatus']({ status: TransportStatus.CONNECTED })
       })
       vi.spyOn(postMessageTransport, 'listenForNewPeer').mockResolvedValue(undefined)
       vi.spyOn(p2pTransport, 'connect').mockImplementation(async () => {
-        p2pTransport['updateConnectionStatus']({ status: TransportStatus.CONNECTING })
-        p2pTransport['updateConnectionStatus']({ status: TransportStatus.CONNECTED })
+        await p2pTransport['updateConnectionStatus']({ status: TransportStatus.CONNECTING })
+        await p2pTransport['updateConnectionStatus']({ status: TransportStatus.CONNECTED })
       })
       vi.spyOn(p2pTransport, 'listenForNewPeer').mockImplementation(async (cb) => {
         p2pPeerCallback = cb

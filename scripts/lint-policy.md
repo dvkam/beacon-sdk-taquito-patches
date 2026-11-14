@@ -37,7 +37,10 @@ non-source JavaScript and TypeScript separately with `eslint.tooling.config.mjs`
 It covers package tests, helpers, mocks, setup, end-to-end tests, root and package
 configuration, scripts, and consumer/type fixtures. Generated output, source,
 examples and documentation are outside that profile. It has zero allowances:
-syntax/correctness and dependency findings fail, including warnings. The SDK
+syntax/correctness and dependency findings fail, including warnings. Runtime
+TypeScript tests and tools also reject floating promises and invalid awaits.
+Compiler-only fixture files retain syntax/import checks; broader compiler
+coverage is tracked in issue #209. The SDK
 consumer test treats its own package references as internal; other external
 imports still need declared dependencies. Response-correlation negative cases
 run through the existing compiler-backed wallet contract test.

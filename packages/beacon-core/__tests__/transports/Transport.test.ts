@@ -94,7 +94,7 @@ describe('Transport', () => {
 
     const notification = transport.notify('message')
     let completed = false
-    notification.then(() => {
+    const completionObserved = notification.then(() => {
       completed = true
     })
     await Promise.resolve()
@@ -102,6 +102,7 @@ describe('Transport', () => {
 
     finish()
     await expect(notification).resolves.toBeUndefined()
+    await completionObserved
     expect(completed).toBe(true)
   })
 

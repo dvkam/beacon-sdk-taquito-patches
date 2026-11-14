@@ -24,6 +24,7 @@ const loadTransport = async () => {
     windowRef
   }))
   const { PostMessageTransport } = await import('../src/PostMessageTransport')
+  // eslint-disable-next-line @typescript-eslint/no-floating-promises -- Prime the timed collection; each suite drains its timer in afterEach.
   PostMessageTransport.getAvailableExtensions()
   const discovery = listeners[0]
   if (!discovery) {
@@ -96,7 +97,7 @@ describe('PostMessageTransport public extension discovery', () => {
     const first = PostMessageTransport.getAvailableExtensions()
     const second = PostMessageTransport.getAvailableExtensions()
     let settled = false
-    first.then(() => {
+    const settlementObserved = first.then(() => {
       settled = true
     })
 
@@ -110,6 +111,7 @@ describe('PostMessageTransport public extension discovery', () => {
     expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
     const collected = await first
+    await settlementObserved
     expect(collected).toEqual([])
     expect(await second).toBe(collected)
     expect(await PostMessageTransport.getAvailableExtensions()).toBe(collected)

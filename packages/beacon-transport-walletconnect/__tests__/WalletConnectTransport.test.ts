@@ -128,13 +128,13 @@ describe('WalletConnectTransport', () => {
       const delivery = receive('message')
       expect(delivery).toBeInstanceOf(Promise)
       let completed = false
-      Promise.resolve(delivery).then(() => {
+      const completionObserved = Promise.resolve(delivery).then(() => {
         completed = true
       })
       await Promise.resolve()
       expect(completed).toBe(false)
       finish()
-      await delivery
+      await completionObserved
       await reported
       expect(Logger.prototype.error).toHaveBeenCalledWith('listen', failure)
     } finally {

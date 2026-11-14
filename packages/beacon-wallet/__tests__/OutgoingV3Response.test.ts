@@ -104,7 +104,7 @@ describe('outgoing V3 response values', () => {
         '2'
       )
     )
-    interception.then(() => {
+    const completionObserved = interception.then(() => {
       finished = true
     })
     await started.promise
@@ -113,6 +113,7 @@ describe('outgoing V3 response values', () => {
     release.resolve()
     await delivered.promise
     await interception
+    await completionObserved
 
     expect(finishedBeforeDelivery).toBe(false)
     expect(response).toEqual({
