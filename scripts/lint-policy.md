@@ -32,9 +32,17 @@ with that limitation in mind.
 Run the CLI contract tests with
 `node --test scripts/__tests__/lint-new-findings.test.js`.
 
-The source gate does not select package tests, test setup/helpers, end-to-end
-tests, scripts or build-tool configuration. Those files need an explicit lint
-policy that preserves intentional negative type fixtures and declared test
-utilities. Running Vitest, Node tests or Playwright does not establish lint or
-static typecheck coverage. Test and tooling typechecking is tracked separately
-in [issue #209](https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues/209).
+The source gate selects production source only. `npm run lint:tooling` checks
+non-source JavaScript and TypeScript separately with `eslint.tooling.config.mjs`.
+It covers package tests, helpers, mocks, setup, end-to-end tests, root and package
+configuration, scripts, and consumer/type fixtures. Generated output, source,
+examples and documentation are outside that profile. It has zero allowances:
+syntax/correctness and dependency findings fail, including warnings. Intentional
+compiler-only paths and consumer self-imports have explained local exceptions.
+
+Tooling may use devDependencies declared by its own package or the workspace
+root, never declarations borrowed from sibling packages. Production dependency
+rules remain unchanged. This profile does not impose production style or mock
+restrictions, and syntax parsing does not establish compiler coverage. Test and
+tooling typechecking is tracked in
+[issue #209](https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues/209).

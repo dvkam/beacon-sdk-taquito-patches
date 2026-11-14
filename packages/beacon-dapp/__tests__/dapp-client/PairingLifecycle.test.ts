@@ -1,5 +1,4 @@
 import type { Mock } from 'vitest'
-import { TransportType as PairingTransportType } from '@ecadlabs/beacon-types'
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
@@ -267,7 +266,7 @@ describe('DApp pairing lifecycle through init', () => {
     const { client, p2p, post, listeners, pairing, connectDone, outcome, emit } = await setup()
     const peer = { name: 'Wallet', publicKey: '11'.repeat(32) }
     await listeners.p2p(peer)
-    expect(await outcome).toEqual({ value: PairingTransportType.P2P })
+    expect(await outcome).toEqual({ value: TransportType.P2P })
     expect(client.setActivePeer).toHaveBeenCalledWith(peer, expect.anything())
     expect(client.setTransport).toHaveBeenCalledWith(p2p)
     await pairing.abortedHandler()
@@ -345,7 +344,7 @@ describe('DApp pairing lifecycle through init', () => {
       await expect(selectingWinner).resolves.toBe(true)
       expect(await outcome).toEqual({
         value:
-          winningTransport === 'p2p' ? PairingTransportType.P2P : PairingTransportType.WALLETCONNECT
+          winningTransport === 'p2p' ? TransportType.P2P : TransportType.WALLETCONNECT
       })
       connectDone()
       await pairing.p2pPeerInfo
