@@ -53,7 +53,6 @@ export abstract class Storage {
    * Backends without external-change notifications reject the subscription;
    * their read and write operations remain available.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Keep the callback argument for Storage compatibility.
   public subscribeToStorageChanged(_callback: StorageChangeListener): Promise<void> {
     return Promise.reject(new Error('This storage backend does not support change notifications.'))
   }

@@ -6,8 +6,8 @@ import globals from 'globals'
 
 export default [
   {
-    // Preserve ESLint 8's handling of existing suppression comments.
-    linterOptions: { reportUnusedDisableDirectives: 'off' }
+    // Reject suppression comments that no longer suppress a finding.
+    linterOptions: { reportUnusedDisableDirectives: 'error' }
   },
   ...tsPlugin.configs['flat/recommended'],
   prettier,
@@ -20,17 +20,7 @@ export default [
       globals: { ...globals.browser, ...globals.es2015, ...globals.node }
     },
     plugins: {
-      import: importPlugin,
-      // Resolve legacy source suppressions without restoring the retired rule.
-      // prefer-arrow-callback below enforces the replacement policy.
-      'prefer-arrow': {
-        rules: {
-          'prefer-arrow-functions': {
-            meta: { schema: [] },
-            create: () => ({})
-          }
-        }
-      }
+      import: importPlugin
     },
     rules: {
       '@typescript-eslint/adjacent-overload-signatures': 'error',
