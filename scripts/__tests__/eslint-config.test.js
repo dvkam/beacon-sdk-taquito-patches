@@ -8,19 +8,24 @@ const { ESLint } = require('eslint')
 const eslint = new ESLint({ cwd: path.resolve(__dirname, '../..') })
 
 test('unused suppressions fail while a required console exception remains valid', async () => {
-  const filePath = 'packages/beacon-core/src/debug.ts'
-  const [unused] = await eslint.lintText(
-    '// eslint-disable-next-line no-console\nexport const value = 1\n',
-    { filePath }
+  const config = await eslint.calculateConfigForFile('packages/beacon-core/src/debug.ts')
+  const policy = new ESLint({
+    overrideConfigFile: true,
+    overrideConfig: {
+      linterOptions: config.linterOptions,
+      rules: { 'no-console': config.rules['no-console'] }
+    }
+  })
+  const [unused] = await policy.lintText(
+    '// eslint-disable-next-line no-console\nexport const value = 1\n'
   )
   assert.equal(unused.errorCount, 1)
   assert.equal(unused.messages.length, 1)
   assert.match(unused.messages[0].message, /Unused eslint-disable directive/)
   assert.equal(unused.messages[0].severity, 2)
 
-  const [required] = await eslint.lintText(
-    '// eslint-disable-next-line no-console\nconsole.warn("required diagnostic")\n',
-    { filePath }
+  const [required] = await policy.lintText(
+    '// eslint-disable-next-line no-console\nconsole.warn("required diagnostic")\n'
   )
   assert.deepEqual(required.messages, [])
 })
