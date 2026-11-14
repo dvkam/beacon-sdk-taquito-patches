@@ -601,6 +601,8 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
       })
 
       it('enforces compile-time request/response correlation', () => {
+        // Keep negative type assertions unreachable during runtime tests.
+        // eslint-disable-next-line no-constant-condition
         if (false) {
           const storage = new LocalStorage()
           const client = new WalletClient({ name: 'TestWallet', storage })
