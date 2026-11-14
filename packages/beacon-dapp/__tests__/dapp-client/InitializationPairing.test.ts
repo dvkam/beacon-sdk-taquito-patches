@@ -299,7 +299,7 @@ describe('Initialization pairing completion', () => {
       expect(await second.outcome).toEqual({ value: type })
       expect(pairSuccess).toHaveBeenCalledTimes(1)
       expect(dapp.connectionStatus).toBe(TransportStatus.CONNECTED)
-      await pairing.abortedHandler?.()
+      await Promise.resolve(pairing.abortedHandler?.())
       expect(group.p2p.disconnect).not.toHaveBeenCalled()
       expect(group.post.disconnect).not.toHaveBeenCalled()
     }

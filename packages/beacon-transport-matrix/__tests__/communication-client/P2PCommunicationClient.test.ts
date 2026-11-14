@@ -1115,7 +1115,7 @@ describe('P2PCommunicationClient', () => {
     it('revokes requests on cancellation', async () => {
       const request = await client.getPairingRequestInfo()
       respond(request.id)
-      client.cancelPairingRequests()
+      await client.cancelPairingRequests()
       await handler(event)
       expect(accept).not.toHaveBeenCalled()
     })
@@ -1124,9 +1124,10 @@ describe('P2PCommunicationClient', () => {
       const relay = createDeferred<{ server: string; timestamp: number }>()
       ;(client as any).getRelayServer.mockReturnValue(relay.promise)
       const request = client.getPairingRequestInfo()
-      client.cancelPairingRequests()
+      const cancellation = client.cancelPairingRequests()
       relay.resolve({ server: 'relay.server', timestamp: 1 })
       await expect(request).rejects.toThrow('cancelled')
+      await cancellation
     })
 
     it('rejects a channel-open message with non-hex payload without calling openCryptobox', async () => {

@@ -206,14 +206,14 @@ it.each(['message', 'leader'] as const)(
     const delivery = state.channel.onmessage?.({
       type: callback === 'leader' ? 'LEADER_DEAD' : 'RESPONSE'
     })
-    delivery?.then(() => { delivered = true })
+    const deliveryObserved = delivery?.then(() => { delivered = true })
     try {
       for (let tick = 0; tick < 10; tick++) await Promise.resolve()
       expect(callbackStarted).toHaveBeenCalledOnce()
       expect(delivered).toBe(true)
     } finally {
       release()
-      await delivery
+      await deliveryObserved
       await channel.close()
     }
   }

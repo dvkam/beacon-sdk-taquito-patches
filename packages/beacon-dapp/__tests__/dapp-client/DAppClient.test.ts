@@ -223,7 +223,7 @@ vi.mock('@walletconnect/utils', () => ({ getSdkError: vi.fn() }))
 describe('DAppClient: basic unit tests', () => {
   let client: DAppClient
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ;(window as any).beaconCreatedClientInstance = false
     mockLoggerWarn.mockClear()
     mockLoggerError.mockClear()
@@ -234,7 +234,7 @@ describe('DAppClient: basic unit tests', () => {
       storage: new LocalStorage(),
       preferredNetwork: NetworkType.MAINNET
     })
-    client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
   })
 
   it('returns event cleanup that stops notifications without removing other subscribers', async () => {
@@ -410,7 +410,7 @@ describe('DAppClient: basic unit tests', () => {
       removePeer: vi.fn()
     }
 
-    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
     await expect(
       (client as any).handleResponse(
@@ -445,7 +445,7 @@ describe('DAppClient: basic unit tests', () => {
       .spyOn(client as any, 'removeAccountsForPeerIds')
       .mockResolvedValue(undefined)
     const closed = vi.fn()
-    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
+    await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
     for (const [claimedSender, connectionId] of [
       ['forged-sender', publicKey],
       [senderId, '22'.repeat(32)]
@@ -477,7 +477,7 @@ describe('DAppClient: basic unit tests', () => {
       false
     )
 
-    client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
+    await client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
 
     const acknowledge = {
       id: 'request-id',
@@ -512,7 +512,7 @@ describe('DAppClient: basic unit tests', () => {
       false
     )
 
-    client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
+    await client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
 
     const acknowledge = {
       id: 'wrapper-request-id',
@@ -848,7 +848,7 @@ describe('DAppClient: basic unit tests', () => {
         this.walletConnectTransport = walletConnectTransport
       })
 
-    client.subscribeToEvent(BeaconEvent.PAIR_INIT, pairInitHandler)
+    await client.subscribeToEvent(BeaconEvent.PAIR_INIT, pairInitHandler)
     const initPromise = (client as any).init().catch(() => undefined)
 
     try {
@@ -888,7 +888,7 @@ describe('DAppClient: basic unit tests', () => {
   it('emits channel close events before transport has resolved', async () => {
     const channelClosedHandler = vi.fn()
 
-    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
     const result = await Promise.race([
       (client as any).channelClosedHandler(TransportType.P2P).then(() => 'resolved'),
@@ -914,7 +914,7 @@ describe('DAppClient: basic unit tests', () => {
       addListener: vi.fn().mockResolvedValue(undefined)
     }
 
-    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
     await (client as any).storage.set(StorageKey.ACCOUNTS, [staleAccount])
     await (client as any).setTransport(transport)
@@ -1643,9 +1643,9 @@ describe('DAppClient: basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       requestTimeoutMs: 10
     })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
     const channelClosedHandler = vi.fn()
-    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    await timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
     const operationRequest = new ExposedPromise<unknown, unknown>()
     const rejection = vi.fn()
@@ -1679,9 +1679,9 @@ describe('DAppClient: basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       requestTimeoutMs: 10
     })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
     const channelClosedHandler = vi.fn()
-    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    await timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
     const postMessage = vi.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
 
     try {
@@ -1738,9 +1738,9 @@ describe('DAppClient: basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       requestTimeoutMs: 10
     })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
     const channelClosedHandler = vi.fn()
-    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    await timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
     const postMessage = vi.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
 
     const operationRequest = new ExposedPromise<unknown, unknown>()
@@ -1799,7 +1799,7 @@ describe('DAppClient: basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       requestTimeoutMs: 0
     })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
 
     const postMessage = vi.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
     vi.spyOn((timeoutClient as any).multiTabChannel, 'isLeader').mockReturnValue(true)
@@ -1856,7 +1856,7 @@ describe('DAppClient: basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       requestTimeoutMs: 0
     })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
 
     const sendError = new Error('send failed')
     const transport = {
@@ -2428,7 +2428,7 @@ describe('DAppClient: basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       requestTimeoutMs: 0
     })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
 
     const sendError = new Error('send failed')
     const transport = {
@@ -2475,7 +2475,7 @@ describe('DAppClient: basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       requestTimeoutMs: 10
     })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
 
     const operationRequest = new ExposedPromise<unknown, unknown>()
     void operationRequest.promise.catch(() => undefined)
@@ -2504,9 +2504,9 @@ describe('DAppClient: basic unit tests', () => {
         preferredNetwork: NetworkType.MAINNET,
         requestTimeoutMs: 10
       })
-      timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+      await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
       const channelClosedHandler = vi.fn()
-      timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+      await timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
       vi.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
 
       const operationRequest = new ExposedPromise<unknown, unknown>()
@@ -2570,9 +2570,9 @@ describe('DAppClient: basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       requestTimeoutMs: 10
     })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    await timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
     const channelClosedHandler = vi.fn()
-    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    await timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
     const sessionUpdate = new ExposedPromise<RequestResponse, ErrorResponse>()
     const rejection = vi.fn()
@@ -4693,7 +4693,7 @@ describe('DAppClient: basic unit tests', () => {
       if (!retained) {
         throw new Error('Missing retained pairing callback')
       }
-      retained({
+      await retained({
         id: 'old-peer',
         type: 'postmessage-pairing-response',
         name: 'Old wallet',

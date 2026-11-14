@@ -63,7 +63,7 @@ describe('WalletConnectCommunicationClient BeaconErrorType round-trip', () => {
   })
 
   it('preserves BeaconErrorType when wallet rejects with a serialized Beacon JSON-RPC error', async () => {
-    await restoreSession(client, 'current')
+    restoreSession('current')
 
     const serializedReq = await serializer.serialize({
       id: 'req-params-invalid',
@@ -89,7 +89,7 @@ describe('WalletConnectCommunicationClient BeaconErrorType round-trip', () => {
   })
 
   it('preserves TRANSACTION_INVALID_ERROR and TezosRpcError[] errorData', async () => {
-    await restoreSession(client, 'current')
+    restoreSession('current')
 
     const rpcErrors: TezosRpcError[] = [
       { kind: 'temporary', id: 'proto.021-PsQuebec.contract.balance_too_low' }
@@ -122,7 +122,7 @@ describe('WalletConnectCommunicationClient BeaconErrorType round-trip', () => {
   })
 
   it('falls back to ABORTED_ERROR for legacy wallet JSON-RPC errors', async () => {
-    await restoreSession(client, 'current')
+    restoreSession('current')
 
     const serializedReq = await serializer.serialize({
       id: 'req-legacy-reject',
