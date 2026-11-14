@@ -373,13 +373,14 @@ describe('WalletConnect proposal retirement', () => {
     await first.client.init()
     const remote = remotes[0]
     const released = vi.fn()
-    first.client.releaseOwner(first.token, false).then(released)
+    const releaseObserved = first.client.releaseOwner(first.token, false).then(released)
     await vi.advanceTimersByTimeAsync(0)
     expect.soft(released).toHaveBeenCalledTimes(1)
     expect.soft(remote.core.relayer.transportClose).not.toHaveBeenCalled()
 
     expect.soft(await remote.receiveApproval(1)).toBe(true)
     await vi.advanceTimersByTimeAsync(0)
+    await releaseObserved
     expect
       .soft(remote.disconnect)
       .toHaveBeenCalledWith(expect.objectContaining({ topic: remote.approvalTopic }))

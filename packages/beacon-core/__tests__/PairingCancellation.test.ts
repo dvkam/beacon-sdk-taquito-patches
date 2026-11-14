@@ -49,13 +49,13 @@ describe('pairing cancellation transactions', () => {
       await started.promise
       const cancelled = registry.cancel()
       let drained = false
-      cancelled.then(() => {
+      const cancellationObserved = cancelled.then(() => {
         drained = true
       })
       await Promise.resolve()
       expect(drained).toBe(false)
       write.resolve()
-      await Promise.all([acceptance, cancelled])
+      await Promise.all([acceptance, cancelled, cancellationObserved])
       expect(stored).toEqual(existing ? prior : undefined)
       expect(accepted).not.toHaveBeenCalled()
       expect(transport.listen).not.toHaveBeenCalled()

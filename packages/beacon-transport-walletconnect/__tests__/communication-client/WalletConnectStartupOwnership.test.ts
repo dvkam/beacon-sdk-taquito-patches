@@ -54,7 +54,9 @@ class Events {
   }
 
   async emit(event: string, value: unknown): Promise<void> {
-    await Promise.all(Array.from(this.callbacks.get(event) ?? [], (callback) => callback(value)))
+    await Promise.all(
+      Array.from(this.callbacks.get(event) ?? [], (callback) => Promise.resolve(callback(value)))
+    )
   }
 }
 

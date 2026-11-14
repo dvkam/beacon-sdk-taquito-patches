@@ -52,7 +52,7 @@ const dispatchMessage = async (): Promise<void> => {
     .map(([, listener]) => listener)
   expect(listeners).toHaveLength(2)
   const event = openingEvent()
-  await Promise.all(listeners.map((listener) => listener(event)))
+  await Promise.all(listeners.map((listener) => Promise.resolve(listener(event))))
 }
 
 describe('PostMessageClient pairing callback failures', () => {
