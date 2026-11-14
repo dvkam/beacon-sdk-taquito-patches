@@ -8,6 +8,8 @@ import { MatrixEventService } from '../../src/matrix-client/services/MatrixEvent
 import { MatrixUserService } from '../../src/matrix-client/services/MatrixUserService'
 import { MatrixSyncResponse } from '../../src/matrix-client/models/api/MatrixSync'
 
+type EncryptedMessageListener = Parameters<P2PCommunicationClient['listenForEncryptedMessage']>[1]
+
 const relay = 'relay.example'
 const relayResponse = (timestamp = 12345) =>
   new Response(
@@ -308,7 +310,9 @@ describe('Matrix discovery ownership', () => {
       const peerKey = Buffer.from((await getKeypairFromSeed('discovery-peer')).publicKey).toString(
         'hex'
       )
-      await expect(client.listenForEncryptedMessage(peerKey, vi.fn())).resolves.toBeUndefined()
+      await expect(
+        client.listenForEncryptedMessage(peerKey, vi.fn<EncryptedMessageListener>())
+      ).resolves.toBeUndefined()
       expect(login).toHaveBeenCalledTimes(2)
     }
   )

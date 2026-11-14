@@ -238,7 +238,7 @@ describe('useWallets hook', () => {
     // Wait for the effect to run.
     await waitFor(async () => {
       const { arrangeTopWallets } = await import('../../src/utils/wallets')
-      return arrangeTopWallets.mock.calls.length > 0
+      return vi.mocked(arrangeTopWallets).mock.calls.length > 0
     })
 
     const { arrangeTopWallets } = await import('../../src/utils/wallets')

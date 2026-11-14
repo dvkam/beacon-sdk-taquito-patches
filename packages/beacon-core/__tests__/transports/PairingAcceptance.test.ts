@@ -1,6 +1,6 @@
 import {
   PeerInfoType,
-  PostMessagePairingRequest,
+  ExtendedPostMessagePairingResponse,
   StorageKey,
   StorageKeyReturnType,
   TransportStatus
@@ -55,7 +55,7 @@ class PairingClient extends CommunicationClient {
 }
 
 class PairingTransport extends Transport<
-  PostMessagePairingRequest,
+  ExtendedPostMessagePairingResponse,
   StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP,
   PairingClient
 > {
@@ -67,7 +67,7 @@ class PairingTransport extends Transport<
   }
 
   accept(
-    peer: PostMessagePairingRequest,
+    peer: ExtendedPostMessagePairingResponse,
     isActive: () => boolean,
     accepted: () => boolean | Promise<boolean>
   ): Promise<boolean> {
@@ -75,11 +75,13 @@ class PairingTransport extends Transport<
   }
 }
 
-function peer(publicKey: string, name: string = publicKey): PostMessagePairingRequest {
+function peer(publicKey: string, name: string = publicKey): ExtendedPostMessagePairingResponse {
   return {
     id: publicKey,
     name,
-    type: 'postmessage-pairing-request',
+    type: 'postmessage-pairing-response',
+    senderId: publicKey,
+    extensionId: 'extension',
     publicKey,
     version: '3'
   }
@@ -184,7 +186,7 @@ describe('Transport pairing acceptance', () => {
     const listening = new Gate()
     transport.onListen = (publicKey) =>
       publicKey === candidate.publicKey ? listening.wait() : Promise.resolve()
-    let observed: PostMessagePairingRequest[] = []
+    let observed: ExtendedPostMessagePairingResponse[] = []
     const accepted = vi.fn(async () => {
       observed = await transport.getPeers()
       return true

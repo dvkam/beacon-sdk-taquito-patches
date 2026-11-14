@@ -5,6 +5,9 @@ import { BeaconEvent } from '../../src/events'
 import { LocalStorage } from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
+  SignPayloadRequestInput,
+  PermissionRequestInput,
+  StoredAccountInfo,
   AccountInfo,
   BeaconErrorType,
   BeaconMessageType,
@@ -97,7 +100,7 @@ beforeEach(async () => {
   vi.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
   vi.spyOn(transport, 'getPeers').mockResolvedValue([])
   client['_transport'] = ExposedPromise.resolve<Awaited<DAppClient['transport']>>(transport)
-  client['_activeAccount'] = ExposedPromise.resolve<AccountInfo | undefined>(account)
+  client['_activeAccount'] = ExposedPromise.resolve<StoredAccountInfo | undefined>(account)
   vi.spyOn(client, 'getWalletInfo').mockResolvedValue({ name: 'Wallet' })
   vi.spyOn(client, 'init').mockResolvedValue(transport.type)
 })
@@ -198,9 +201,19 @@ it.each([
     client as unknown as { makeRequest: (typeof client)['makeRequest'] },
     'makeRequest'
   ).mockRejectedValue(error)
-  await client['prepareRequest']({
+  const signPayloadRequestInput = {
     id: 'delegated',
-    data: { type: BeaconMessageType.SignPayloadRequest, payload: 'aa' }
+    senderId: 'dapp',
+    version: '2',
+    type: BeaconMessageType.SignPayloadRequest,
+    payload: 'aa',
+    signingType: SigningType.RAW,
+    sourceAddress: account.address
+  } satisfies SignPayloadRequestInput
+  await client['prepareRequest']({
+    kind: 'v2',
+    id: 'delegated',
+    data: signPayloadRequestInput
   })
   await vi.waitFor(() =>
     expect(channel.postMessage).toHaveBeenCalledWith({
@@ -224,7 +237,16 @@ it('secondary tabs ignore delegated requests instead of sending them again', asy
     client as unknown as { makeRequest: (typeof client)['makeRequest'] },
     'makeRequest'
   )
-  await client['prepareRequest']({ id: 'delegated', data: {} })
+  const signPayloadRequestInput = {
+    id: 'delegated',
+    senderId: 'dapp',
+    version: '2',
+    type: BeaconMessageType.SignPayloadRequest,
+    payload: 'aa',
+    signingType: SigningType.RAW,
+    sourceAddress: account.address
+  } satisfies SignPayloadRequestInput
+  await client['prepareRequest']({ kind: 'v2', id: 'delegated', data: signPayloadRequestInput })
   expect(makeRequest).not.toHaveBeenCalled()
   expect(client['requestTracker'].size).toBe(0)
 })
@@ -311,12 +333,13 @@ it('keeps an unanswered secondary-tab sign request open by default', async () =>
 it('times out a forwarded permission request after the 60 s default', async () => {
   vi.useFakeTimers()
   try {
-    const pending = client['makeRequestBC']({
+    const permissionRequestInput = {
       type: BeaconMessageType.PermissionRequest,
       appMetadata: { name: 'Dapp', senderId: 'dapp' },
       network,
       scopes: []
-    })
+    } satisfies PermissionRequestInput
+    const pending = client['makeRequestBC'](permissionRequestInput)
     const settled = vi.fn()
     const outcome = pending.then(
       (value) => {
@@ -348,12 +371,13 @@ it('times out a forwarded permission request after the 60 s default', async () =
 it('emits PERMISSION_REQUEST_SENT for a forwarded permission request', async () => {
   const emitted = vi.fn()
   await client.subscribeToEvent(BeaconEvent.PERMISSION_REQUEST_SENT, emitted)
-  const pending = client['makeRequestBC']({
+  const permissionRequestInput = {
     type: BeaconMessageType.PermissionRequest,
     appMetadata: { name: 'Dapp', senderId: 'dapp' },
     network,
     scopes: []
-  })
+  } satisfies PermissionRequestInput
+  const pending = client['makeRequestBC'](permissionRequestInput)
   void pending.catch(() => {})
   await vi.waitFor(() => expect(client['requestTracker'].size).toBe(1))
   expect(emitted).toHaveBeenCalledTimes(1)

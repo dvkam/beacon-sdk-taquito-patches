@@ -1,6 +1,7 @@
 import { LocalStorage, Serializer } from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
+  StoredAccountInfo,
   AccountInfo,
   BeaconErrorType,
   BeaconMessageType,
@@ -197,7 +198,7 @@ describe('Delegated request lifetime', () => {
       vi.spyOn(adapter, 'removeAllPeers').mockResolvedValue(undefined)
       vi.spyOn(adapter, 'getPeers').mockResolvedValue([])
       client['_transport'] = ExposedPromise.resolve<Awaited<DAppClient['transport']>>(adapter)
-      client['_activeAccount'] = ExposedPromise.resolve<AccountInfo | undefined>(account)
+      client['_activeAccount'] = ExposedPromise.resolve<StoredAccountInfo | undefined>(account)
       vi.spyOn(client, 'getWalletInfo').mockResolvedValue({ name: 'Wallet' })
       vi.spyOn(client, 'init').mockResolvedValue(adapter.type)
       client.addBlockchain(blockchain)

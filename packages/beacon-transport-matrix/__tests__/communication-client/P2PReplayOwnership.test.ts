@@ -16,6 +16,8 @@ import { MatrixSyncResponse } from '../../src/matrix-client/models/api/MatrixSyn
 import { MatrixEventService } from '../../src/matrix-client/services/MatrixEventService'
 import { MatrixUserService } from '../../src/matrix-client/services/MatrixUserService'
 
+type EncryptedMessageListener = Parameters<P2PCommunicationClient['listenForEncryptedMessage']>[1]
+
 const gate = () => ({ entered: new ExposedPromise<void>(), release: new ExposedPromise<void>() })
 type Gate = ReturnType<typeof gate>
 let messageEncryption: Gate | undefined
@@ -219,7 +221,7 @@ describe('Matrix replay and room ownership', () => {
     await pending.entered.promise
     const otherKey = Buffer.from((await getKeypairFromSeed('other-peer')).publicKey).toString('hex')
     try {
-      await client.listenForEncryptedMessage(otherKey, vi.fn())
+      await client.listenForEncryptedMessage(otherKey, vi.fn<EncryptedMessageListener>())
       expect(callback).not.toHaveBeenCalled()
       expect(unsubscribe).not.toHaveBeenCalled()
       pending.release.resolve()

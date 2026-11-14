@@ -42,7 +42,10 @@ The root `tsconfig.json` supplies shared compiler options and the project for
 type-aware lint. Each package builds from `src`. The package `tsconfig.json`
 and `tsconfig-cjs.json` emit ESM and CommonJS respectively. Beacon UI uses
 Rollup for both formats and `tsconfig.build.json` for production declarations.
-Its editor config also includes UI tests. The wallet lifecycle typecheck uses
+Package tests use separate `tsconfig.tests.json` projects. Run
+`npm run typecheck` after building to check production, tests and tooling;
+`npm run check:typecheck-coverage` verifies file ownership without running the
+compiler. The wallet lifecycle typecheck uses
 `packages/beacon-wallet/__tests__/tsconfig.typecheck.json` so it can import
 shared test fixtures outside the wallet source tree.
 

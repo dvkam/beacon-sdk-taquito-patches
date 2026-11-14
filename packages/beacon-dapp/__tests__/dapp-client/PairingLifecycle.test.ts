@@ -1,21 +1,8 @@
-import type { Mock } from 'vitest'
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
-import {
-  BeaconMessageType,
-  BeaconErrorType,
-  NetworkType,
-  Origin,
-  PermissionScope,
-  StorageKey,
-  TransportStatus,
-  TransportType
-} from '@ecadlabs/beacon-types'
+import { TransportType } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
-import { LocalStorage } from '@ecadlabs/beacon-core'
-import { WalletConnectTransport } from '@ecadlabs/beacon-transport-walletconnect'
 import { BeaconEvent } from '../../src/events'
-import { getDAppClientInstance } from '../../src/utils/get-instance'
 
 const mockLoggerWarn = vi.fn()
 let storageChangedCallback:

@@ -530,13 +530,13 @@ describe('Initialization pairing completion', () => {
       })
     }
     const { pairing } = await start()
-    const information = observe(
+    const pairingInformation =
       kind === 'p2p'
         ? pairing.p2pPeerInfo
         : kind === 'post'
           ? pairing.postmessagePeerInfo
           : pairing.walletConnectPeerInfo
-    )
+    const information = observe<Awaited<typeof pairingInformation>>(pairingInformation)
     await gate.entered.promise
     await dapp.disconnect({ notifyPeers: false })
     await vi.advanceTimersByTimeAsync(0)

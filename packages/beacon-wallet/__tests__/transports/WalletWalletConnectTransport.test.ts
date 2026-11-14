@@ -211,6 +211,7 @@ describe('WalletWalletConnectTransport', () => {
         currentSignClient = createMockSignClient()
         const messages: string[] = []
         await transport.addListener((message) => {
+          if (typeof message !== 'string') throw new Error('Expected serialized transport message')
           messages.push(message)
         })
         await transport.connect()
@@ -245,7 +246,10 @@ describe('WalletWalletConnectTransport', () => {
               id: 'peer',
               name: 'dApp',
               publicKey: hexPk('e'),
-              version: '2'
+              version: '2',
+              type: 'walletconnect-pairing-request',
+              senderId: 'fixture-sender',
+              uri: 'wc:fixture'
             })
             await vi.waitFor(() => expect(currentSignClient.disconnect).toHaveBeenCalledTimes(1))
           } else if (close === 'cleanup') {
@@ -261,11 +265,25 @@ describe('WalletWalletConnectTransport', () => {
             messages.map((message) => serializer.deserialize(message))
           )
           expect(
-            requests.filter((message) => message.type === BeaconMessageType.OperationRequest)
+            requests.filter(
+              (message) =>
+                typeof message === 'object' &&
+                message !== null &&
+                'type' in message &&
+                message.type === BeaconMessageType.OperationRequest
+            )
           ).toHaveLength(0)
         } else {
           await receiving
           const request = await serializer.deserialize(messages[0])
+          if (
+            typeof request !== 'object' ||
+            request === null ||
+            !('id' in request) ||
+            typeof request.id !== 'string'
+          ) {
+            throw new Error('Expected a correlated transport request')
+          }
           const response = await serializer.serialize({
             id: request.id,
             version: '2',
@@ -503,7 +521,10 @@ describe('WalletWalletConnectTransport', () => {
       id: 'peer',
       name: 'Example dApp',
       publicKey: received[0].id,
-      version: '2'
+      version: '2',
+      type: 'walletconnect-pairing-request',
+      senderId: 'fixture-sender',
+      uri: 'wc:fixture'
     })
 
     expect(currentSignClient.approve).toHaveBeenCalledTimes(1)
@@ -572,7 +593,10 @@ describe('WalletWalletConnectTransport', () => {
       id: 'peer',
       name: 'Legacy dApp',
       publicKey: received[0].id,
-      version: '2'
+      version: '2',
+      type: 'walletconnect-pairing-request',
+      senderId: 'fixture-sender',
+      uri: 'wc:fixture'
     })
 
     const approveArg = currentSignClient.approve.mock.calls[0][0]
@@ -617,7 +641,10 @@ describe('WalletWalletConnectTransport', () => {
       id: 'peer',
       name: 'dApp',
       publicKey: received[0].id,
-      version: '2'
+      version: '2',
+      type: 'walletconnect-pairing-request',
+      senderId: 'fixture-sender',
+      uri: 'wc:fixture'
     })
 
     expect(currentSignClient.reject).toHaveBeenCalledWith({
@@ -921,7 +948,10 @@ describe('WalletWalletConnectTransport', () => {
       id: 'peer',
       name: 'Optional dApp',
       publicKey: hexPk('1'),
-      version: '2'
+      version: '2',
+      type: 'walletconnect-pairing-request',
+      senderId: 'fixture-sender',
+      uri: 'wc:fixture'
     })
     expect(currentSignClient.approve).toHaveBeenCalledTimes(1)
 
@@ -935,7 +965,10 @@ describe('WalletWalletConnectTransport', () => {
       id: 'peer',
       name: 'Optional dApp',
       publicKey: hexPk('1'),
-      version: '2'
+      version: '2',
+      type: 'walletconnect-pairing-request',
+      senderId: 'fixture-sender',
+      uri: 'wc:fixture'
     })
     expect(currentSignClient.disconnect).toHaveBeenCalledWith(
       expect.objectContaining({ topic: 'topic-109' })

@@ -56,7 +56,7 @@ describe('Transport', () => {
   it('continues broadcast sends when one peer rejects', async () => {
     const peers: PeerInfo[] = [createPeer('peer-1'), createPeer('peer-2'), createPeer('peer-3')]
     const rejection = new Error('peer-2 failed')
-    const sendMessage = vi.fn((message: string, peer?: PeerInfoType) => {
+    const sendMessage = vi.fn((_message: string, peer?: PeerInfoType) => {
       if (peer?.publicKey === 'peer-2') {
         return Promise.reject(rejection)
       }

@@ -72,7 +72,18 @@ export default [
     files: ['**/*.{ts,tsx}'],
     // These files contain compiler-only calls and never run as tests.
     ignores: ['**/type-fixtures/**', 'test-fixtures/client-options/**'],
-    languageOptions: { parserOptions: { project: './tsconfig.json', tsconfigRootDir: root } },
+    languageOptions: {
+      parserOptions: {
+        project: [
+          './packages/*/tsconfig.tests.json',
+          './tsconfig.tools.json',
+          './tsconfig.e2e.json',
+          './tsconfig.server.json',
+          './tsconfig.compat.json'
+        ],
+        tsconfigRootDir: root
+      }
+    },
     plugins: { '@typescript-eslint': tsPlugin },
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',

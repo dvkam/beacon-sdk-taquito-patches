@@ -1,6 +1,8 @@
 import { LocalStorage, Serializer } from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
+  PermissionRequestInput,
+  StoredAccountInfo,
   AccountInfo,
   BeaconErrorType,
   BeaconMessageType,
@@ -201,7 +203,7 @@ describe('Follower route ownership', () => {
     vi.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
     vi.spyOn(transport, 'getPeers').mockResolvedValue([])
     client['_transport'] = ExposedPromise.resolve<Awaited<DAppClient['transport']>>(transport)
-    client['_activeAccount'] = ExposedPromise.resolve<AccountInfo | undefined>(account)
+    client['_activeAccount'] = ExposedPromise.resolve<StoredAccountInfo | undefined>(account)
     vi.spyOn(client, 'getWalletInfo').mockResolvedValue({ name: 'Wallet' })
     vi.spyOn(client, 'init').mockResolvedValue(transport.type)
     client.addBlockchain(blockchain)
@@ -559,7 +561,7 @@ describe('Follower route ownership', () => {
     vi.spyOn(transport, 'send').mockResolvedValue(undefined)
     vi.spyOn(transport['client'], 'unsubscribeFromEncryptedMessages').mockResolvedValue(undefined)
     direct.client['p2pTransport'] = transport
-    direct.client['_activeAccount'] = ExposedPromise.resolve<AccountInfo | undefined>({
+    direct.client['_activeAccount'] = ExposedPromise.resolve<StoredAccountInfo | undefined>({
       ...account,
       origin: { type: Origin.P2P, id: peer.publicKey }
     })
@@ -768,14 +770,13 @@ describe('Follower route ownership', () => {
     async (timeout) => {
       await create(timeout)
       const follower = await create(timeout)
-      const pending = observe(
-        follower.client['makeRequestBC']({
-          type: BeaconMessageType.PermissionRequest,
-          appMetadata: { name: 'Dapp', senderId: 'dapp' },
-          network: { type: NetworkType.MAINNET },
-          scopes: []
-        })
-      )
+      const permissionRequestInput = {
+        type: BeaconMessageType.PermissionRequest,
+        appMetadata: { name: 'Dapp', senderId: 'dapp' },
+        network: { type: NetworkType.MAINNET },
+        scopes: []
+      } satisfies PermissionRequestInput
+      const pending = observe(follower.client['makeRequestBC'](permissionRequestInput))
       await vi.advanceTimersByTimeAsync(600_000)
       expect(pending.settled).not.toHaveBeenCalled()
     }

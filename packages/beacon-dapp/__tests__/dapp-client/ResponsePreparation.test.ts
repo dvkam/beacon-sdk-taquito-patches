@@ -271,7 +271,10 @@ describe('Response metadata preparation', () => {
     const pending = await request(version)
     const receivedAt = 1_800_000_000_000
     vi.setSystemTime(receivedAt)
-    const rejection = { type: BeaconMessageType.Error, errorType: BeaconErrorType.ABORTED_ERROR }
+    const rejection = {
+      type: BeaconMessageType.Error as const,
+      errorType: BeaconErrorType.ABORTED_ERROR
+    }
     const envelope = { id: pending.id, version, senderId: peer.senderId }
     await transport.receive(
       version === '2' ? { ...envelope, ...rejection } : { ...envelope, message: rejection }
@@ -294,7 +297,7 @@ describe('Response metadata preparation', () => {
     const receivedAt = 1_800_000_000_000
     vi.setSystemTime(receivedAt)
     const envelope = { id: pending.id, version, senderId: peer.senderId }
-    const ack = { type: BeaconMessageType.Acknowledge }
+    const ack = { type: BeaconMessageType.Acknowledge as const }
     await transport.receive(
       version === '2' ? { ...envelope, ...ack } : { ...envelope, message: ack }
     )

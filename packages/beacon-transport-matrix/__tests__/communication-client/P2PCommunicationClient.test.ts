@@ -86,6 +86,8 @@ import {
 import { MatrixMessageType } from '../../src/matrix-client/models/MatrixMessage'
 import { P2PCommunicationClient } from '../../src/communication-client/P2PCommunicationClient'
 
+type EncryptedMessageListener = Parameters<P2PCommunicationClient['listenForEncryptedMessage']>[1]
+
 describe('P2PCommunicationClient', () => {
   let client: P2PCommunicationClient
   let fakeMatrixClient: {
@@ -320,14 +322,17 @@ describe('P2PCommunicationClient', () => {
       ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
         key === senderPublicKey ? gate.promise : Promise.resolve({ receive: 'key' })
       )
-      vi.spyOn(client as any, 'isSender').mockImplementation(
+      vi.spyOn(client, 'isSender').mockImplementation(
         async (_event: unknown, key: unknown) => key === senderPublicKey
       )
       vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
       vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
       const buffer = vi.fn()
       ;(client as any).initialListener = buffer
-      const wrong = client.listenForEncryptedMessage(otherPublicKey, vi.fn())
+      const wrong = client.listenForEncryptedMessage(
+        otherPublicKey,
+        vi.fn<EncryptedMessageListener>()
+      )
       const handler = vi.fn()
       const matching = client.listenForEncryptedMessage(senderPublicKey, handler)
       await wrong
@@ -363,7 +368,10 @@ describe('P2PCommunicationClient', () => {
     it('does not finalize a new session when an old registration settles after reset', async () => {
       const gate = createDeferred<any>()
       ;(client as any).createCryptoBoxServer.mockReturnValueOnce(gate.promise)
-      const old = client.listenForEncryptedMessage(otherPublicKey, vi.fn())
+      const old = client.listenForEncryptedMessage(
+        otherPublicKey,
+        vi.fn<EncryptedMessageListener>()
+      )
       await client.reset()
       ;(client as any).client.resolve(fakeMatrixClient)
       const event = initialMessage()
@@ -384,7 +392,7 @@ describe('P2PCommunicationClient', () => {
       ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
         key === otherPublicKey ? keeper.promise : Promise.resolve({ receive: 'key' })
       )
-      vi.spyOn(client as any, 'isSender').mockImplementation(
+      vi.spyOn(client, 'isSender').mockImplementation(
         async (_event: unknown, key: unknown) => key === senderPublicKey
       )
       vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
@@ -393,7 +401,10 @@ describe('P2PCommunicationClient', () => {
       ;(client as any).initialEvent = event
       const handlerGate = createDeferred<void>()
       const handler = vi.fn(() => handlerGate.promise)
-      const pending = client.listenForEncryptedMessage(otherPublicKey, vi.fn())
+      const pending = client.listenForEncryptedMessage(
+        otherPublicKey,
+        vi.fn<EncryptedMessageListener>()
+      )
       const registration = client.listenForEncryptedMessage(senderPublicKey, handler)
       await waitFor(() => handler.mock.calls.length === 1)
       const newer = initialMessage()
@@ -415,7 +426,10 @@ describe('P2PCommunicationClient', () => {
       ;(decryptCryptoboxPayload as Mock).mockRejectedValueOnce(new Error('wrong recipient'))
       const event = initialMessage()
       ;(client as any).initialEvent = event
-      const pending = client.listenForEncryptedMessage(otherPublicKey, vi.fn())
+      const pending = client.listenForEncryptedMessage(
+        otherPublicKey,
+        vi.fn<EncryptedMessageListener>()
+      )
       const handler = vi.fn()
       await client.listenForEncryptedMessage(senderPublicKey, handler)
       expect(handler).not.toHaveBeenCalled()
@@ -514,7 +528,7 @@ describe('P2PCommunicationClient', () => {
     it('finalizes the buffer after standalone peer registration', async () => {
       const buffer = vi.fn()
       ;(client as any).initialListener = buffer
-      await client.listenForEncryptedMessage(senderPublicKey, vi.fn())
+      await client.listenForEncryptedMessage(senderPublicKey, vi.fn<EncryptedMessageListener>())
       expect(fakeMatrixClient.unsubscribe).toHaveBeenCalledWith(
         MatrixClientEventType.MESSAGE,
         buffer
@@ -524,7 +538,7 @@ describe('P2PCommunicationClient', () => {
     it.each(['reset', 'stop'] as const)(
       'subscribes a known peer on the new Matrix client after %s',
       async (operation) => {
-        await client.listenForEncryptedMessage(senderPublicKey, vi.fn())
+        await client.listenForEncryptedMessage(senderPublicKey, vi.fn<EncryptedMessageListener>())
         const oldListener = (client as any).activeListeners.get(senderPublicKey)
         expect(fakeMatrixClient.subscribe).toHaveBeenCalledWith(
           MatrixClientEventType.MESSAGE,
@@ -539,7 +553,7 @@ describe('P2PCommunicationClient', () => {
         }
         ;(MatrixClient.create as Mock).mockReturnValue(replacementMatrixClient)
         await client.start()
-        await client.listenForEncryptedMessage(senderPublicKey, vi.fn())
+        await client.listenForEncryptedMessage(senderPublicKey, vi.fn<EncryptedMessageListener>())
 
         const newListener = (client as any).activeListeners.get(senderPublicKey)
         expect(replacementMatrixClient.subscribe).toHaveBeenCalledWith(
@@ -615,8 +629,14 @@ describe('P2PCommunicationClient', () => {
         fakeMatrixClient.subscribe.mock.calls[0][1]
 
       const event = messageEvent('ab'.repeat(24))
-      event.content.message.sender = '@hex-hash:relay'
-      await expect(listener(event)).rejects.toBe(failure)
+      const updatedEvent = {
+        ...event,
+        content: {
+          ...event.content,
+          message: { ...event.content.message, sender: '@hex-hash:relay' }
+        }
+      }
+      await expect(listener(updatedEvent)).rejects.toBe(failure)
       expect(callback).toHaveBeenCalledTimes(1)
     })
 
@@ -675,8 +695,14 @@ describe('P2PCommunicationClient', () => {
     it('requires the complete Matrix localpart', async () => {
       const event = { content: { message: { sender: '@hex-hash-extra:relay' } } }
       await expect(client.isSender(event as any, '11'.repeat(32))).resolves.toBe(false)
-      event.content.message.sender = '@hex-hash:relay'
-      await expect(client.isSender(event as any, '11'.repeat(32))).resolves.toBe(true)
+      const updatedEvent = {
+        ...event,
+        content: {
+          ...event.content,
+          message: { ...event.content.message, sender: '@hex-hash:relay' }
+        }
+      }
+      await expect(client.isSender(updatedEvent as any, '11'.repeat(32))).resolves.toBe(true)
     })
 
     it('decodes once across Matrix verification and core delivery', async () => {
@@ -797,7 +823,7 @@ describe('P2PCommunicationClient', () => {
         senderId
       })
       const realCiphertext = await actualUtils.encryptCryptoboxPayload(payload, sharedKey)
-      ;(decryptCryptoboxPayload as Mock).mockImplementation((ct: string, rx: Uint8Array) =>
+      ;(decryptCryptoboxPayload as Mock).mockImplementation((ct: Uint8Array, rx: Uint8Array) =>
         actualUtils.decryptCryptoboxPayload(ct, rx)
       )
 
@@ -1058,12 +1084,14 @@ describe('P2PCommunicationClient', () => {
                   type: 'm.room.member',
                   sender: '@trusted:relay.server',
                   state_key: '@hex-hash:relay.server',
+                  origin_server_ts: 1,
                   content: { membership: 'invite' }
                 },
                 {
                   type: 'm.room.member',
                   sender: '@attacker:relay.server',
                   state_key: '@hex-hash:relay.server',
+                  origin_server_ts: 1,
                   content: { membership: 'invite' }
                 }
               ]
