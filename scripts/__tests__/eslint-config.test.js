@@ -64,10 +64,23 @@ test('only underscore-prefixed arguments are exempt from unused-variable finding
 
 test('tooling imports accept owner and root dependencies without borrowing sibling declarations', async () => {
   const tooling = new ESLint({ cwd: path.resolve(__dirname, '../..'), overrideConfigFile: 'eslint.tooling.config.mjs' })
+  const lintImport = async (source, filePath) => {
+    const config = await tooling.calculateConfigForFile(filePath)
+    const policy = new ESLint({
+      cwd: path.resolve(__dirname, '../..'),
+      overrideConfigFile: true,
+      overrideConfig: {
+        files: ['**/*.{ts,tsx}'],
+        plugins: { import: config.plugins.import },
+        rules: { 'import/no-extraneous-dependencies': config.rules['import/no-extraneous-dependencies'] }
+      }
+    })
+    return policy.lintText(source, { filePath })
+  }
   const [shared, owned, sibling] = await Promise.all([
-    tooling.lintText("import { test } from 'vitest'\n", { filePath: 'packages/beacon-core/__tests__/debug.test.ts' }),
-    tooling.lintText("import QRCode from 'qrcode'\n", { filePath: 'packages/beacon-ui/__tests__/components/info.test.tsx' }),
-    tooling.lintText("import QRCode from 'qrcode'\n", { filePath: 'packages/beacon-core/__tests__/debug.test.ts' })
+    lintImport("import { test } from 'vitest'\n", 'packages/beacon-core/__tests__/debug.test.ts'),
+    lintImport("import QRCode from 'qrcode'\n", 'packages/beacon-ui/__tests__/components/info.test.tsx'),
+    lintImport("import QRCode from 'qrcode'\n", 'packages/beacon-core/__tests__/debug.test.ts')
   ])
   assert.deepEqual(shared[0].messages, [])
   assert.deepEqual(owned[0].messages, [])
