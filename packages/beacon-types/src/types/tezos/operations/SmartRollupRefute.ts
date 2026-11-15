@@ -33,12 +33,10 @@ export enum SmartRollupRefutationOptions {
 }
 
 export type SmartRollupRefutationMoveStep =
-  | SmartRollupRefutationMoveStepDissection[]
-  | SmartRollupRefutationMoveStepProof
+  SmartRollupRefutationMoveStepDissection[] | SmartRollupRefutationMoveStepProof
 
 export type SmartRollupGameStatus =
-  | SmartRollupRefuteGameStatusOptions.ONGOING
-  | SmartRollupRefuteGameStatusEnded
+  SmartRollupRefuteGameStatusOptions.ONGOING | SmartRollupRefuteGameStatusEnded
 
 export interface SmartRollupRefutationMoveStepDissection {
   state?: string
@@ -65,8 +63,7 @@ export type SmartRollupRefutationMoveInputProof =
   | SmartRollupRefutationMoveInputProofFirstInput
 
 export type SmartRollupRefuteGameStatusResult =
-  | SmartRollupRefuteGameEndedResultLoser
-  | SmartRollupRefuteGameEndedResultDraw
+  SmartRollupRefuteGameEndedResultLoser | SmartRollupRefuteGameEndedResultDraw
 
 export interface SmartRollupRefutationMoveInputProofInbox {
   input_proof_kind: SmartRollupInputProofKind.INBOX_PROOF

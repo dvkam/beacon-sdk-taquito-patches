@@ -335,7 +335,9 @@ describe('DApp pairing lifecycle through init', () => {
       const contender = { name: 'Contender' }
       const selectingWinner = listeners[winningTransport](winner)
       await expect(listeners.post(contender)).resolves.toBe(false)
-      await expect(listeners[winningTransport === 'p2p' ? 'wc' : 'p2p'](contender)).resolves.toBe(false)
+      await expect(listeners[winningTransport === 'p2p' ? 'wc' : 'p2p'](contender)).resolves.toBe(
+        false
+      )
       expect(client.setActivePeer).toHaveBeenCalledWith(winner, expect.anything())
       expect(client.setActivePeer).not.toHaveBeenCalledWith(contender, expect.anything())
       expect(p2p.stopListeningForNewPeers).toHaveBeenCalled()
@@ -343,8 +345,7 @@ describe('DApp pairing lifecycle through init', () => {
       selectionDone()
       await expect(selectingWinner).resolves.toBe(true)
       expect(await outcome).toEqual({
-        value:
-          winningTransport === 'p2p' ? TransportType.P2P : TransportType.WALLETCONNECT
+        value: winningTransport === 'p2p' ? TransportType.P2P : TransportType.WALLETCONNECT
       })
       connectDone()
       await pairing.p2pPeerInfo

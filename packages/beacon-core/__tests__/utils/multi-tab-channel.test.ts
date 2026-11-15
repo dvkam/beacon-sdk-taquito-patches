@@ -189,12 +189,13 @@ it('reports detached outbound failures', async () => {
   await channel.close()
 })
 
-
 it.each(['message', 'leader'] as const)(
   'completes channel delivery while the %s callback is still pending',
   async (callback) => {
     let release: () => void = () => {}
-    const pending = new Promise<void>((resolve) => { release = resolve })
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
     const callbackStarted = vi.fn(() => pending)
     const channel = new MultiTabChannel(
       'detached-callback',
@@ -206,7 +207,9 @@ it.each(['message', 'leader'] as const)(
     const delivery = state.channel.onmessage?.({
       type: callback === 'leader' ? 'LEADER_DEAD' : 'RESPONSE'
     })
-    const deliveryObserved = delivery?.then(() => { delivered = true })
+    const deliveryObserved = delivery?.then(() => {
+      delivered = true
+    })
     try {
       for (let tick = 0; tick < 10; tick++) await Promise.resolve()
       expect(callbackStarted).toHaveBeenCalledOnce()

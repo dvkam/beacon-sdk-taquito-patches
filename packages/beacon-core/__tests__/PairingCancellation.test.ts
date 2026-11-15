@@ -62,61 +62,97 @@ describe('pairing cancellation transactions', () => {
     }
   )
 
-  it.each([false, true])('rolls back an explicit rejection, preserving prior peer=%s', async (existing) => {
-    const prior = { publicKey: 'wallet', name: 'previous' }
-    let stored: typeof prior | undefined = existing ? prior : undefined
-    const transport = Object.create(Transport.prototype)
-    transport.peerWrite = Promise.resolve()
-    transport.pairingPeers = new Map()
-    transport._isConnected = TransportStatus.NOT_CONNECTED
-    transport.peerManager = {
-      getPeer: async () => stored,
-      addPeer: async (peer: typeof prior) => { stored = peer },
-      removePeer: async () => { stored = undefined }
+  it.each([false, true])(
+    'rolls back an explicit rejection, preserving prior peer=%s',
+    async (existing) => {
+      const prior = { publicKey: 'wallet', name: 'previous' }
+      let stored: typeof prior | undefined = existing ? prior : undefined
+      const transport = Object.create(Transport.prototype)
+      transport.peerWrite = Promise.resolve()
+      transport.pairingPeers = new Map()
+      transport._isConnected = TransportStatus.NOT_CONNECTED
+      transport.peerManager = {
+        getPeer: async () => stored,
+        addPeer: async (peer: typeof prior) => {
+          stored = peer
+        },
+        removePeer: async () => {
+          stored = undefined
+        }
+      }
+      transport.listen = vi.fn()
+      transport.client = { unsubscribeFromEncryptedMessage: vi.fn() }
+      await transport.addPairingPeer(
+        { publicKey: 'wallet', name: 'candidate' },
+        () => true,
+        async () => false
+      )
+      expect(stored).toEqual(existing ? prior : undefined)
+      expect(transport.client.unsubscribeFromEncryptedMessage).toHaveBeenCalledTimes(
+        existing ? 0 : 1
+      )
     }
-    transport.listen = vi.fn()
-    transport.client = { unsubscribeFromEncryptedMessage: vi.fn() }
-    await transport.addPairingPeer({ publicKey: 'wallet', name: 'candidate' }, () => true, async () => false)
-    expect(stored).toEqual(existing ? prior : undefined)
-    expect(transport.client.unsubscribeFromEncryptedMessage).toHaveBeenCalledTimes(existing ? 0 : 1)
-  })
+  )
 
-  it.each(['one', 'all', 'replacement'])('does not restore a rejected peer after %s changes', async (removal) => {
-    const prior = { publicKey: 'wallet', name: 'previous' }
-    let stored: typeof prior | undefined = prior
-    const transport = Object.create(Transport.prototype)
-    transport.peerWrite = Promise.resolve()
-    transport.pairingPeers = new Map()
-    transport._isConnected = TransportStatus.NOT_CONNECTED
-    transport.peerManager = {
-      getPeer: async () => stored,
-      addPeer: async (peer: typeof prior) => { stored = peer },
-      removePeer: async () => { stored = undefined },
-      removeAllPeers: async () => { stored = undefined }
+  it.each(['one', 'all', 'replacement'])(
+    'does not restore a rejected peer after %s changes',
+    async (removal) => {
+      const prior = { publicKey: 'wallet', name: 'previous' }
+      let stored: typeof prior | undefined = prior
+      const transport = Object.create(Transport.prototype)
+      transport.peerWrite = Promise.resolve()
+      transport.pairingPeers = new Map()
+      transport._isConnected = TransportStatus.NOT_CONNECTED
+      transport.peerManager = {
+        getPeer: async () => stored,
+        addPeer: async (peer: typeof prior) => {
+          stored = peer
+        },
+        removePeer: async () => {
+          stored = undefined
+        },
+        removeAllPeers: async () => {
+          stored = undefined
+        }
+      }
+      const entered = deferred()
+      const release = deferred()
+      transport.listen = async () => {
+        entered.resolve()
+        await release.promise
+      }
+      transport.client = {
+        unsubscribeFromEncryptedMessage: vi.fn(),
+        unsubscribeFromEncryptedMessages: vi.fn()
+      }
+      const pairing = transport.addPairingPeer(
+        { publicKey: 'wallet', name: 'candidate' },
+        () => true,
+        async () => false
+      )
+      await entered.promise
+      const replacement = { publicKey: 'wallet', name: 'replacement' }
+      const removed =
+        removal === 'replacement'
+          ? transport.addPeer(replacement)
+          : removal === 'one'
+            ? transport.removePeer(prior)
+            : transport.removeAllPeers()
+      for (let i = 0; i < 10; i++) await Promise.resolve()
+      release.resolve()
+      await Promise.all([pairing, removed])
+      expect(stored).toEqual(removal === 'replacement' ? replacement : undefined)
+      if (removal !== 'replacement') {
+        expect(
+          removal === 'one'
+            ? transport.client.unsubscribeFromEncryptedMessage
+            : transport.client.unsubscribeFromEncryptedMessages
+        ).toHaveBeenCalled()
+      } else {
+        expect(transport.client.unsubscribeFromEncryptedMessage).not.toHaveBeenCalled()
+      }
     }
-    const entered = deferred()
-    const release = deferred()
-    transport.listen = async () => { entered.resolve(); await release.promise }
-    transport.client = {
-      unsubscribeFromEncryptedMessage: vi.fn(),
-      unsubscribeFromEncryptedMessages: vi.fn()
-    }
-    const pairing = transport.addPairingPeer({ publicKey: 'wallet', name: 'candidate' }, () => true, async () => false)
-    await entered.promise
-    const replacement = { publicKey: 'wallet', name: 'replacement' }
-    const removed = removal === 'replacement'
-      ? transport.addPeer(replacement)
-      : removal === 'one' ? transport.removePeer(prior) : transport.removeAllPeers()
-    for (let i = 0; i < 10; i++) await Promise.resolve()
-    release.resolve()
-    await Promise.all([pairing, removed])
-    expect(stored).toEqual(removal === 'replacement' ? replacement : undefined)
-    if (removal !== 'replacement') {
-      expect(removal === 'one' ? transport.client.unsubscribeFromEncryptedMessage : transport.client.unsubscribeFromEncryptedMessages).toHaveBeenCalled()
-    } else {
-      expect(transport.client.unsubscribeFromEncryptedMessage).not.toHaveBeenCalled()
-    }
-  })
+  )
 
   it('allows a replayed disconnect to remove a peer during listener registration', async () => {
     const peer = { publicKey: 'wallet', name: 'candidate' }
@@ -128,17 +164,29 @@ describe('pairing cancellation transactions', () => {
     transport._isConnected = TransportStatus.NOT_CONNECTED
     transport.peerManager = {
       getPeer: async () => stored,
-      addPeer: async (value: typeof peer) => { stored = value },
-      removePeer: async () => { stored = undefined }
+      addPeer: async (value: typeof peer) => {
+        stored = value
+      },
+      removePeer: async () => {
+        stored = undefined
+      }
     }
-    transport.client = { unsubscribeFromEncryptedMessage: async () => { listening = false } }
+    transport.client = {
+      unsubscribeFromEncryptedMessage: async () => {
+        listening = false
+      }
+    }
     transport.listen = async () => {
       listening = true
       await transport.removePeer(peer)
     }
     const accepted = vi.fn().mockResolvedValue(false)
     let settled = false
-    const pairing = transport.addPairingPeer(peer, () => true, accepted).then(() => { settled = true })
+    const pairing = transport
+      .addPairingPeer(peer, () => true, accepted)
+      .then(() => {
+        settled = true
+      })
     for (let i = 0; i < 100; i++) await Promise.resolve()
     expect(settled).toBe(true)
     await pairing
@@ -156,17 +204,25 @@ describe('pairing cancellation transactions', () => {
     transport._isConnected = TransportStatus.NOT_CONNECTED
     transport.peerManager = {
       getPeer: async () => stored,
-      getPeers: async () => stored ? [stored] : [],
-      addPeer: async (value: typeof peer) => { stored = value },
-      removePeer: async () => { stored = undefined }
+      getPeers: async () => (stored ? [stored] : []),
+      addPeer: async (value: typeof peer) => {
+        stored = value
+      },
+      removePeer: async () => {
+        stored = undefined
+      }
     }
     transport.listen = vi.fn()
     transport.client = { unsubscribeFromEncryptedMessage: vi.fn() }
-    await transport.addPairingPeer(peer, () => true, async () => {
-      transport._isConnected = TransportStatus.CONNECTED
-      await transport.removePeer(peer)
-      return false
-    })
+    await transport.addPairingPeer(
+      peer,
+      () => true,
+      async () => {
+        transport._isConnected = TransportStatus.CONNECTED
+        await transport.removePeer(peer)
+        return false
+      }
+    )
     expect(stored).toBeUndefined()
     expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
   })

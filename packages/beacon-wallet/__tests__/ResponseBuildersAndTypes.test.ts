@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, expectTypeOf } from 'vitest'
-import {
-  AppMetadataManager,
-  LocalStorage,
-  PermissionManager
-} from '@ecadlabs/beacon-core'
+import { AppMetadataManager, LocalStorage, PermissionManager } from '@ecadlabs/beacon-core'
 import {
   BeaconErrorType,
   BeaconMessageType,
@@ -334,17 +330,15 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
     })
 
     it('maps SimulatedProofOfEventChallengeRequestOutput to SimulatedProofOfEventChallengeResponseInput | ErrorResponseInput', () => {
-      expectTypeOf<ResponseInputForRequest<SimulatedProofOfEventChallengeRequestOutput>>().toEqualTypeOf<
-        SimulatedProofOfEventChallengeResponseInput | ErrorResponseInput
-      >()
+      expectTypeOf<
+        ResponseInputForRequest<SimulatedProofOfEventChallengeRequestOutput>
+      >().toEqualTypeOf<SimulatedProofOfEventChallengeResponseInput | ErrorResponseInput>()
     })
 
     it('distributes over request unions: PermissionRequestOutput | OperationRequestOutput', () => {
       expectTypeOf<
         ResponseInputForRequest<PermissionRequestOutput | OperationRequestOutput>
-      >().toEqualTypeOf<
-        PermissionResponseInput | OperationResponseInput | ErrorResponseInput
-      >()
+      >().toEqualTypeOf<PermissionResponseInput | OperationResponseInput | ErrorResponseInput>()
     })
 
     it('re-exports ResponseInputForRequest from @ecadlabs/beacon-wallet', () => {
@@ -550,7 +544,10 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
       })
 
       it('accepts string ID directly', () => {
-        const response = buildErrorResponse('string-id-100', BeaconErrorType.PARAMETERS_INVALID_ERROR)
+        const response = buildErrorResponse(
+          'string-id-100',
+          BeaconErrorType.PARAMETERS_INVALID_ERROR
+        )
         expect(response).toEqual({
           id: 'string-id-100',
           type: BeaconMessageType.Error,
@@ -586,9 +583,7 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
         const storage = new LocalStorage()
         const client = new WalletClient({ name: 'TestWallet', storage })
 
-        expectTypeOf(client.respond).toBeCallableWith(
-          buildOperationResponse(opRequest, 'hash')
-        )
+        expectTypeOf(client.respond).toBeCallableWith(buildOperationResponse(opRequest, 'hash'))
 
         expectTypeOf(client.respond<PermissionRequestOutput>).toBeCallableWith(
           buildPermissionResponse(permRequest, { publicKey: validEdpk })

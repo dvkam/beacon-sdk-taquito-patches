@@ -196,32 +196,51 @@ describe('PairingAlert Component', () => {
     vi.clearAllMocks()
   })
 
-  test.each(['success', 'reject'])('restarts sole-wallet pairing on each payload change without handler churn: %s', async (outcome) => {
-    const failure = new Error('unexpected auto-start rejection')
-    const first = vi.fn().mockResolvedValue(undefined)
-    const latest = vi.fn().mockImplementation(() => outcome === 'reject' ? Promise.reject(failure) : Promise.resolve())
-    const initial = [...defaultUseConnect]
-    initial[7] = first
-    ;(useConnect as Mock).mockReturnValue(initial)
-    const view = await renderPairingAlert(defaultProps)
-    expect(first).toHaveBeenCalledTimes(1)
-    const changedHandler = [...initial]
-    changedHandler[7] = latest
-    ;(useConnect as Mock).mockReturnValue(changedHandler)
-    await act(async () => view.rerender(<PairingAlert {...defaultProps} title="Unrelated render" />))
-    expect(latest).not.toHaveBeenCalled()
-    let payload = pairingPayload
-    for (const field of ['walletConnectSyncCode', 'p2pSyncCode', 'postmessageSyncCode'] as const) {
-      payload = { ...payload, [field]: Promise.resolve('replacement') }
-      await act(async () => view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} />))
+  test.each(['success', 'reject'])(
+    'restarts sole-wallet pairing on each payload change without handler churn: %s',
+    async (outcome) => {
+      const failure = new Error('unexpected auto-start rejection')
+      const first = vi.fn().mockResolvedValue(undefined)
+      const latest = vi
+        .fn()
+        .mockImplementation(() =>
+          outcome === 'reject' ? Promise.reject(failure) : Promise.resolve()
+        )
+      const initial = [...defaultUseConnect]
+      initial[7] = first
+      ;(useConnect as Mock).mockReturnValue(initial)
+      const view = await renderPairingAlert(defaultProps)
+      expect(first).toHaveBeenCalledTimes(1)
+      const changedHandler = [...initial]
+      changedHandler[7] = latest
+      ;(useConnect as Mock).mockReturnValue(changedHandler)
+      await act(async () =>
+        view.rerender(<PairingAlert {...defaultProps} title="Unrelated render" />)
+      )
+      expect(latest).not.toHaveBeenCalled()
+      let payload = pairingPayload
+      for (const field of [
+        'walletConnectSyncCode',
+        'p2pSyncCode',
+        'postmessageSyncCode'
+      ] as const) {
+        payload = { ...payload, [field]: Promise.resolve('replacement') }
+        await act(async () =>
+          view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} />)
+        )
+      }
+      expect(latest).toHaveBeenCalledTimes(3)
+      await act(async () =>
+        view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} open={false} />)
+      )
+      expect(latest).toHaveBeenCalledTimes(3)
+      await act(async () =>
+        view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} />)
+      )
+      expect(latest).toHaveBeenCalledTimes(4)
+      expect(reportDiagnostic).toHaveBeenCalledTimes(outcome === 'reject' ? 4 : 0)
     }
-    expect(latest).toHaveBeenCalledTimes(3)
-    await act(async () => view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} open={false} />))
-    expect(latest).toHaveBeenCalledTimes(3)
-    await act(async () => view.rerender(<PairingAlert {...defaultProps} pairingPayload={payload} />))
-    expect(latest).toHaveBeenCalledTimes(4)
-    expect(reportDiagnostic).toHaveBeenCalledTimes(outcome === 'reject' ? 4 : 0)
-  })
+  )
 
   // --- Install State Tests ---
   describe('Install State', () => {
@@ -251,7 +270,9 @@ describe('PairingAlert Component', () => {
       const view = await renderPairingAlert(defaultProps)
       const qr = screen.getByTestId('qr')
       expect(qr).toHaveTextContent('QR: QR_CODE_123 - isMobile: false')
-      await act(async () => view.rerender(<PairingAlert {...defaultProps} title="Unrelated render" />))
+      await act(async () =>
+        view.rerender(<PairingAlert {...defaultProps} title="Unrelated render" />)
+      )
       expect(screen.getByTestId('qr')).toBe(qr)
     })
 

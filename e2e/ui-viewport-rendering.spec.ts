@@ -32,7 +32,14 @@ interface LayoutCheckResult {
   scrollY: number
   viewportWidth: number
   viewportHeight: number
-  containerRect: { top: number; left: number; right: number; bottom: number; width: number; height: number }
+  containerRect: {
+    top: number
+    left: number
+    right: number
+    bottom: number
+    width: number
+    height: number
+  }
   horizontalOverflowPx: number
   closeButtonVisible: boolean
   closeButtonInBounds: boolean
@@ -110,10 +117,10 @@ async function inspectToastLayout(page: Page): Promise<LayoutCheckResult> {
       closeButtonVisible: Boolean(closeRect && closeRect.width >= 16 && closeRect.height >= 16),
       closeButtonInBounds: Boolean(
         closeRect &&
-          closeRect.left >= rect.left - 1 &&
-          closeRect.right <= rect.right + 1 &&
-          closeRect.right <= window.innerWidth &&
-          closeRect.top >= 0
+        closeRect.left >= rect.left - 1 &&
+        closeRect.right <= rect.right + 1 &&
+        closeRect.right <= window.innerWidth &&
+        closeRect.top >= 0
       ),
       closeButtonHitTestable,
       overflowingChildren
@@ -180,7 +187,9 @@ async function inspectAlertLayout(page: Page): Promise<LayoutCheckResult> {
     if (infoWrapper) {
       const infoRect = infoWrapper.getBoundingClientRect()
       infoWrapper
-        .querySelectorAll<HTMLElement>('.info-title, .info-description, .info-buttons, .info-button, .info-button-secondary')
+        .querySelectorAll<HTMLElement>(
+          '.info-title, .info-description, .info-buttons, .info-button, .info-button-secondary'
+        )
         .forEach((child) => {
           const cRect = child.getBoundingClientRect()
           if (cRect.width === 0 && cRect.height === 0) return
@@ -215,10 +224,10 @@ async function inspectAlertLayout(page: Page): Promise<LayoutCheckResult> {
       closeButtonVisible: Boolean(closeRect && closeRect.width >= 16 && closeRect.height >= 16),
       closeButtonInBounds: Boolean(
         closeRect &&
-          closeRect.left >= rect.left - 1 &&
-          closeRect.right <= rect.right + 1 &&
-          closeRect.right <= window.innerWidth &&
-          closeRect.top >= 0
+        closeRect.left >= rect.left - 1 &&
+        closeRect.right <= rect.right + 1 &&
+        closeRect.right <= window.innerWidth &&
+        closeRect.top >= 0
       ),
       closeButtonHitTestable,
       overflowingChildren

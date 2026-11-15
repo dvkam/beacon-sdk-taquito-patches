@@ -135,7 +135,9 @@ const messageSync = (body: string, messageSender = sender): MatrixSyncResponse =
 describe('P2P callbacks retired by stop', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected external request in callback lifecycle test'))
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new Error('Unexpected external request in callback lifecycle test')
+    )
     localStorage.clear()
     vi.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
       server: 'relay.example',
@@ -178,7 +180,11 @@ describe('P2P callbacks retired by stop', () => {
   }
 
   it('does not restore a peer room when an old invite join finishes after stop and restart', async () => {
-    const { client, storage, sync } = await create(inviteSync(`@${await getHexHash(Buffer.from((await getKeypairFromSeed('callback-lifecycle')).publicKey))}:relay.example`))
+    const { client, storage, sync } = await create(
+      inviteSync(
+        `@${await getHexHash(Buffer.from((await getKeypairFromSeed('callback-lifecycle')).publicKey))}:relay.example`
+      )
+    )
     const join = gate()
     vi.spyOn(MatrixClient.prototype, 'joinRooms').mockImplementation(async () => {
       join.entered.resolve()
@@ -204,7 +210,11 @@ describe('P2P callbacks retired by stop', () => {
   })
 
   it('does not retry an old forbidden invite using a replacement Matrix client', async () => {
-    const { client, sync } = await create(inviteSync(`@${await getHexHash(Buffer.from((await getKeypairFromSeed('callback-lifecycle')).publicKey))}:relay.example`))
+    const { client, sync } = await create(
+      inviteSync(
+        `@${await getHexHash(Buffer.from((await getKeypairFromSeed('callback-lifecycle')).publicKey))}:relay.example`
+      )
+    )
     const entered = new ExposedPromise<void>()
     const join = vi.spyOn(MatrixClient.prototype, 'joinRooms').mockImplementation(async () => {
       entered.resolve()
@@ -225,24 +235,28 @@ describe('P2P callbacks retired by stop', () => {
     }
   })
 
-  it.each(['cancelled', 'expired', 'replaced', 'valid'])('rechecks pending invite authorization on a %s retry', async (outcome) => {
-    const keys = await getKeypairFromSeed('callback-lifecycle')
-    const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
-    const { client } = await create(inviteSync(target))
-    const join = vi.spyOn(MatrixClient.prototype, 'joinRooms')
-      .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' }))
-      .mockResolvedValue(undefined)
-    await client.getPairingRequestInfo()
-    await client.start()
-    await setImmediate()
-    expect(join).toHaveBeenCalledTimes(1)
-    if (outcome === 'cancelled' || outcome === 'replaced') await client.cancelPairingRequests()
-    if (outcome === 'replaced') await client.getPairingRequestInfo()
-    if (outcome === 'expired') vi.setSystemTime(Date.now() + 31 * 60 * 1000)
-    await vi.advanceTimersByTimeAsync(200)
-    expect(join).toHaveBeenCalledTimes(outcome === 'valid' ? 2 : 1)
-    await client.stop()
-  })
+  it.each(['cancelled', 'expired', 'replaced', 'valid'])(
+    'rechecks pending invite authorization on a %s retry',
+    async (outcome) => {
+      const keys = await getKeypairFromSeed('callback-lifecycle')
+      const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
+      const { client } = await create(inviteSync(target))
+      const join = vi
+        .spyOn(MatrixClient.prototype, 'joinRooms')
+        .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' }))
+        .mockResolvedValue(undefined)
+      await client.getPairingRequestInfo()
+      await client.start()
+      await setImmediate()
+      expect(join).toHaveBeenCalledTimes(1)
+      if (outcome === 'cancelled' || outcome === 'replaced') await client.cancelPairingRequests()
+      if (outcome === 'replaced') await client.getPairingRequestInfo()
+      if (outcome === 'expired') vi.setSystemTime(Date.now() + 31 * 60 * 1000)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(join).toHaveBeenCalledTimes(outcome === 'valid' ? 2 : 1)
+      await client.stop()
+    }
+  )
 
   it('does not retry a known-peer invite after that peer is removed', async () => {
     const keys = await getKeypairFromSeed('callback-lifecycle')
@@ -254,11 +268,19 @@ describe('P2P callbacks retired by stop', () => {
     if (!events) throw new Error('Missing invite fixture')
     events[0].sender = inviter
     const { client, storage } = await create(invitation)
-    await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [{
-      id: 'known', type: 'p2p-pairing-response', name: 'Known', version: '3',
-      publicKey: Buffer.from(peerKeys.publicKey).toString('hex'), relayServer: 'relay.example', senderId: 'known'
-    }])
-    const join = vi.spyOn(MatrixClient.prototype, 'joinRooms')
+    await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [
+      {
+        id: 'known',
+        type: 'p2p-pairing-response',
+        name: 'Known',
+        version: '3',
+        publicKey: Buffer.from(peerKeys.publicKey).toString('hex'),
+        relayServer: 'relay.example',
+        senderId: 'known'
+      }
+    ])
+    const join = vi
+      .spyOn(MatrixClient.prototype, 'joinRooms')
       .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' }))
       .mockResolvedValue(undefined)
     await client.start()
@@ -270,33 +292,42 @@ describe('P2P callbacks retired by stop', () => {
     await client.stop()
   })
 
-  it.each([false, true])('retains peer authorization after pairing ends, previously stored=%s', async (existing) => {
-    const keys = await getKeypairFromSeed('callback-lifecycle')
-    const peerKeys = await getKeypairFromSeed('known-inviter')
-    const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
-    const invitation = inviteSync(target)
-    const events = invitation.rooms?.invite?.[room].invite_state.events
-    if (!events) throw new Error('Missing invite fixture')
-    events[0].sender = `@${await getHexHash(Buffer.from(peerKeys.publicKey))}:relay.example`
-    const { client, storage } = await create(invitation)
-    const peer = {
-      id: 'known', type: 'p2p-pairing-response' as const, name: 'Known', version: '3',
-      publicKey: Buffer.from(peerKeys.publicKey).toString('hex'), relayServer: 'relay.example', senderId: 'known'
+  it.each([false, true])(
+    'retains peer authorization after pairing ends, previously stored=%s',
+    async (existing) => {
+      const keys = await getKeypairFromSeed('callback-lifecycle')
+      const peerKeys = await getKeypairFromSeed('known-inviter')
+      const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
+      const invitation = inviteSync(target)
+      const events = invitation.rooms?.invite?.[room].invite_state.events
+      if (!events) throw new Error('Missing invite fixture')
+      events[0].sender = `@${await getHexHash(Buffer.from(peerKeys.publicKey))}:relay.example`
+      const { client, storage } = await create(invitation)
+      const peer = {
+        id: 'known',
+        type: 'p2p-pairing-response' as const,
+        name: 'Known',
+        version: '3',
+        publicKey: Buffer.from(peerKeys.publicKey).toString('hex'),
+        relayServer: 'relay.example',
+        senderId: 'known'
+      }
+      if (existing) await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [peer])
+      const join = vi
+        .spyOn(MatrixClient.prototype, 'joinRooms')
+        .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' }))
+        .mockResolvedValue(undefined)
+      await client.getPairingRequestInfo()
+      await client.start()
+      await setImmediate()
+      expect(join).toHaveBeenCalledTimes(1)
+      await client.cancelPairingRequests()
+      if (!existing) await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [peer])
+      await vi.advanceTimersByTimeAsync(200)
+      expect(join).toHaveBeenCalledTimes(2)
+      await client.stop()
     }
-    if (existing) await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [peer])
-    const join = vi.spyOn(MatrixClient.prototype, 'joinRooms')
-      .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' }))
-      .mockResolvedValue(undefined)
-    await client.getPairingRequestInfo()
-    await client.start()
-    await setImmediate()
-    expect(join).toHaveBeenCalledTimes(1)
-    await client.cancelPairingRequests()
-    if (!existing) await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [peer])
-    await vi.advanceTimersByTimeAsync(200)
-    expect(join).toHaveBeenCalledTimes(2)
-    await client.stop()
-  })
+  )
 
   it('does not authorize a delayed invite using a replacement pairing', async () => {
     const { client, keys, polling } = await create()

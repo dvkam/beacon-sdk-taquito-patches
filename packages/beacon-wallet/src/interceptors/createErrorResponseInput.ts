@@ -1,8 +1,4 @@
-import {
-  BeaconErrorType,
-  BeaconMessageType,
-  ErrorResponseInput
-} from '@ecadlabs/beacon-types'
+import { BeaconErrorType, BeaconMessageType, ErrorResponseInput } from '@ecadlabs/beacon-types'
 
 export const createErrorResponseInput = (
   request: { id: string } | string,

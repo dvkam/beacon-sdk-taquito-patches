@@ -5,8 +5,7 @@ import { RequestErrorResponse } from '../types/RequestErrorResponse'
 import { TezosRpcError } from '../types/TezosRpcError'
 import { BeaconError } from './BeaconError'
 
-export const isBeaconError = (value: unknown): value is BeaconError =>
-  value instanceof BeaconError
+export const isBeaconError = (value: unknown): value is BeaconError => value instanceof BeaconError
 
 export const isErrorOrigin = (value: unknown): value is ErrorOrigin =>
   value === 'wallet' || value === 'local'
@@ -24,7 +23,9 @@ export const isRequestErrorResponse = (value: unknown): value is RequestErrorRes
     return false
   }
 
-  return !('errorOrigin' in value) || value.errorOrigin === undefined || isErrorOrigin(value.errorOrigin)
+  return (
+    !('errorOrigin' in value) || value.errorOrigin === undefined || isErrorOrigin(value.errorOrigin)
+  )
 }
 
 export const isTezosRpcError = (value: unknown): value is TezosRpcError =>

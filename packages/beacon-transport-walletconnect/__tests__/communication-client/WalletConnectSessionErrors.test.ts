@@ -99,30 +99,43 @@ describe('WalletConnect restored-session failure containment', () => {
 
   it.each([
     { label: 'null', failure: null, closes: true },
-    { label: 'throwing message getter', failure: { get message(): string { throw new Error('getter failed') } }, closes: true },
+    {
+      label: 'throwing message getter',
+      failure: {
+        get message(): string {
+          throw new Error('getter failed')
+        }
+      },
+      closes: true
+    },
     { label: 'plain string', failure: 'Wallet rejected pairing', closes: false }
-  ])('contains a $label proposal rejection without abandoning recovery', async ({ failure, closes }) => {
-    mockRemote.session.keys = []
-    mockRemote.connect.mockResolvedValueOnce({
-      uri: 'wc:new-topic@2?symKey=key',
-      approval: () => Promise.reject(failure)
-    })
-    const instance = client()
-    const closeAlert = vi.fn()
-    const proposalError = vi.fn()
-    instance.eventHandlers.set(ClientEvents.CLOSE_ALERT, closeAlert)
-    instance.eventHandlers.set(ClientEvents.WC_ACK_NOTIFICATION, proposalError)
-    await instance.init()
-    await vi.waitFor(() => expect(closes ? closeAlert : proposalError).toHaveBeenCalledWith(
-      closes ? 'walletconnect' : 'error'
-    ))
-    expect(instance.currentSession()).toBeUndefined()
-    await expect(instance.init()).resolves.toEqual({
-      uri: 'wc:new-topic@2?symKey=key',
-      topic: 'new-topic'
-    })
-    expect(mockRemote.connect).toHaveBeenCalledTimes(2)
-  })
+  ])(
+    'contains a $label proposal rejection without abandoning recovery',
+    async ({ failure, closes }) => {
+      mockRemote.session.keys = []
+      mockRemote.connect.mockResolvedValueOnce({
+        uri: 'wc:new-topic@2?symKey=key',
+        approval: () => Promise.reject(failure)
+      })
+      const instance = client()
+      const closeAlert = vi.fn()
+      const proposalError = vi.fn()
+      instance.eventHandlers.set(ClientEvents.CLOSE_ALERT, closeAlert)
+      instance.eventHandlers.set(ClientEvents.WC_ACK_NOTIFICATION, proposalError)
+      await instance.init()
+      await vi.waitFor(() =>
+        expect(closes ? closeAlert : proposalError).toHaveBeenCalledWith(
+          closes ? 'walletconnect' : 'error'
+        )
+      )
+      expect(instance.currentSession()).toBeUndefined()
+      await expect(instance.init()).resolves.toEqual({
+        uri: 'wc:new-topic@2?symKey=key',
+        topic: 'new-topic'
+      })
+      expect(mockRemote.connect).toHaveBeenCalledTimes(2)
+    }
+  )
 
   it.each([
     { event: ClientEvents.CLOSE_ALERT, failure: null, context: 'close alert callback' },

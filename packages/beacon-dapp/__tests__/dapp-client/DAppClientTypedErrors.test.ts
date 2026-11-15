@@ -170,12 +170,16 @@ describe('DAppClient typed error rejections', () => {
       const onOperationError = vi.fn()
       await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, onOperationError)
 
-      const errorPromise = dapp.requestOperation({
-        operationDetails: []
-      }).then(
-        () => { throw new Error('Expected requestOperation to reject') },
-        (err: unknown) => err
-      )
+      const errorPromise = dapp
+        .requestOperation({
+          operationDetails: []
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestOperation to reject')
+          },
+          (err: unknown) => err
+        )
       await vi.advanceTimersByTimeAsync(0)
       const requestId = await getLastSentRequestId()
 
@@ -229,7 +233,9 @@ describe('DAppClient typed error rejections', () => {
       const failed = vi.fn()
       await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, failed)
       const outcome = dapp.requestOperation({ operationDetails: [] }).then(
-        () => { throw new Error('Expected requestOperation to reject') },
+        () => {
+          throw new Error('Expected requestOperation to reject')
+        },
         (error: unknown) => error
       )
       await vi.advanceTimersByTimeAsync(0)
@@ -265,12 +271,16 @@ describe('DAppClient typed error rejections', () => {
 
     it('rejects with TransactionInvalidBeaconError carrying errorData when wallet replies with TRANSACTION_INVALID_ERROR', async () => {
       const rpcErrorData = [{ kind: 'temporary', id: 'proto.michelson_v1.runtime_exhausted' }]
-      const errorPromise = dapp.requestOperation({
-        operationDetails: []
-      }).then(
-        () => { throw new Error('Expected requestOperation to reject') },
-        (err: unknown) => err
-      )
+      const errorPromise = dapp
+        .requestOperation({
+          operationDetails: []
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestOperation to reject')
+          },
+          (err: unknown) => err
+        )
       await vi.advanceTimersByTimeAsync(0)
       const requestId = await getLastSentRequestId()
 
@@ -304,12 +314,16 @@ describe('DAppClient typed error rejections', () => {
       await dapp.destroy()
       dapp = await createClient(100)
 
-      const errorPromise = dapp.requestOperation({
-        operationDetails: []
-      }).then(
-        () => { throw new Error('Expected requestOperation to reject') },
-        (err: unknown) => err
-      )
+      const errorPromise = dapp
+        .requestOperation({
+          operationDetails: []
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestOperation to reject')
+          },
+          (err: unknown) => err
+        )
       await vi.advanceTimersByTimeAsync(0)
       await vi.advanceTimersByTimeAsync(100)
 
@@ -325,12 +339,16 @@ describe('DAppClient typed error rejections', () => {
 
   describe('aborted request via disconnect()', () => {
     it('rejects with AbortedBeaconError when pending request is aborted via disconnect()', async () => {
-      const errorPromise = dapp.requestOperation({
-        operationDetails: []
-      }).then(
-        () => { throw new Error('Expected requestOperation to reject') },
-        (err: unknown) => err
-      )
+      const errorPromise = dapp
+        .requestOperation({
+          operationDetails: []
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestOperation to reject')
+          },
+          (err: unknown) => err
+        )
       await vi.advanceTimersByTimeAsync(0)
 
       await dapp.disconnect()
@@ -349,12 +367,16 @@ describe('DAppClient typed error rejections', () => {
     it('rejects with NoAddressBeaconError when requesting operation without active account', async () => {
       vi.spyOn(dapp, 'getActiveAccount').mockResolvedValueOnce(undefined)
 
-      const error: any = await dapp.requestOperation({
-        operationDetails: []
-      }).then(
-        () => { throw new Error('Expected requestOperation to reject') },
-        (err: unknown) => err
-      )
+      const error: any = await dapp
+        .requestOperation({
+          operationDetails: []
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestOperation to reject')
+          },
+          (err: unknown) => err
+        )
 
       expect(error).toBeInstanceOf(Error)
       expect(error).toBeInstanceOf(BeaconError)
@@ -370,12 +392,16 @@ describe('DAppClient typed error rejections', () => {
       await dapp.subscribeToEvent(BeaconEvent.NO_PERMISSIONS, onNoPermissions)
       vi.spyOn(dapp, 'checkPermissions').mockResolvedValue(false)
 
-      const error: any = await dapp.requestOperation({
-        operationDetails: []
-      }).then(
-        () => { throw new Error('Expected requestOperation to reject') },
-        (err: unknown) => err
-      )
+      const error: any = await dapp
+        .requestOperation({
+          operationDetails: []
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestOperation to reject')
+          },
+          (err: unknown) => err
+        )
 
       expect(error).toBeInstanceOf(Error)
       expect(error).toBeInstanceOf(BeaconError)
@@ -393,12 +419,16 @@ describe('DAppClient typed error rejections', () => {
       await dapp.subscribeToEvent(BeaconEvent.LOCAL_RATE_LIMIT_REACHED, onRateLimit)
       vi.spyOn(dapp as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(true)
 
-      const error: any = await dapp.requestOperation({
-        operationDetails: []
-      }).then(
-        () => { throw new Error('Expected requestOperation to reject') },
-        (err: unknown) => err
-      )
+      const error: any = await dapp
+        .requestOperation({
+          operationDetails: []
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestOperation to reject')
+          },
+          (err: unknown) => err
+        )
 
       expect(error).toBeInstanceOf(Error)
       expect(error).toBeInstanceOf(BeaconError)
@@ -415,7 +445,9 @@ describe('DAppClient typed error rejections', () => {
       await dapp.addRequestAndCheckIfRateLimited()
 
       const error: unknown = await dapp.requestPermissions().then(
-        () => { throw new Error('Expected requestPermissions to reject') },
+        () => {
+          throw new Error('Expected requestPermissions to reject')
+        },
         (err: unknown) => err
       )
 
@@ -424,13 +456,17 @@ describe('DAppClient typed error rejections', () => {
     })
 
     it('rejects with ParametersInvalidBeaconError when sign payload does not start with 03 prefix for OPERATION', async () => {
-      const error: any = await dapp.requestSignPayload({
-        signingType: SigningType.OPERATION,
-        payload: 'deadbeef'
-      }).then(
-        () => { throw new Error('Expected requestSignPayload to reject') },
-        (err: unknown) => err
-      )
+      const error: any = await dapp
+        .requestSignPayload({
+          signingType: SigningType.OPERATION,
+          payload: 'deadbeef'
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestSignPayload to reject')
+          },
+          (err: unknown) => err
+        )
 
       expect(error).toBeInstanceOf(Error)
       expect(error).toBeInstanceOf(BeaconError)
@@ -440,13 +476,17 @@ describe('DAppClient typed error rejections', () => {
     })
 
     it('rejects with ParametersInvalidBeaconError when sign payload is not a string', async () => {
-      const error: any = await dapp.requestSignPayload({
-        signingType: SigningType.RAW,
-        payload: 123 as unknown as string
-      }).then(
-        () => { throw new Error('Expected requestSignPayload to reject') },
-        (err: unknown) => err
-      )
+      const error: any = await dapp
+        .requestSignPayload({
+          signingType: SigningType.RAW,
+          payload: 123 as unknown as string
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestSignPayload to reject')
+          },
+          (err: unknown) => err
+        )
 
       expect(error).toBeInstanceOf(Error)
       expect(error).toBeInstanceOf(BeaconError)
@@ -461,12 +501,16 @@ describe('DAppClient typed error rejections', () => {
     })
 
     it('rejects with ParametersInvalidBeaconError when deprecated network property is passed to requestPermissions', async () => {
-      const error: any = await dapp.requestPermissions({
-        network: { type: NetworkType.MAINNET }
-      } as unknown as RequestPermissionInput).then(
-        () => { throw new Error('Expected requestPermissions to reject') },
-        (err: unknown) => err
-      )
+      const error: any = await dapp
+        .requestPermissions({
+          network: { type: NetworkType.MAINNET }
+        } as unknown as RequestPermissionInput)
+        .then(
+          () => {
+            throw new Error('Expected requestPermissions to reject')
+          },
+          (err: unknown) => err
+        )
 
       expect(error).toBeInstanceOf(Error)
       expect(error).toBeInstanceOf(BeaconError)
@@ -483,14 +527,20 @@ describe('DAppClient typed error rejections', () => {
     })
 
     it('rejects with ParametersInvalidBeaconError when concurrent requestPermissions with different scopes is called', async () => {
-      const firstPromise = dapp.requestPermissions({ scopes: [PermissionScope.SIGN] }).catch(() => {})
+      const firstPromise = dapp
+        .requestPermissions({ scopes: [PermissionScope.SIGN] })
+        .catch(() => {})
 
-      const error: any = await dapp.requestPermissions({
-        scopes: [PermissionScope.OPERATION_REQUEST]
-      }).then(
-        () => { throw new Error('Expected requestPermissions to reject') },
-        (err: unknown) => err
-      )
+      const error: any = await dapp
+        .requestPermissions({
+          scopes: [PermissionScope.OPERATION_REQUEST]
+        })
+        .then(
+          () => {
+            throw new Error('Expected requestPermissions to reject')
+          },
+          (err: unknown) => err
+        )
 
       expect(error).toBeInstanceOf(Error)
       expect(error).toBeInstanceOf(BeaconError)
@@ -514,7 +564,9 @@ describe('DAppClient typed error rejections', () => {
       vi.spyOn(dapp, 'getActiveAccount').mockResolvedValue(undefined)
 
       const error: any = await dapp.requestProofOfEventChallenge({ payload: 'test' }).then(
-        () => { throw new Error('Expected requestProofOfEventChallenge to reject') },
+        () => {
+          throw new Error('Expected requestProofOfEventChallenge to reject')
+        },
         (err: unknown) => err
       )
 
@@ -527,14 +579,18 @@ describe('DAppClient typed error rejections', () => {
       expect(error.version).toBe('2')
       expect(error.errorType).toBe(BeaconErrorType.NO_ADDRESS_ERROR)
       expect(error.errorOrigin).toBe('local')
-      expect(error.description).toBe('Please request permissions before doing a proof of event challenge')
+      expect(error.description).toBe(
+        'Please request permissions before doing a proof of event challenge'
+      )
     })
 
     it('rejects with NoAddressBeaconError when requesting simulated proof of event challenge without active account', async () => {
       vi.spyOn(dapp, 'getActiveAccount').mockResolvedValue(undefined)
 
       const error: any = await dapp.requestSimulatedProofOfEventChallenge({ payload: 'test' }).then(
-        () => { throw new Error('Expected requestSimulatedProofOfEventChallenge to reject') },
+        () => {
+          throw new Error('Expected requestSimulatedProofOfEventChallenge to reject')
+        },
         (err: unknown) => err
       )
 
@@ -547,7 +603,9 @@ describe('DAppClient typed error rejections', () => {
       expect(error.version).toBe('2')
       expect(error.errorType).toBe(BeaconErrorType.NO_ADDRESS_ERROR)
       expect(error.errorOrigin).toBe('local')
-      expect(error.description).toBe('Please request permissions before doing a proof of event challenge')
+      expect(error.description).toBe(
+        'Please request permissions before doing a proof of event challenge'
+      )
     })
 
     it('rejects with NoAddressBeaconError when requesting proof of event challenge with active account missing network', async () => {
@@ -557,7 +615,9 @@ describe('DAppClient typed error rejections', () => {
       } as unknown as AccountInfo)
 
       const error: any = await dapp.requestProofOfEventChallenge({ payload: 'test' }).then(
-        () => { throw new Error('Expected requestProofOfEventChallenge to reject') },
+        () => {
+          throw new Error('Expected requestProofOfEventChallenge to reject')
+        },
         (err: unknown) => err
       )
 
@@ -570,7 +630,9 @@ describe('DAppClient typed error rejections', () => {
       expect(error.version).toBe('2')
       expect(error.errorType).toBe(BeaconErrorType.NO_ADDRESS_ERROR)
       expect(error.errorOrigin).toBe('local')
-      expect(error.description).toBe('Please request permissions before doing a proof of event challenge')
+      expect(error.description).toBe(
+        'Please request permissions before doing a proof of event challenge'
+      )
     })
 
     it('rejects with NoAddressBeaconError when requesting simulated proof of event challenge with active account missing network', async () => {
@@ -580,7 +642,9 @@ describe('DAppClient typed error rejections', () => {
       } as unknown as AccountInfo)
 
       const error: any = await dapp.requestSimulatedProofOfEventChallenge({ payload: 'test' }).then(
-        () => { throw new Error('Expected requestSimulatedProofOfEventChallenge to reject') },
+        () => {
+          throw new Error('Expected requestSimulatedProofOfEventChallenge to reject')
+        },
         (err: unknown) => err
       )
 
@@ -593,12 +657,16 @@ describe('DAppClient typed error rejections', () => {
       expect(error.version).toBe('2')
       expect(error.errorType).toBe(BeaconErrorType.NO_ADDRESS_ERROR)
       expect(error.errorOrigin).toBe('local')
-      expect(error.description).toBe('Please request permissions before doing a proof of event challenge')
+      expect(error.description).toBe(
+        'Please request permissions before doing a proof of event challenge'
+      )
     })
 
     it('rejects with ParametersInvalidBeaconError when requesting proof of event challenge with non-abstracted account', async () => {
       const error: any = await dapp.requestProofOfEventChallenge({ payload: 'test' }).then(
-        () => { throw new Error('Expected requestProofOfEventChallenge to reject') },
+        () => {
+          throw new Error('Expected requestProofOfEventChallenge to reject')
+        },
         (err: unknown) => err
       )
 
@@ -618,7 +686,9 @@ describe('DAppClient typed error rejections', () => {
 
     it('rejects with ParametersInvalidBeaconError when requesting simulated proof of event challenge with non-abstracted account', async () => {
       const error: any = await dapp.requestSimulatedProofOfEventChallenge({ payload: 'test' }).then(
-        () => { throw new Error('Expected requestSimulatedProofOfEventChallenge to reject') },
+        () => {
+          throw new Error('Expected requestSimulatedProofOfEventChallenge to reject')
+        },
         (err: unknown) => err
       )
 
@@ -647,7 +717,9 @@ describe('DAppClient typed error rejections', () => {
       }
 
       const error: any = await dapp.permissionRequest(input).then(
-        () => { throw new Error('Expected permissionRequest to reject') },
+        () => {
+          throw new Error('Expected permissionRequest to reject')
+        },
         (err: unknown) => err
       )
 
@@ -675,7 +747,9 @@ describe('DAppClient typed error rejections', () => {
       }
 
       const error: any = await dapp.request(input).then(
-        () => { throw new Error('Expected request to reject') },
+        () => {
+          throw new Error('Expected request to reject')
+        },
         (err: unknown) => err
       )
 

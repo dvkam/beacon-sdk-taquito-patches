@@ -137,13 +137,18 @@ describe('QR Component', () => {
   })
 
   test.each(['callback throw', 'callback reject', 'clipboard reject', 'code change', 'unmount'])(
-    'owns clipboard completion and diagnostics across %s', async (outcome) => {
+    'owns clipboard completion and diagnostics across %s',
+    async (outcome) => {
       vi.useFakeTimers()
       const failure = new Error('copy action failed')
       let finishCopy: (() => void) | undefined
-      const write = vi.fn(() => outcome === 'clipboard reject'
-        ? Promise.reject(failure)
-        : new Promise<void>((resolve) => { finishCopy = resolve }))
+      const write = vi.fn(() =>
+        outcome === 'clipboard reject'
+          ? Promise.reject(failure)
+          : new Promise<void>((resolve) => {
+              finishCopy = resolve
+            })
+      )
       navigator.clipboard.writeText = write
       let remove: (() => void) | undefined
       const onClickQrCode = vi.fn(() => {
@@ -151,17 +156,28 @@ describe('QR Component', () => {
         if (outcome === 'callback throw') throw failure
         return outcome === 'callback reject' ? Promise.reject(failure) : undefined
       })
-      const view = render(<QR isWalletConnect={false} isMobile walletName={walletName}
-        code={code} onClickQrCode={onClickQrCode} />)
+      const view = render(
+        <QR
+          isWalletConnect={false}
+          isMobile
+          walletName={walletName}
+          code={code}
+          onClickQrCode={onClickQrCode}
+        />
+      )
       remove = () => view.unmount()
       const copy = view.container.querySelector('.qr-right')
       if (!copy) throw new Error('Copy action missing')
       fireEvent.click(copy)
       expect(onClickQrCode).toHaveBeenCalledTimes(1)
       expect(write).toHaveBeenCalledExactlyOnceWith(code)
-      if (outcome === 'code change') view.rerender(
-        <QR isWalletConnect={false} isMobile walletName={walletName} code="new-code" />)
-      await act(async () => { finishCopy?.() })
+      if (outcome === 'code change')
+        view.rerender(
+          <QR isWalletConnect={false} isMobile walletName={walletName} code="new-code" />
+        )
+      await act(async () => {
+        finishCopy?.()
+      })
       const failed = outcome.includes('callback') || outcome === 'clipboard reject'
       expect(reportDiagnostic).toHaveBeenCalledTimes(failed ? 1 : 0)
       if (failed) {

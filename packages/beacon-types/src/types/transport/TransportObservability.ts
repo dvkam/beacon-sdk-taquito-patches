@@ -9,11 +9,7 @@ import { TransportType } from './TransportType'
 export type TransportHealth = 'ok' | 'degraded'
 
 export type TransportStatusChangeReason =
-  | 'sync_failing'
-  | 'token_renewed'
-  | 'session_deleted'
-  | 'session_expired'
-  | 'relay_changed'
+  'sync_failing' | 'token_renewed' | 'session_deleted' | 'session_expired' | 'relay_changed'
 
 export interface TransportStatusChangedInfo {
   transport: TransportType
@@ -83,4 +79,3 @@ export interface WalletPeerEvent {
   peer: ExtendedPeerInfo
   source: 'local' | 'storage'
 }
-

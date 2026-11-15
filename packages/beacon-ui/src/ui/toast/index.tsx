@@ -92,7 +92,9 @@ const ToastRoot = (props: ToastConfig) => {
             onClickClose={closeToast}
             actions={config.actions}
             walletInfo={config.walletInfo}
-            openWalletAction={config.openWalletAction ? () => config.openWalletAction?.() : undefined}
+            openWalletAction={
+              config.openWalletAction ? () => config.openWalletAction?.() : undefined
+            }
           />
         )}
       </div>

@@ -187,10 +187,16 @@ describe('PairingAlert Kukai async pairing paths', () => {
         const qrButton = view.container.querySelector('button#qr-code-icon')
         if (!qrButton) throw new Error('QR action was not rendered')
         fireEvent.click(qrButton)
-        view.rerender(<PairingAlert {...props} title="Unrelated render" open={outcome === 'QR wins'} />)
-        await act(async () => { await Promise.resolve() })
+        view.rerender(
+          <PairingAlert {...props} title="Unrelated render" open={outcome === 'QR wins'} />
+        )
+        await act(async () => {
+          await Promise.resolve()
+        })
         if (outcome === 'QR wins') {
-          expect(screen.getByTestId('qr')).toHaveTextContent('wc:first@2?symKey=abc&relay-protocol=irn')
+          expect(screen.getByTestId('qr')).toHaveTextContent(
+            'wc:first@2?symKey=abc&relay-protocol=irn'
+          )
         } else {
           expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
           expect(props.onClose).not.toHaveBeenCalled()
@@ -205,39 +211,48 @@ describe('PairingAlert Kukai async pairing paths', () => {
     }
   )
 
-  it.each([1, 2])('dismisses the old resolved wallet QR on payload replacement with %s discovered wallets', async (walletCount) => {
-    const discovery = vi.mocked(useWallets).getMockImplementation()?.()
-    if (!discovery) throw new Error('Wallet discovery fixture missing')
-    vi.mocked(useWallets).mockReturnValue({ ...discovery,
-      wallets: new Map(Array.from(discovery.wallets).slice(0, walletCount)) })
-    const next = deferred<string>()
-    const props: PairingAlertProps = {
-      open: true,
-      closeOnBackdropClick: true,
-      title: 'Pair wallet',
-      onClose: vi.fn(),
-      pairingPayload: {
-        p2pSyncCode: Promise.resolve('p2p-code'),
-        postmessageSyncCode: Promise.resolve('post-code'),
-        walletConnectSyncCode: Promise.resolve('wc:old@2?symKey=abc&relay-protocol=irn'),
-        networkType: NetworkType.GHOSTNET
+  it.each([1, 2])(
+    'dismisses the old resolved wallet QR on payload replacement with %s discovered wallets',
+    async (walletCount) => {
+      const discovery = vi.mocked(useWallets).getMockImplementation()?.()
+      if (!discovery) throw new Error('Wallet discovery fixture missing')
+      vi.mocked(useWallets).mockReturnValue({
+        ...discovery,
+        wallets: new Map(Array.from(discovery.wallets).slice(0, walletCount))
+      })
+      const next = deferred<string>()
+      const props: PairingAlertProps = {
+        open: true,
+        closeOnBackdropClick: true,
+        title: 'Pair wallet',
+        onClose: vi.fn(),
+        pairingPayload: {
+          p2pSyncCode: Promise.resolve('p2p-code'),
+          postmessageSyncCode: Promise.resolve('post-code'),
+          walletConnectSyncCode: Promise.resolve('wc:old@2?symKey=abc&relay-protocol=irn'),
+          networkType: NetworkType.GHOSTNET
+        }
       }
+      const view = render(<PairingAlert {...props} />)
+      if (walletCount > 1) fireEvent.click(screen.getByText('Kukai'))
+      expect(await screen.findByTestId('qr')).toHaveTextContent('wc:old@2')
+      view.rerender(
+        <PairingAlert
+          {...props}
+          pairingPayload={{ ...props.pairingPayload, walletConnectSyncCode: next.promise }}
+        />
+      )
+      expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
+      expect(screen.queryByText('Connect with Kukai Web')).not.toBeInTheDocument()
+      if (walletCount > 1) {
+        expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'false')
+        fireEvent.click(screen.getByText('Kukai'))
+      }
+      expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'true')
+      await act(async () => next.resolve('wc:old@2?symKey=abc&relay-protocol=irn'))
+      expect(await screen.findByTestId('qr')).toHaveTextContent('wc:old@2')
     }
-    const view = render(<PairingAlert {...props} />)
-    if (walletCount > 1) fireEvent.click(screen.getByText('Kukai'))
-    expect(await screen.findByTestId('qr')).toHaveTextContent('wc:old@2')
-    view.rerender(<PairingAlert {...props}
-      pairingPayload={{ ...props.pairingPayload, walletConnectSyncCode: next.promise }} />)
-    expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
-    expect(screen.queryByText('Connect with Kukai Web')).not.toBeInTheDocument()
-    if (walletCount > 1) {
-      expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'false')
-      fireEvent.click(screen.getByText('Kukai'))
-    }
-    expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'true')
-    await act(async () => next.resolve('wc:old@2?symKey=abc&relay-protocol=irn'))
-    expect(await screen.findByTestId('qr')).toHaveTextContent('wc:old@2')
-  })
+  )
 
   it.each(['close button', 'closed prop', 'replacement payload'] as const)(
     'cancels a pending browser launch on %s before the alert unmounts',
@@ -282,5 +297,4 @@ describe('PairingAlert Kukai async pairing paths', () => {
       expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'false')
     }
   )
-
 })

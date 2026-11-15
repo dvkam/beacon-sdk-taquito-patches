@@ -450,14 +450,18 @@ describe('Permission response lifetime', () => {
     const disconnect = dapp.disconnect({ notifyPeers: false })
     await vi.advanceTimersByTimeAsync(0)
     expectAborted(pending)
-    expect.soft(second.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
+    expect
+      .soft(second.settled)
+      .toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect(send).toHaveBeenCalledTimes(1)
 
     wait.released.resolve()
     await disconnect
     await vi.advanceTimersByTimeAsync(0)
     expectAborted(pending)
-    expect.soft(second.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
+    expect
+      .soft(second.settled)
+      .toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
   })
 
   it('orders the prior account rollback before peer removal while the caller is aborted', async () => {
@@ -527,13 +531,15 @@ describe('Permission response lifetime', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     const account = await dapp.getActiveAccount()
-    expect(account).toEqual(expect.objectContaining({
-      publicKey: 'edpktmjt7F16Lx9kCxWXRJBNAMQivK69385Y8FvgvxRpBV9Aj7Tpfg',
-      address: 'tz1X3Yj3tX8x5cgryzchRsytecqGm1hLh1Pd',
-      walletKey: 'legacy-wallet',
-      walletType: 'implicit',
-      connectedAt
-    }))
+    expect(account).toEqual(
+      expect.objectContaining({
+        publicKey: 'edpktmjt7F16Lx9kCxWXRJBNAMQivK69385Y8FvgvxRpBV9Aj7Tpfg',
+        address: 'tz1X3Yj3tX8x5cgryzchRsytecqGm1hLh1Pd',
+        walletKey: 'legacy-wallet',
+        walletType: 'implicit',
+        connectedAt
+      })
+    )
     expect(await dapp.getAccounts()).toEqual([account])
     expect(await pending.outcome).toEqual({
       value: expect.objectContaining({ accountInfo: account })

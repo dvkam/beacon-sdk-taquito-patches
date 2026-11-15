@@ -103,7 +103,9 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
         {!isMobileOS(window) && props.openWalletAction && (
           <div
             className="toast-action-button"
-            onClick={() => runUICallback(() => props.openWalletAction?.(), 'Toast', 'openWalletAction')}
+            onClick={() =>
+              runUICallback(() => props.openWalletAction?.(), 'Toast', 'openWalletAction')
+            }
           >
             Open Wallet
           </div>
@@ -124,7 +126,9 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
               {action.actionText && (
                 <div
                   className="toast-action-button"
-                  onClick={() => runUICallback(() => action.actionCallback?.(), 'Toast', 'actionCallback')}
+                  onClick={() =>
+                    runUICallback(() => action.actionCallback?.(), 'Toast', 'actionCallback')
+                  }
                 >
                   {action.actionText}
                 </div>

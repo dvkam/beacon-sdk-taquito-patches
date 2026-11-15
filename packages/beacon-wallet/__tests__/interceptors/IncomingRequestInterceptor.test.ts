@@ -199,9 +199,9 @@ it('rejects requests whose sender has no stored app metadata', async () => {
 it('rejects an unknown V3 message in its handler', async () => {
   const config = setup()
   const message = { ...base, version: '3', message: { ...base, type: 'unknown' } }
-  await expect(
-    IncomingRequestInterceptor.intercept({ ...config, message })
-  ).rejects.toThrow('Unsupported V3 request type')
+  await expect(IncomingRequestInterceptor.intercept({ ...config, message })).rejects.toThrow(
+    'Unsupported V3 request type'
+  )
   expect(config.interceptorCallback).not.toHaveBeenCalled()
 })
 

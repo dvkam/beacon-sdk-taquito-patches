@@ -276,7 +276,9 @@ describe('Request response ownership', () => {
       await vi.advanceTimersByTimeAsync(0)
       expect(pending.settled).not.toHaveBeenCalled()
       expect(incoming.map((record) => record.disposition)).toEqual([
-        undefined, undefined, 'unknown-request'
+        undefined,
+        undefined,
+        'unknown-request'
       ])
       const writeCount = write.mock.calls.length
 
@@ -290,7 +292,10 @@ describe('Request response ownership', () => {
       expect(failed).not.toHaveBeenCalled()
       expect(closed).not.toHaveBeenCalled()
       expect(incoming.map((record) => record.disposition)).toEqual([
-        undefined, undefined, 'unknown-request', 'handled'
+        undefined,
+        undefined,
+        'unknown-request',
+        'handled'
       ])
     }
   )
@@ -454,9 +459,7 @@ describe('Request response ownership', () => {
       }
       return details(...args)
     }
-    const acknowledging = transport.receive(
-      control('2', pending.id, BeaconMessageType.Acknowledge)
-    )
+    const acknowledging = transport.receive(control('2', pending.id, BeaconMessageType.Acknowledge))
     await vi.advanceTimersByTimeAsync(0)
     expect(held).toBe(true)
     expect(acknowledged).not.toHaveBeenCalled()

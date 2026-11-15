@@ -58,8 +58,9 @@ describe('Alert UI lifecycle (openAlert / closeAlert)', () => {
       }
       try {
         await act(async () => openAlert(config))
-        const closeButton = document.querySelector('beacon-alert')?.shadowRoot
-          ?.querySelector<HTMLElement>('.alert-header .button-icon')
+        const closeButton = document
+          .querySelector('beacon-alert')
+          ?.shadowRoot?.querySelector<HTMLElement>('.alert-header .button-icon')
         expect(closeButton).toBeTruthy()
         await act(async () => {
           if (closeButton) {

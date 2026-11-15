@@ -39,8 +39,7 @@ export interface AbstractedPermissionResponseBuilderOptions extends BasePermissi
 }
 
 export type PermissionResponseBuilderOptions =
-  | ImplicitPermissionResponseBuilderOptions
-  | AbstractedPermissionResponseBuilderOptions
+  ImplicitPermissionResponseBuilderOptions | AbstractedPermissionResponseBuilderOptions
 
 export const buildPermissionResponse = (
   request: Pick<PermissionRequestOutput, 'id' | 'network' | 'scopes'>,

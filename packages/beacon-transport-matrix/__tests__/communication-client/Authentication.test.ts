@@ -54,9 +54,10 @@ describe('relay authentication contract', () => {
     const create = vi.spyOn(MatrixClient, 'create').mockReturnValue(matrix)
     const storage: any = { get: vi.fn().mockResolvedValue([]), set: vi.fn() }
     const p2p = new P2PCommunicationClient('App', keyPair, 1, storage)
-    vi
-      .spyOn(p2p, 'getRelayServer')
-      .mockResolvedValue({ server: 'relay.test', timestamp: Date.now() / 1000 })
+    vi.spyOn(p2p, 'getRelayServer').mockResolvedValue({
+      server: 'relay.test',
+      timestamp: Date.now() / 1000
+    })
     const info = vi
       .spyOn(p2p, 'getBeaconInfo')
       .mockImplementation(
@@ -108,9 +109,7 @@ describe('relay authentication contract', () => {
       {} as any,
       { sync } as any,
       {
-        cancelAllRequests: vi.fn(async () =>
-          failSync?.(new DOMException('stopped', 'AbortError'))
-        )
+        cancelAllRequests: vi.fn(async () => failSync?.(new DOMException('stopped', 'AbortError')))
       } as any
     )
     const create = vi.spyOn(MatrixClient, 'create').mockReturnValue(matrix)

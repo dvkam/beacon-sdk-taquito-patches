@@ -5,7 +5,10 @@ describe('useDrag hook', () => {
   test('uses the current handler during a drag and stops after reset or unmount', () => {
     const firstHandler = vi.fn()
     const latestHandler = vi.fn()
-    const TestComponent = ({ handler, open }: {
+    const TestComponent = ({
+      handler,
+      open
+    }: {
       handler: (state: { offset: [number, number] }) => void
       open: boolean
     }) => {

@@ -188,7 +188,8 @@ describe('PostMessageClient', () => {
 
     it('deduplicates repeated channel-opening registrations', async () => {
       const pairingClient = new PostMessageClient('pairing', {
-        publicKey: new Uint8Array(32), secretKey: new Uint8Array(64)
+        publicKey: new Uint8Array(32),
+        secretKey: new Uint8Array(64)
       })
       const callback = vi.fn()
       await pairingClient.listenForChannelOpening(callback)

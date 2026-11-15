@@ -1,7 +1,13 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { getWorkspacePackages, readJson, repoRoot, rootPackagePath, writeJson } from './workspace-utils.mjs'
+import {
+  getWorkspacePackages,
+  readJson,
+  repoRoot,
+  rootPackagePath,
+  writeJson
+} from './workspace-utils.mjs'
 
 const rootPackage = readJson(rootPackagePath)
 const targetVersion = process.argv[2] ?? rootPackage.version

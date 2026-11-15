@@ -46,7 +46,11 @@ describe('stored account variants', () => {
 
   it('restores legacy Tezos accounts with retired testnet network types without throwing', async () => {
     const storage = new LocalStorage('retired-testnet-accounts')
-    const legacyOxford = { ...account, accountIdentifier: 'oxford-1', network: { type: 'oxfordnet' } }
+    const legacyOxford = {
+      ...account,
+      accountIdentifier: 'oxford-1',
+      network: { type: 'oxfordnet' }
+    }
     const legacyTezlink = {
       ...account,
       accountIdentifier: 'tezlink-1',

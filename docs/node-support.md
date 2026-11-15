@@ -13,12 +13,12 @@ Current releases are outside the tested support matrix.
 
 ## Checks
 
-| Check | Node versions |
-| --- | --- |
-| Locked install, package and browser-bundle build, script and unit tests | 22, 24, 26 |
-| Installed package checks with import and require | 22, 24, 26 |
-| Chromium smoke tests | 24 |
-| Release build and pre-publication checks | 24 |
+| Check                                                                   | Node versions |
+| ----------------------------------------------------------------------- | ------------- |
+| Locked install, package and browser-bundle build, script and unit tests | 22, 24, 26    |
+| Installed package checks with import and require                        | 22, 24, 26    |
+| Chromium smoke tests                                                    | 24            |
+| Release build and pre-publication checks                                | 24            |
 
 Run the installed-package checks after building:
 
@@ -53,8 +53,7 @@ it with an upgrade that has been tested against Kukai iOS.
 `scripts/check-security-deps.mjs` enforces the exact version in the package
 manifests, root overrides and lockfile.
 
-Node 26 entered LTS on October 28, 2026 and receives updates through April
-2029. Its official Linux binaries require `libatomic`, as do Node 25 binaries.
+Node 26 entered LTS on October 28, 2026 and receives updates through April 2029. Its official Linux binaries require `libatomic`, as do Node 25 binaries.
 See the [Node 26 LTS announcement](https://nodejs.org/en/blog/release/v26.13.0)
 and [Node release schedule](https://github.com/nodejs/Release) when updating
 the support matrix. Include both Active LTS and Maintenance LTS; future LTS

@@ -358,10 +358,14 @@ describe('DAppClient: basic unit tests', () => {
       vi.mocked(setDesktopList).mockClear()
       client.addBlockchain(chain)
       if (action === 'remove') client.removeBlockchain(chain.identifier)
-      else client.addBlockchain(
-        action === 'another chain' ? { ...chain, identifier: 'other-chain' } :
-        action === 'replace' ? { ...chain } : chain
-      )
+      else
+        client.addBlockchain(
+          action === 'another chain'
+            ? { ...chain, identifier: 'other-chain' }
+            : action === 'replace'
+              ? { ...chain }
+              : chain
+        )
       await Promise.resolve()
       if (action !== 'remove') expect(setDesktopList).toHaveBeenCalledOnce()
       vi.mocked(setDesktopList).mockClear()
@@ -3010,7 +3014,7 @@ describe('DAppClient: basic unit tests', () => {
   })
 
   it('removes an inactive saved peer and its accounts on authenticated Disconnect without deactivating the active peer', async () => {
-    const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
+    const { getSenderId: mockGetSenderId } = await import('@ecadlabs/beacon-core')
     const pubKeyA = 'aa'.repeat(32)
     const pubKeyB = 'bb'.repeat(32)
     const senderIdA = 'sender-wallet-a'
@@ -3145,9 +3149,7 @@ describe('DAppClient: basic unit tests', () => {
   it('rejects an implicit account in onNewAccount when address does not match publicKey', async () => {
     const publicKey = '11'.repeat(32)
     await (client as any).storage.set(StorageKey.ACCOUNTS, [])
-    const setActiveAccountSpy = vi
-      .spyOn(client, 'setActiveAccount')
-      .mockResolvedValue(undefined)
+    const setActiveAccountSpy = vi.spyOn(client, 'setActiveAccount').mockResolvedValue(undefined)
 
     try {
       await expect(
@@ -3329,65 +3331,85 @@ describe('DAppClient: basic unit tests', () => {
     await expect((client as any).storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([accountB])
   })
 
-  it.each(['peer', 'one', 'all'])('clears an account selected while %s removal waits for an earlier account write', async (kind) => {
-    await client.getActiveAccount()
-    const account = createStoredAccount()
-    const storage: LocalStorage = Reflect.get(client, 'storage')
-    await storage.set(StorageKey.ACCOUNTS, [account])
-    const pending = new ExposedPromise<void>()
-    const queued = Reflect.get(client, 'mutateAccounts').call(client, () => pending.promise)
-    const removed = kind === 'peer'
-      ? Reflect.get(client, 'removeAccountsForPeerIds').call(client, [account.senderId])
-      : kind === 'one' ? client.removeAccount(account.accountIdentifier) : client.removeAllAccounts()
-    vi.spyOn(client, 'initInternalTransports').mockResolvedValue(undefined)
-    vi.spyOn(Reflect.get(client, 'accountManager'), 'getAccount').mockResolvedValue(account)
-    await client.setActiveAccount(account)
-    pending.resolve()
-    await Promise.all([queued, removed])
-    expect((await client.getAccounts()) ?? []).toEqual([])
-    expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
-    expect(await client.getActiveAccount()).toBeUndefined()
-  })
-
-  it.each(['lookup', 'write'])('does not restore durable accounts after removal during %s', async (stage) => {
-    const storage: LocalStorage = Reflect.get(client, 'storage')
-    const entered = new ExposedPromise<void>()
-    const release = new ExposedPromise<void>()
-    await client.getActiveAccount()
-    const get = storage.get.bind(storage)
-    const set = storage.set.bind(storage)
-    vi.spyOn(storage, 'get').mockImplementation(async (key) => {
-      if (stage === 'lookup' && key === StorageKey.LAST_SELECTED_WALLET) { entered.resolve(); await release.promise }
-      const result = await get(key)
-      return key === StorageKey.ACCOUNTS ? result ?? [] : result
-    })
-    if (stage === 'write') {
-      vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
-        if (key === StorageKey.ACCOUNTS && Array.isArray(value) && value.length > 0) {
-          entered.resolve(); await release.promise
-        }
-        return set(key, value)
-      })
+  it.each(['peer', 'one', 'all'])(
+    'clears an account selected while %s removal waits for an earlier account write',
+    async (kind) => {
+      await client.getActiveAccount()
+      const account = createStoredAccount()
+      const storage: LocalStorage = Reflect.get(client, 'storage')
+      await storage.set(StorageKey.ACCOUNTS, [account])
+      const pending = new ExposedPromise<void>()
+      const queued = Reflect.get(client, 'mutateAccounts').call(client, () => pending.promise)
+      const removed =
+        kind === 'peer'
+          ? Reflect.get(client, 'removeAccountsForPeerIds').call(client, [account.senderId])
+          : kind === 'one'
+            ? client.removeAccount(account.accountIdentifier)
+            : client.removeAllAccounts()
+      vi.spyOn(client, 'initInternalTransports').mockResolvedValue(undefined)
+      vi.spyOn(Reflect.get(client, 'accountManager'), 'getAccount').mockResolvedValue(account)
+      await client.setActiveAccount(account)
+      pending.resolve()
+      await Promise.all([queued, removed])
+      expect((await client.getAccounts()) ?? []).toEqual([])
+      expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
+      expect(await client.getActiveAccount()).toBeUndefined()
     }
-    const change = Reflect.get(client, 'onNewAccount').call(client, {
-      id: 'permission', version: '2', senderId: 'wallet-sender-id',
-      type: BeaconMessageType.PermissionResponse,
-      address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
-      network: { type: NetworkType.MAINNET }, scopes: [PermissionScope.SIGN]
-    }, { origin: Origin.P2P, id: 'wallet-public-key' })
-    await entered.promise
-    const removed = client.removeAllAccounts()
-    // Let cleanup reach storage while the earlier operation remains held.
-    for (let i = 0; i < 30; i++) await Promise.resolve()
-    release.resolve()
-    await Promise.all([change, removed])
-    expect(await storage.get(StorageKey.ACCOUNTS)).toEqual([])
-    expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
-    expect(await client.getActiveAccount()).toBeUndefined()
-  })
+  )
+
+  it.each(['lookup', 'write'])(
+    'does not restore durable accounts after removal during %s',
+    async (stage) => {
+      const storage: LocalStorage = Reflect.get(client, 'storage')
+      const entered = new ExposedPromise<void>()
+      const release = new ExposedPromise<void>()
+      await client.getActiveAccount()
+      const get = storage.get.bind(storage)
+      const set = storage.set.bind(storage)
+      vi.spyOn(storage, 'get').mockImplementation(async (key) => {
+        if (stage === 'lookup' && key === StorageKey.LAST_SELECTED_WALLET) {
+          entered.resolve()
+          await release.promise
+        }
+        const result = await get(key)
+        return key === StorageKey.ACCOUNTS ? (result ?? []) : result
+      })
+      if (stage === 'write') {
+        vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+          if (key === StorageKey.ACCOUNTS && Array.isArray(value) && value.length > 0) {
+            entered.resolve()
+            await release.promise
+          }
+          return set(key, value)
+        })
+      }
+      const change = Reflect.get(client, 'onNewAccount').call(
+        client,
+        {
+          id: 'permission',
+          version: '2',
+          senderId: 'wallet-sender-id',
+          type: BeaconMessageType.PermissionResponse,
+          address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+          network: { type: NetworkType.MAINNET },
+          scopes: [PermissionScope.SIGN]
+        },
+        { origin: Origin.P2P, id: 'wallet-public-key' }
+      )
+      await entered.promise
+      const removed = client.removeAllAccounts()
+      // Let cleanup reach storage while the earlier operation remains held.
+      for (let i = 0; i < 30; i++) await Promise.resolve()
+      release.resolve()
+      await Promise.all([change, removed])
+      expect(await storage.get(StorageKey.ACCOUNTS)).toEqual([])
+      expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
+      expect(await client.getActiveAccount()).toBeUndefined()
+    }
+  )
 
   it('does not overwrite active account when a peer switch occurs while ChangeAccountRequest is awaiting storage in onNewAccount', async () => {
-    const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
+    const { getSenderId: mockGetSenderId } = await import('@ecadlabs/beacon-core')
     const pubKeyA = 'aa'.repeat(32)
     const pubKeyB = 'bb'.repeat(32)
     const senderIdA = 'sender-wallet-a'
@@ -3486,7 +3508,9 @@ describe('DAppClient: basic unit tests', () => {
 
       await expect(client.getActiveAccount()).resolves.toEqual(accountB)
       expect(await client.getAccounts()).toEqual([accountA, accountB])
-      expect(await Reflect.get(client, 'storage').get(StorageKey.ACTIVE_ACCOUNT)).toBe(accountB.accountIdentifier)
+      expect(await Reflect.get(client, 'storage').get(StorageKey.ACTIVE_ACCOUNT)).toBe(
+        accountB.accountIdentifier
+      )
     } finally {
       addAccountSpy.mockRestore()
       initTransportsSpy.mockRestore()
@@ -3601,7 +3625,7 @@ describe('DAppClient: basic unit tests', () => {
   })
 
   it('does not overwrite active account if user switches account during setActiveAccount pre-commit awaits', async () => {
-    const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
+    const { getSenderId: mockGetSenderId } = await import('@ecadlabs/beacon-core')
     const pubKeyA = 'aa'.repeat(32)
     const pubKeyB = 'bb'.repeat(32)
     const senderIdA = 'sender-wallet-a'
@@ -3706,7 +3730,7 @@ describe('DAppClient: basic unit tests', () => {
   })
 
   it('does not re-activate an account when ChangeAccountRequest arrives while disconnect is in flight', async () => {
-    const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
+    const { getSenderId: mockGetSenderId } = await import('@ecadlabs/beacon-core')
     const pubKeyA = 'aa'.repeat(32)
     const senderIdA = 'sender-wallet-a'
     ;(mockGetSenderId as Mock).mockImplementation(async (pk: string) =>
@@ -4876,18 +4900,10 @@ describe('DAppClient WalletConnect projectId deprecation warning', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const clientWithoutProjectId = new DAppClient({ name: 'Demo Fallback dApp' })
     try {
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('demo')
-      )
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('https://dashboard.reown.com/')
-      )
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Terms of Service')
-      )
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('next minor release')
-      )
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('demo'))
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('https://dashboard.reown.com/'))
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Terms of Service'))
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('next minor release'))
       expect((clientWithoutProjectId as unknown as { wcProjectId?: string }).wcProjectId).toBe(
         '24469fd0a06df227b6e5f7dc7de0ff4f'
       )
@@ -4904,8 +4920,8 @@ describe('DAppClient WalletConnect projectId deprecation warning', () => {
       walletConnectOptions: { projectId: 'custom-project-id' }
     })
     try {
-      const wcWarnings = warnSpy.mock.calls.filter(([msg]) =>
-        typeof msg === 'string' && msg.includes('WalletConnect projectId')
+      const wcWarnings = warnSpy.mock.calls.filter(
+        ([msg]) => typeof msg === 'string' && msg.includes('WalletConnect projectId')
       )
       expect(wcWarnings).toHaveLength(0)
       expect((clientWithProjectId as unknown as { wcProjectId?: string }).wcProjectId).toBe(

@@ -1,4 +1,3 @@
-
 /**
  * A helper function to improve typings of object keys
  *

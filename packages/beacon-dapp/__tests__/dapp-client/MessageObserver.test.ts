@@ -517,7 +517,11 @@ describe('DAppClient plaintext message observers (#149)', () => {
       [],
       { unexpected: { nested: true } },
       { id: 'unknown', type: 'not-a-beacon-type', senderId: 42 },
-      { id: 'missing-version', type: BeaconMessageType.SignPayloadResponse, senderId: 'wallet-sender' }
+      {
+        id: 'missing-version',
+        type: BeaconMessageType.SignPayloadResponse,
+        senderId: 'wallet-sender'
+      }
     ].map((malformed) => ({ malformed }))
   )('observes malformed deserialized input before routing: $malformed', async ({ malformed }) => {
     await start()
@@ -602,7 +606,12 @@ describe('DAppClient plaintext message observers (#149)', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     // 4. invalid (malformed message)
-    await transport.receive({ id: 'bad-msg', version: '2', senderId: peer.senderId, type: 'unknown_type' })
+    await transport.receive({
+      id: 'bad-msg',
+      version: '2',
+      senderId: peer.senderId,
+      type: 'unknown_type'
+    })
     await vi.advanceTimersByTimeAsync(0)
 
     const incomingDispositions: Array<BeaconMessageDisposition | undefined> = records

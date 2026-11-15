@@ -6,11 +6,24 @@ import importPlugin from 'eslint-plugin-import'
 import globals from 'globals'
 
 const root = import.meta.dirname
-const dependencyRule = packageDir => ['error', { devDependencies: true, packageDir }]
+const dependencyRule = (packageDir) => ['error', { devDependencies: true, packageDir }]
 
 // Tests and tools need correctness checks without the production style/mock policy.
 export default [
-  { ignores: ['**/node_modules/**', '**/dist/**', '**/src/**', '**/coverage/**', 'examples/**', 'docs/**', 'webpack_builds/**', '**/test-results/**', '**/playwright-report/**', 'e2e/output/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/src/**',
+      '**/coverage/**',
+      'examples/**',
+      'docs/**',
+      'webpack_builds/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
+      'e2e/output/**'
+    ]
+  },
   {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     linterOptions: { reportUnusedDisableDirectives: 'error' },
@@ -61,7 +74,10 @@ export default [
     ignores: ['**/type-fixtures/**', 'test-fixtures/client-options/**'],
     languageOptions: { parserOptions: { project: './tsconfig.json', tsconfigRootDir: root } },
     plugins: { '@typescript-eslint': tsPlugin },
-    rules: { '@typescript-eslint/no-floating-promises': 'error', '@typescript-eslint/await-thenable': 'error' }
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error'
+    }
   },
   {
     files: ['**/*.{js,cjs}'],
@@ -73,7 +89,21 @@ export default [
   },
   {
     files: ['packages/*/__tests__/**/*.js'],
-    languageOptions: { globals: Object.fromEntries(['it', 'test', 'expect', 'describe', 'vi', 'beforeEach', 'afterEach', 'beforeAll', 'afterAll'].map(name => [name, 'readonly'])) }
+    languageOptions: {
+      globals: Object.fromEntries(
+        [
+          'it',
+          'test',
+          'expect',
+          'describe',
+          'vi',
+          'beforeEach',
+          'afterEach',
+          'beforeAll',
+          'afterAll'
+        ].map((name) => [name, 'readonly'])
+      )
+    }
   },
   {
     // This consumer test exercises the SDK's own package exports.
@@ -81,9 +111,14 @@ export default [
     settings: { 'import/internal-regex': '^@ecadlabs/beacon-sdk(?:/|$)' }
   },
   ...readdirSync(resolve(root, 'packages'), { withFileTypes: true })
-    .filter(entry => entry.isDirectory())
-    .map(entry => ({
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
       files: [`packages/${entry.name}/**/*.{js,mjs,cjs,ts,tsx}`],
-      rules: { 'import/no-extraneous-dependencies': dependencyRule([resolve(root, 'packages', entry.name), root]) }
+      rules: {
+        'import/no-extraneous-dependencies': dependencyRule([
+          resolve(root, 'packages', entry.name),
+          root
+        ])
+      }
     }))
 ]

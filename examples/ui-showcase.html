@@ -89,7 +89,9 @@
             ></iframe>
             <button
               class="btn btn-sm mt-2"
-              onclick="document.getElementById('desktopPairingFrame').contentWindow.showPairingAlert()"
+              onclick="
+                document.getElementById('desktopPairingFrame').contentWindow.showPairingAlert()
+              "
             >
               Reopen Desktop Pairing
             </button>
@@ -106,7 +108,9 @@
             ></iframe>
             <button
               class="btn btn-sm mt-2"
-              onclick="document.getElementById('mobilePairingFrame').contentWindow.showPairingAlert()"
+              onclick="
+                document.getElementById('mobilePairingFrame').contentWindow.showPairingAlert()
+              "
             >
               Reopen Mobile Pairing
             </button>
@@ -147,18 +151,24 @@
       darkModeToggle.addEventListener('click', () => {
         isDarkMode = !isDarkMode
         document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light')
-        
+
         // Propagate theme change to all iframes
         const frames = document.querySelectorAll('iframe')
-        frames.forEach(frame => {
+        frames.forEach((frame) => {
           // Set the theme on the iframe's document
-          frame.contentDocument.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light')
-          
+          frame.contentDocument.documentElement.setAttribute(
+            'data-theme',
+            isDarkMode ? 'dark' : 'light'
+          )
+
           // Send message to update Beacon color mode
-          frame.contentWindow.postMessage({ 
-            type: 'themeChange', 
-            theme: isDarkMode ? 'dark' : 'light' 
-          }, '*')
+          frame.contentWindow.postMessage(
+            {
+              type: 'themeChange',
+              theme: isDarkMode ? 'dark' : 'light'
+            },
+            '*'
+          )
 
           // Wait a short moment for the message to be processed, then reopen the UI
           setTimeout(() => {

@@ -1,8 +1,16 @@
 import { LocalStorage, PeerManager, windowRef } from '@ecadlabs/beacon-core'
-import { ExtendedPostMessagePairingResponse, StorageKey, TransportStatus, TransportType } from '@ecadlabs/beacon-types'
+import {
+  ExtendedPostMessagePairingResponse,
+  StorageKey,
+  TransportStatus,
+  TransportType
+} from '@ecadlabs/beacon-types'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { BeaconEvent } from '../../src/events'
-import { PeerTestTransport, RecordingPeerClient } from '../../../beacon-core/__tests__/helpers/transport-peers'
+import {
+  PeerTestTransport,
+  RecordingPeerClient
+} from '../../../beacon-core/__tests__/helpers/transport-peers'
 
 vi.mock('@walletconnect/sign-client', () => ({ init: vi.fn() }))
 vi.mock('@walletconnect/utils', () => ({
@@ -32,7 +40,11 @@ describe('active transport event', () => {
       ExtendedPostMessagePairingResponse,
       StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
     >(new SensitiveClient(), new PeerManager(storage, StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP))
-    const client = new DAppClient({ name: 'Transport snapshot', storage, disableDefaultEvents: true })
+    const client = new DAppClient({
+      name: 'Transport snapshot',
+      storage,
+      disableDefaultEvents: true
+    })
     const observed: unknown[] = []
     await client.subscribeToEvent(BeaconEvent.ACTIVE_TRANSPORT_SET, (value) => {
       observed.push(value)

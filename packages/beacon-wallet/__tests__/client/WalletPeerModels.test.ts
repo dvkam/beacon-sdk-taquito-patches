@@ -31,8 +31,7 @@ function typeCheckInline(code: string): string {
   const originalGetSourceFile = host.getSourceFile.bind(host)
   const originalFileExists = host.fileExists.bind(host)
   const originalReadFile = host.readFile.bind(host)
-  host.fileExists = (fileName) =>
-    resolve(fileName) === virtualFile || originalFileExists(fileName)
+  host.fileExists = (fileName) => resolve(fileName) === virtualFile || originalFileExists(fileName)
   host.readFile = (fileName) =>
     resolve(fileName) === virtualFile ? code : originalReadFile(fileName)
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {

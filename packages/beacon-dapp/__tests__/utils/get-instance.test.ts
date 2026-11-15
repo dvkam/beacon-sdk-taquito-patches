@@ -67,7 +67,8 @@ describe('getDAppClientInstance config mismatch warning (09-C)', () => {
     expect(second).toBe(first)
     expect(
       diagnostics.filter(
-        (d) => d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
+        (d) =>
+          d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
       )
     ).toHaveLength(0)
   })
@@ -95,7 +96,8 @@ describe('getDAppClientInstance config mismatch warning (09-C)', () => {
 
     expect(secondByName).toBe(first)
     const nameWarnings = diagnostics.filter(
-      (d) => d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
+      (d) =>
+        d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
     )
     expect(nameWarnings).toHaveLength(1)
 
@@ -109,7 +111,8 @@ describe('getDAppClientInstance config mismatch warning (09-C)', () => {
 
     expect(thirdByNetwork).toBe(first)
     const networkWarnings = diagnostics.filter(
-      (d) => d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
+      (d) =>
+        d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
     )
     expect(networkWarnings).toHaveLength(1)
 
@@ -123,7 +126,8 @@ describe('getDAppClientInstance config mismatch warning (09-C)', () => {
 
     expect(fourthByRpcUrl).toBe(first)
     const rpcWarnings = diagnostics.filter(
-      (d) => d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
+      (d) =>
+        d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
     )
     expect(rpcWarnings).toHaveLength(1)
   })
@@ -159,7 +163,8 @@ describe('getDAppClientInstance config mismatch warning (09-C)', () => {
     expect(second.network.type).toBe(NetworkType.GHOSTNET)
     expect(
       diagnostics.filter(
-        (d) => d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
+        (d) =>
+          d.service === 'DAppClient' && d.method === 'getDAppClientInstance' && d.level === 'warn'
       )
     ).toHaveLength(0)
   })

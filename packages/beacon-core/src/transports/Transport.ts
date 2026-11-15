@@ -155,11 +155,7 @@ export abstract class Transport<
     this._connectionStatus = nextStatus
     this._health = nextHealth
 
-    if (
-      nextStatus === previous &&
-      nextHealth === previousHealth &&
-      update.reason === undefined
-    ) {
+    if (nextStatus === previous && nextHealth === previousHealth && update.reason === undefined) {
       return Promise.resolve()
     }
 

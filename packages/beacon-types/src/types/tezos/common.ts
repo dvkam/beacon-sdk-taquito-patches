@@ -2,20 +2,10 @@ import { MichelineMichelsonV1Expression } from './MichelineMichelsonV1Expression
 import { TezosOperationType } from './OperationTypes'
 
 export type MetadataBalanceUpdatesKindEnum =
-  | 'contract'
-  | 'freezer'
-  | 'accumulator'
-  | 'burned'
-  | 'commitment'
-  | 'minted'
-  | 'staking'
+  'contract' | 'freezer' | 'accumulator' | 'burned' | 'commitment' | 'minted' | 'staking'
 
 export type MetadataBalanceUpdatesOriginEnum =
-  | 'block'
-  | 'migration'
-  | 'subsidy'
-  | 'simulation'
-  | 'delayed_operation'
+  'block' | 'migration' | 'subsidy' | 'simulation' | 'delayed_operation'
 
 export type MetadataBalanceUpdatesCategoryEnum = METADATA_BALANCE_UPDATES_CATEGORY
 

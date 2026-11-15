@@ -103,16 +103,14 @@ export abstract class BeaconClient {
    * This method initializes the SDK by setting some values in the storage and generating a keypair.
    */
   protected async initSDK(): Promise<void> {
-    this.storage
-      .set(StorageKey.BEACON_SDK_VERSION, SDK_VERSION)
-      .catch((error: unknown) =>
-        reportDiagnostic({
-          level: 'error',
-          service: 'BeaconClient',
-          method: 'persistSDKVersion',
-          args: [error]
-        })
-      )
+    this.storage.set(StorageKey.BEACON_SDK_VERSION, SDK_VERSION).catch((error: unknown) =>
+      reportDiagnostic({
+        level: 'error',
+        service: 'BeaconClient',
+        method: 'persistSDKVersion',
+        args: [error]
+      })
+    )
 
     this.loadOrCreateBeaconSecret().catch((error: unknown) =>
       reportDiagnostic({

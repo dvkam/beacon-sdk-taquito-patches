@@ -1,4 +1,3 @@
-
 /**
  * A helper function to make sure if/elses and switch/cases are exhaustive
  *

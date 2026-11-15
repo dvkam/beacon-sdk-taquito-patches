@@ -18,7 +18,6 @@ export const secretbox_MACBYTES = 16 // crypto_secretbox_MACBYTES
 const POE_CHALLENGE_BYTES_LENGTH = 20
 const POE_CHALLENGE_PREFIX = 110
 
-
 type HexInput = string | ArrayLike<number> | ArrayBufferLike
 
 /**

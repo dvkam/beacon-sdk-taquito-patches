@@ -1555,14 +1555,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         type: 'session',
         topic: event.topic,
         reason: 'session_deleted'
-      }).catch(
-        (error: unknown) => {
-          logger.warn(
-            'session_delete handler',
-            error instanceof Error ? error.message : String(error)
-          )
-        }
-      )
+      }).catch((error: unknown) => {
+        logger.warn(
+          'session_delete handler',
+          error instanceof Error ? error.message : String(error)
+        )
+      })
     })
 
     on('session_expire', (event) => {
@@ -1578,14 +1576,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         type: 'session',
         topic: event.topic,
         reason: 'session_expired'
-      }).catch(
-        (error: unknown) => {
-          logger.warn(
-            'session_expire handler',
-            error instanceof Error ? error.message : String(error)
-          )
-        }
-      )
+      }).catch((error: unknown) => {
+        logger.warn(
+          'session_expire handler',
+          error instanceof Error ? error.message : String(error)
+        )
+      })
     })
     onPairing('pairing_delete', (event) => {
       logger.debug('Pairing deleted', { topic: event.topic })
@@ -1643,10 +1639,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         if (isPublicKeySC(token)) {
           publicKey = token
         } else {
-          const result = await this.fetchAccounts(
-            session.topic,
-            `${TEZOS_PLACEHOLDER}:${chainId}`
-          )
+          const result = await this.fetchAccounts(session.topic, `${TEZOS_PLACEHOLDER}:${chainId}`)
           publicKey = result?.find(({ address: _address }) => addressOrPbk === _address)?.pubkey
         }
       } else {
