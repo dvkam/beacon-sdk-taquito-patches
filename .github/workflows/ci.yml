@@ -42,6 +42,10 @@ jobs:
       - name: Install dependencies
         run: ./scripts/npm11.sh ci --include=optional
 
+      - name: Check formatting
+        if: matrix.node == 24
+        run: ./scripts/npm11.sh run format:check
+
       - name: Check workspace versions
         run: ./scripts/npm11.sh run check:versions
 

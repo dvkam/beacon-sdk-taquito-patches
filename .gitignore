@@ -78,7 +78,9 @@ combined.webm
 examples/walletbeacon.min.js
 
 lib
-docs
+# Keep authored Markdown guides visible alongside generated TypeDoc output.
+/docs/*
+!/docs/*.md
 
 webpack_builds
 

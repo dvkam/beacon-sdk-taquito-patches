@@ -36,6 +36,23 @@ npm run e2e:smoke
 Use `npm run e2e` when you need the full suite, including the longer reconnect
 scenarios that are not part of the required CI smoke gate.
 
+## Formatting
+
+Run `npm run format:check` to check formatting without writing files. Run
+`npm run format` to apply the installed Prettier version and `.prettierrc` options.
+`npm run prettier` remains an alias for the write command and forwards extra flags.
+
+These commands select Prettier-supported repository files, including source,
+tests, scripts, examples, configuration and the authored Markdown guides in
+`docs/`. Root `.gitignore` and `.prettierignore` exclude generated SDK files and
+generator-managed package READMEs, package locks, build/documentation output,
+coverage, browser reports and minified bundles. The SDK generator is
+`npm run prebuild`. `scripts/sync-package-readmes.mjs` owns the package README
+scaffolds. Keep formatting changes to generated portions in their generator.
+
+CI checks formatting once, in the Node 24 build job before package compilation.
+Keep formatting-only normalization separate from behavior changes.
+
 ## Versioning
 
 The workspace root version is the source of truth for the published package

@@ -33,9 +33,9 @@ describe('@ecadlabs/beacon-transport-walletconnect package manifest', () => {
   })
 
   it('ignores @walletconnect/* and TypeScript >= 6.0.0 in dependabot configuration', () => {
-    expect(dependabotConfig).toContain('dependency-name: "@walletconnect/*"')
-    expect(dependabotConfig).toContain('dependency-name: "typescript"')
-    expect(dependabotConfig).toContain('">= 6.0.0"')
+    expect(dependabotConfig).toMatch(/dependency-name: ['"]@walletconnect\/\*['"]/)
+    expect(dependabotConfig).toMatch(/dependency-name: ['"]typescript['"]/)
+    expect(dependabotConfig).toMatch(/['"]>= 6\.0\.0['"]/)
   })
 
   it('does not carry an unused elliptic dependency', () => {
