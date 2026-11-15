@@ -21,5 +21,4 @@ export type ClientTransport = Omit<
   'addPeer'
 > & {
   addPeer(peer: ExtendedPeerInfo, sendPairingResponse?: boolean): Promise<void>
-} &
-  Partial<Pick<Transport, 'health' | 'relayServer' | 'addStatusListener'>>
+} & Partial<Pick<Transport, 'health' | 'relayServer' | 'addStatusListener'>>

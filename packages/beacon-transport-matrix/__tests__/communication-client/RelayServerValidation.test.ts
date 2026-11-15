@@ -55,7 +55,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     })
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.EUROPE_WEST,
         known_servers: ['active-node-1.example.com'],
@@ -88,7 +95,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     })
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.EUROPE_WEST,
         known_servers: ['active-node-2.example.com'],
@@ -116,7 +130,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     })
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.EUROPE_WEST,
         known_servers: ['custom-stored-node.example.com'],
@@ -142,7 +163,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     const client = new P2PCommunicationClient('RelayTest', keys, 2, storage)
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.EUROPE_WEST,
         known_servers: ['beacon-node-1.octez.io'],
@@ -173,7 +201,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     const client = new P2PCommunicationClient('RelayTest', keys, 2, storage, {})
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.EUROPE_WEST,
         known_servers: ['beacon-node-1.octez.io'],
@@ -201,7 +236,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     const client = new P2PCommunicationClient('RelayTest', keys, 2, storage)
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.EUROPE_WEST,
         known_servers: ['beacon-node-1.octez.io'],
@@ -229,7 +271,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     })
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.EUROPE_WEST,
         known_servers: ['undefined-region-stored-node.example.com'],
@@ -243,7 +292,10 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     expect(deleteSpy).not.toHaveBeenCalled()
     expect(getBeaconInfoSpy).toHaveBeenCalledWith('undefined-region-stored-node.example.com')
     expect(findBestSpy).not.toHaveBeenCalled()
-    expect(result).toEqual({ server: 'undefined-region-stored-node.example.com', timestamp: 444445 })
+    expect(result).toEqual({
+      server: 'undefined-region-stored-node.example.com',
+      timestamp: 444445
+    })
   })
 
   it('uses stored MATRIX_SELECTED_NODE when configured with multi-region ENABLED_RELAY_SERVERS and stored node is in a non-first region', async () => {
@@ -259,7 +311,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     })
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.NORTH_AMERICA_EAST,
         known_servers: ['na-node-2.example.com'],
@@ -289,7 +348,14 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     })
 
     const getBeaconInfoSpy = vi
-      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .spyOn(
+        client as unknown as {
+          getBeaconInfo: (
+            server: string
+          ) => Promise<{ region: string; known_servers: string[]; timestamp: number }>
+        },
+        'getBeaconInfo'
+      )
       .mockResolvedValue({
         region: Regions.NORTH_AMERICA_EAST,
         known_servers: ['na-node-1.example.com'],
@@ -306,6 +372,8 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     expect(getBeaconInfoSpy).not.toHaveBeenCalledWith('stale-multi-region.example.com')
     expect(findBestSpy).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ server: 'na-node-1.example.com', timestamp: 666666 })
-    await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBe('na-node-1.example.com')
+    await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBe(
+      'na-node-1.example.com'
+    )
   })
 })

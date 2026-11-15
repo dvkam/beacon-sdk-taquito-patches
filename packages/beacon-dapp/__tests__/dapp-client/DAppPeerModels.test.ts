@@ -72,8 +72,7 @@ function typeCheckInline(code: string): string {
   const originalGetSourceFile = host.getSourceFile.bind(host)
   const originalFileExists = host.fileExists.bind(host)
   const originalReadFile = host.readFile.bind(host)
-  host.fileExists = (fileName) =>
-    resolve(fileName) === virtualFile || originalFileExists(fileName)
+  host.fileExists = (fileName) => resolve(fileName) === virtualFile || originalFileExists(fileName)
   host.readFile = (fileName) =>
     resolve(fileName) === virtualFile ? code : originalReadFile(fileName)
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
@@ -128,10 +127,10 @@ describe('DApp custom transport peers', () => {
       storage.getPrefixedKey(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP),
       JSON.stringify([known, missing])
     )
-    const transport = new PeerTestTransport<
-      PeerInfo,
-      StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
-    >(new RecordingPeerClient(), manager)
+    const transport = new PeerTestTransport<PeerInfo, StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP>(
+      new RecordingPeerClient(),
+      manager
+    )
     const client = new DAppClient({ name: 'Peer model DApp', storage, disableDefaultEvents: true })
     const closed = vi.fn()
     await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)

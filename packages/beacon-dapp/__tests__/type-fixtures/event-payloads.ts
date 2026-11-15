@@ -163,7 +163,6 @@ export async function observability(client: DAppClient): Promise<void> {
   void pending
 }
 
-
 export function clientCallbacks(
   transport: DappWalletConnectTransport,
   communication: CommunicationClient

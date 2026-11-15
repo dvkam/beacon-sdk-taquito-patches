@@ -12,9 +12,7 @@ export const getDAppClientInstance = (config: DAppClientOptions, reset?: boolean
 
   if (instance && reset) {
     // sync API — kick off cleanup but surface failures rather than swallow.
-    instance
-      .disconnect()
-      .catch((error: unknown) =>
+    instance.disconnect().catch((error: unknown) =>
       reportDiagnostic({
         level: 'error',
         service: 'DAppClient',

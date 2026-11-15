@@ -11,7 +11,10 @@ vi.mock('@ecadlabs/beacon-core', async (importActual) => ({
 const deferred = () => {
   let resolve: (value: string) => void = () => undefined
   let reject: (error: unknown) => void = () => undefined
-  const promise = new Promise<string>((accept, fail) => { resolve = accept; reject = fail })
+  const promise = new Promise<string>((accept, fail) => {
+    resolve = accept
+    reject = fail
+  })
   return { promise, resolve, reject }
 }
 
@@ -42,25 +45,33 @@ describe('PairOther Component', () => {
     const view = render(<PairOther {...defaultProps} wcPayload={oldWC.promise} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Beacon' }))
     expect(await screen.findByTestId('qr-component')).toHaveTextContent('p2p-code')
-    view.rerender(<PairOther {...defaultProps} p2pPayload={nextP2P.promise} wcPayload={nextWC.promise} />)
+    view.rerender(
+      <PairOther {...defaultProps} p2pPayload={nextP2P.promise} wcPayload={nextWC.promise} />
+    )
     expect(screen.queryByTestId('qr-component')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Beacon' })).not.toBeInTheDocument()
     await act(async () => oldWC.resolve('old-wc'))
     expect(screen.queryByRole('button', { name: 'WalletConnect' })).not.toBeInTheDocument()
-    await act(async () => { nextP2P.resolve('new-p2p'); nextWC.resolve('') })
+    await act(async () => {
+      nextP2P.resolve('new-p2p')
+      nextWC.resolve('')
+    })
     fireEvent.click(await screen.findByRole('button', { name: 'Beacon' }))
     expect(await screen.findByTestId('qr-component')).toHaveTextContent('new-p2p')
     expect(reportDiagnostic).not.toHaveBeenCalled()
   })
 
   test.each(['late success', 'late rejection', 'current rejection'])(
-    'owns a thenable QR click across %s', async (outcome) => {
+    'owns a thenable QR click across %s',
+    async (outcome) => {
       const pending = deferred()
       let reads = 0
       const wcPayload: PromiseLike<string> = {
         then(onfulfilled, onrejected) {
-          return (reads++ === 0 ? Promise.resolve('available-wc') : pending.promise)
-            .then(onfulfilled, onrejected)
+          return (reads++ === 0 ? Promise.resolve('available-wc') : pending.promise).then(
+            onfulfilled,
+            onrejected
+          )
         }
       }
       render(<PairOther {...defaultProps} wcPayload={wcPayload} />)
@@ -77,7 +88,10 @@ describe('PairOther Component', () => {
       if (outcome === 'current rejection') {
         expect(screen.queryByTestId('qr-component')).not.toBeInTheDocument()
         expect(reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
-          level: 'error', service: 'PairOther', method: 'selectQR', args: [failure]
+          level: 'error',
+          service: 'PairOther',
+          method: 'selectQR',
+          args: [failure]
         })
       } else {
         expect(screen.getByTestId('qr-component')).toHaveTextContent('p2p-code')

@@ -167,16 +167,14 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
     vi.useRealTimers()
   })
 
-  async function createConfiguredClient(options: {
-    transportType?: TransportType
-    requestTimeoutMs?: number
-    ackTimeoutMs?: number
-  } = {}): Promise<{ client: DAppClient; transport: ControlledTransport }> {
-    const {
-      transportType = TransportType.P2P,
-      requestTimeoutMs,
-      ackTimeoutMs
-    } = options
+  async function createConfiguredClient(
+    options: {
+      transportType?: TransportType
+      requestTimeoutMs?: number
+      ackTimeoutMs?: number
+    } = {}
+  ): Promise<{ client: DAppClient; transport: ControlledTransport }> {
+    const { transportType = TransportType.P2P, requestTimeoutMs, ackTimeoutMs } = options
     const storage = new LocalStorage('dapp-observability-150')
     const transport = new ControlledTransport(storage, transportType)
     const client = new DAppClient({
@@ -206,7 +204,10 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
     return { client, transport }
   }
 
-  async function getSentRequestIdAt(transport: ControlledTransport, index: number): Promise<string> {
+  async function getSentRequestIdAt(
+    transport: ControlledTransport,
+    index: number
+  ): Promise<string> {
     const calls = vi.mocked(transport.send).mock.calls
     const call = calls[index]
     const deserialized = (await new Serializer().deserialize(call[0])) as { id: string }
@@ -377,8 +378,10 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       vi.spyOn(MatrixClient, 'create').mockReturnValue(matrixClient)
       const commClient = p2pTransport['client']
       await storage.set(StorageKey.MATRIX_SELECTED_NODE, 'matrix-1.test.ecad.io')
-      vi.spyOn(commClient as unknown as { getBeaconInfo: () => Promise<{ timestamp: number }> }, 'getBeaconInfo')
-        .mockResolvedValue({ timestamp: 1_700_000_000 })
+      vi.spyOn(
+        commClient as unknown as { getBeaconInfo: () => Promise<{ timestamp: number }> },
+        'getBeaconInfo'
+      ).mockResolvedValue({ timestamp: 1_700_000_000 })
       vi.spyOn(commClient, 'listenForChannelOpening').mockResolvedValue(undefined)
 
       const events: TransportStatusChangedInfo[] = []
@@ -540,8 +543,10 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       vi.spyOn(MatrixClient, 'create').mockReturnValue(matrixClient)
       const commClient = p2pTransport['client']
       await storage.set(StorageKey.MATRIX_SELECTED_NODE, 'matrix-1.test.ecad.io')
-      vi.spyOn(commClient as unknown as { getBeaconInfo: () => Promise<{ timestamp: number }> }, 'getBeaconInfo')
-        .mockResolvedValue({ timestamp: 1_700_000_000 })
+      vi.spyOn(
+        commClient as unknown as { getBeaconInfo: () => Promise<{ timestamp: number }> },
+        'getBeaconInfo'
+      ).mockResolvedValue({ timestamp: 1_700_000_000 })
       vi.spyOn(commClient, 'listenForChannelOpening').mockResolvedValue(undefined)
 
       const events: TransportStatusChangedInfo[] = []
@@ -829,7 +834,8 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       const p2pTransport = dapp['p2pTransport']!
       const wcTransport = dapp['walletConnectTransport']!
 
-      let p2pPeerCallback: ((peer: ExtendedP2PPairingResponse) => Promise<boolean> | void) | undefined
+      let p2pPeerCallback:
+        ((peer: ExtendedP2PPairingResponse) => Promise<boolean> | void) | undefined
       vi.spyOn(postMessageTransport, 'connect').mockImplementation(async () => {
         await postMessageTransport['updateConnectionStatus']({ status: TransportStatus.CONNECTED })
       })
@@ -883,7 +889,9 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       expect(client.getPendingRequests()).toEqual([])
 
       const opPromise = client.requestOperation({
-        operationDetails: [{ kind: 'transaction' as never, amount: '1', destination: p2pAccount.address }]
+        operationDetails: [
+          { kind: 'transaction' as never, amount: '1', destination: p2pAccount.address }
+        ]
       })
       opPromise.catch(() => undefined)
 
@@ -981,7 +989,9 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
         senderId: p2pPeer.senderId,
         type: BeaconMessageType.Acknowledge
       })
-      expect(client.getPendingRequests().map((r) => ({ id: r.id, acknowledged: r.acknowledged }))).toEqual([
+      expect(
+        client.getPendingRequests().map((r) => ({ id: r.id, acknowledged: r.acknowledged }))
+      ).toEqual([
         { id: permReqId, acknowledged: false },
         { id: signReqId, acknowledged: true }
       ])
@@ -1101,7 +1111,10 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
         transport: TransportType.P2P,
         senderId: p2pPeer.senderId,
         sentAt: expect.any(Number),
-        deadline: capturedPendingV2[0]?.sentAt !== undefined ? capturedPendingV2[0].sentAt + 30_000 : undefined,
+        deadline:
+          capturedPendingV2[0]?.sentAt !== undefined
+            ? capturedPendingV2[0].sentAt + 30_000
+            : undefined,
         acknowledged: false
       })
 
@@ -1136,7 +1149,10 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
         transport: TransportType.P2P,
         senderId: p2pPeer.senderId,
         sentAt: expect.any(Number),
-        deadline: capturedPendingV3[0]?.sentAt !== undefined ? capturedPendingV3[0].sentAt + 30_000 : undefined,
+        deadline:
+          capturedPendingV3[0]?.sentAt !== undefined
+            ? capturedPendingV3[0].sentAt + 30_000
+            : undefined,
         acknowledged: false
       })
 

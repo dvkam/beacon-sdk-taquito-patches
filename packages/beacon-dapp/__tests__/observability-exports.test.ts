@@ -87,12 +87,14 @@ describe('@ecadlabs/beacon-dapp observability and logger root exports (09-B)', (
     })
 
     try {
-      await (client as unknown as {
-        handleResponse: (
-          message: unknown,
-          connectionInfo: { origin: Origin; id: string }
-        ) => Promise<void>
-      }).handleResponse(
+      await (
+        client as unknown as {
+          handleResponse: (
+            message: unknown,
+            connectionInfo: { origin: Origin; id: string }
+          ) => Promise<void>
+        }
+      ).handleResponse(
         {
           id: 'unknown-req-id',
           version: '2',

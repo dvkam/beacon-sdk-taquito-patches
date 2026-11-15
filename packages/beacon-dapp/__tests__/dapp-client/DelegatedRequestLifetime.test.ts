@@ -112,10 +112,7 @@ function localWireError(
   }
 }
 
-function localError(
-  id: string,
-  errorType: BeaconErrorType
-): any {
+function localError(id: string, errorType: BeaconErrorType): any {
   return expect.objectContaining({
     id,
     type: BeaconMessageType.Error,
@@ -415,7 +412,9 @@ describe('Delegated request lifetime', () => {
       await receiveWallet(error)
       // The leader marks the wallet's error before forwarding; the follower keeps that mark.
       const forwarded = { ...error, errorOrigin: 'wallet' }
-      expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(forwarded) })
+      expect(pending.settled).toHaveBeenCalledExactlyOnceWith({
+        error: expect.objectContaining(forwarded)
+      })
       expect(bus.endpoints[0].sent).toEqual([
         { type: 'RESPONSE', id: pending.id, data: { message: forwarded, connectionInfo } }
       ])

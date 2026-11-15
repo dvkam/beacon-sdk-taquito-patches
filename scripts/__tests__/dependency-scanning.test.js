@@ -15,7 +15,8 @@ test('createDependencyScanningReport converts npm audit v2 vulnerabilities into 
           {
             source: 1113686,
             name: 'serialize-javascript',
-            title: 'Serialize JavaScript is Vulnerable to RCE via RegExp.flags and Date.prototype.toISOString()',
+            title:
+              'Serialize JavaScript is Vulnerable to RCE via RegExp.flags and Date.prototype.toISOString()',
             url: 'https://github.com/advisories/GHSA-5c6j-r48x-rmvq',
             severity: 'high',
             cwe: ['CWE-96']

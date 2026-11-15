@@ -487,7 +487,12 @@ describe('WalletClient', () => {
 
       await client.connect(vi.fn())
       await client['handleResponse'](
-        { id: 'disconnect', type: BeaconMessageType.Disconnect, version: '2', senderId: 'sender-a' },
+        {
+          id: 'disconnect',
+          type: BeaconMessageType.Disconnect,
+          version: '2',
+          senderId: 'sender-a'
+        },
         { id: peerA.publicKey, origin: Origin.P2P }
       )
       expect(listener).not.toHaveBeenCalled()
@@ -511,7 +516,12 @@ describe('WalletClient', () => {
         duplicate()
         await client.connect(vi.fn())
         await client['handleResponse'](
-          { id: 'disconnect', type: BeaconMessageType.Disconnect, version: '2', senderId: 'sender-a' },
+          {
+            id: 'disconnect',
+            type: BeaconMessageType.Disconnect,
+            version: '2',
+            senderId: 'sender-a'
+          },
           { id: peerA.publicKey, origin: Origin.P2P }
         )
         expect(listener).toHaveBeenCalledTimes(1)

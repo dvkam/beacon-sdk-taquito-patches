@@ -40,9 +40,15 @@ describe('BeaconError hierarchy and runtime behavior', () => {
     { errorType: BeaconErrorType.NOT_GRANTED_ERROR, subclass: NotGrantedBeaconError },
     { errorType: BeaconErrorType.PARAMETERS_INVALID_ERROR, subclass: ParametersInvalidBeaconError },
     { errorType: BeaconErrorType.PEER_UNREACHABLE, subclass: PeerUnreachableBeaconError },
-    { errorType: BeaconErrorType.SIGNATURE_TYPE_NOT_SUPPORTED, subclass: SignatureTypeNotSupportedBeaconError },
+    {
+      errorType: BeaconErrorType.SIGNATURE_TYPE_NOT_SUPPORTED,
+      subclass: SignatureTypeNotSupportedBeaconError
+    },
     { errorType: BeaconErrorType.TOO_MANY_OPERATIONS, subclass: TooManyOperationsBeaconError },
-    { errorType: BeaconErrorType.TRANSACTION_INVALID_ERROR, subclass: TransactionInvalidBeaconError },
+    {
+      errorType: BeaconErrorType.TRANSACTION_INVALID_ERROR,
+      subclass: TransactionInvalidBeaconError
+    },
     { errorType: BeaconErrorType.UNKNOWN_ERROR, subclass: UnknownBeaconError }
   ]
 
@@ -145,126 +151,137 @@ describe('BeaconError hierarchy and runtime behavior', () => {
       }
     ]
 
-    describe.each(guards)('$name', ({ isBeaconError: checkBeaconError, isRequestErrorResponse: checkRequestErrorResponse, isTezosRpcError: checkTezosRpcError }) => {
-      describe('isBeaconError', () => {
-        it('returns true for BeaconError subclasses', () => {
-          expect(checkBeaconError(new UnknownBeaconError())).toBe(true)
-          expect(checkBeaconError(new AbortedBeaconError())).toBe(true)
-          expect(checkBeaconError(new NotGrantedBeaconError())).toBe(true)
-          expect(checkBeaconError(getError(BeaconErrorType.TRANSACTION_INVALID_ERROR, undefined))).toBe(true)
+    describe.each(guards)(
+      '$name',
+      ({
+        isBeaconError: checkBeaconError,
+        isRequestErrorResponse: checkRequestErrorResponse,
+        isTezosRpcError: checkTezosRpcError
+      }) => {
+        describe('isBeaconError', () => {
+          it('returns true for BeaconError subclasses', () => {
+            expect(checkBeaconError(new UnknownBeaconError())).toBe(true)
+            expect(checkBeaconError(new AbortedBeaconError())).toBe(true)
+            expect(checkBeaconError(new NotGrantedBeaconError())).toBe(true)
+            expect(
+              checkBeaconError(getError(BeaconErrorType.TRANSACTION_INVALID_ERROR, undefined))
+            ).toBe(true)
+          })
+
+          it('returns false for plain Error or plain RequestErrorResponse objects', () => {
+            expect(checkBeaconError(new Error('plain error'))).toBe(false)
+            expect(
+              checkBeaconError({
+                type: BeaconMessageType.Error,
+                id: 'req-1',
+                errorType: BeaconErrorType.UNKNOWN_ERROR
+              })
+            ).toBe(false)
+            expect(
+              checkBeaconError({
+                type: BeaconMessageType.Error,
+                id: 'req-2',
+                errorType: BeaconErrorType.NOT_GRANTED_ERROR,
+                errorOrigin: 'wallet'
+              })
+            ).toBe(false)
+            expect(checkBeaconError(null)).toBe(false)
+            expect(checkBeaconError(undefined)).toBe(false)
+            expect(checkBeaconError('some error string')).toBe(false)
+            expect(checkBeaconError({})).toBe(false)
+          })
         })
 
-        it('returns false for plain Error or plain RequestErrorResponse objects', () => {
-          expect(checkBeaconError(new Error('plain error'))).toBe(false)
-          expect(
-            checkBeaconError({
+        describe('isRequestErrorResponse', () => {
+          it('returns true for both plain RequestErrorResponse wire objects and BeaconError instances', () => {
+            const plainWalletError: RequestErrorResponse = {
               type: BeaconMessageType.Error,
               id: 'req-1',
-              errorType: BeaconErrorType.UNKNOWN_ERROR
-            })
-          ).toBe(false)
-          expect(
-            checkBeaconError({
-              type: BeaconMessageType.Error,
-              id: 'req-2',
               errorType: BeaconErrorType.NOT_GRANTED_ERROR,
               errorOrigin: 'wallet'
-            })
-          ).toBe(false)
-          expect(checkBeaconError(null)).toBe(false)
-          expect(checkBeaconError(undefined)).toBe(false)
-          expect(checkBeaconError('some error string')).toBe(false)
-          expect(checkBeaconError({})).toBe(false)
-        })
-      })
-
-      describe('isRequestErrorResponse', () => {
-        it('returns true for both plain RequestErrorResponse wire objects and BeaconError instances', () => {
-          const plainWalletError: RequestErrorResponse = {
-            type: BeaconMessageType.Error,
-            id: 'req-1',
-            errorType: BeaconErrorType.NOT_GRANTED_ERROR,
-            errorOrigin: 'wallet'
-          }
-          const plainLocalError: RequestErrorResponse = {
-            type: BeaconMessageType.Error,
-            id: 'req-2',
-            errorType: BeaconErrorType.PEER_UNREACHABLE,
-            errorOrigin: 'local'
-          }
-          const plainWithoutOrigin: RequestErrorResponse = {
-            type: BeaconMessageType.Error,
-            id: 'req-3',
-            errorType: BeaconErrorType.UNKNOWN_ERROR
-          }
-
-          expect(checkRequestErrorResponse(plainWalletError)).toBe(true)
-          expect(checkRequestErrorResponse(plainLocalError)).toBe(true)
-          expect(checkRequestErrorResponse(plainWithoutOrigin)).toBe(true)
-
-          expect(checkRequestErrorResponse(new NotGrantedBeaconError())).toBe(true)
-          expect(checkRequestErrorResponse(new PeerUnreachableBeaconError())).toBe(true)
-          expect(checkRequestErrorResponse(getError(BeaconErrorType.ABORTED_ERROR, undefined))).toBe(true)
-        })
-
-        it('returns false when errorOrigin is invalid or type !== BeaconMessageType.Error', () => {
-          expect(
-            checkRequestErrorResponse({
+            }
+            const plainLocalError: RequestErrorResponse = {
               type: BeaconMessageType.Error,
-              id: 'req-1',
-              errorType: BeaconErrorType.NOT_GRANTED_ERROR,
-              errorOrigin: 'somewhere'
-            })
-          ).toBe(false)
-
-          expect(
-            checkRequestErrorResponse({
-              type: BeaconMessageType.Acknowledge,
               id: 'req-2',
-              errorType: BeaconErrorType.NOT_GRANTED_ERROR
-            })
-          ).toBe(false)
+              errorType: BeaconErrorType.PEER_UNREACHABLE,
+              errorOrigin: 'local'
+            }
+            const plainWithoutOrigin: RequestErrorResponse = {
+              type: BeaconMessageType.Error,
+              id: 'req-3',
+              errorType: BeaconErrorType.UNKNOWN_ERROR
+            }
 
-          expect(checkRequestErrorResponse(new Error('plain error'))).toBe(false)
-          expect(checkRequestErrorResponse(null)).toBe(false)
-          expect(checkRequestErrorResponse(undefined)).toBe(false)
-          expect(checkRequestErrorResponse('string error')).toBe(false)
-          expect(checkRequestErrorResponse({})).toBe(false)
+            expect(checkRequestErrorResponse(plainWalletError)).toBe(true)
+            expect(checkRequestErrorResponse(plainLocalError)).toBe(true)
+            expect(checkRequestErrorResponse(plainWithoutOrigin)).toBe(true)
+
+            expect(checkRequestErrorResponse(new NotGrantedBeaconError())).toBe(true)
+            expect(checkRequestErrorResponse(new PeerUnreachableBeaconError())).toBe(true)
+            expect(
+              checkRequestErrorResponse(getError(BeaconErrorType.ABORTED_ERROR, undefined))
+            ).toBe(true)
+          })
+
+          it('returns false when errorOrigin is invalid or type !== BeaconMessageType.Error', () => {
+            expect(
+              checkRequestErrorResponse({
+                type: BeaconMessageType.Error,
+                id: 'req-1',
+                errorType: BeaconErrorType.NOT_GRANTED_ERROR,
+                errorOrigin: 'somewhere'
+              })
+            ).toBe(false)
+
+            expect(
+              checkRequestErrorResponse({
+                type: BeaconMessageType.Acknowledge,
+                id: 'req-2',
+                errorType: BeaconErrorType.NOT_GRANTED_ERROR
+              })
+            ).toBe(false)
+
+            expect(checkRequestErrorResponse(new Error('plain error'))).toBe(false)
+            expect(checkRequestErrorResponse(null)).toBe(false)
+            expect(checkRequestErrorResponse(undefined)).toBe(false)
+            expect(checkRequestErrorResponse('string error')).toBe(false)
+            expect(checkRequestErrorResponse({})).toBe(false)
+          })
         })
-      })
 
-      describe('isTezosRpcError', () => {
-        it('returns true when value is a non-null object with non-empty string kind and id', () => {
-          expect(
-            checkTezosRpcError({
-              kind: 'temporary',
-              id: 'proto.012-PsITHACA.michelson_v1.runtime_exhausted'
-            })
-          ).toBe(true)
+        describe('isTezosRpcError', () => {
+          it('returns true when value is a non-null object with non-empty string kind and id', () => {
+            expect(
+              checkTezosRpcError({
+                kind: 'temporary',
+                id: 'proto.012-PsITHACA.michelson_v1.runtime_exhausted'
+              })
+            ).toBe(true)
 
-          expect(
-            checkTezosRpcError({
-              kind: 'permanent',
-              id: 'node.bootstrap.unknown',
-              extraDetail: 123
-            })
-          ).toBe(true)
+            expect(
+              checkTezosRpcError({
+                kind: 'permanent',
+                id: 'node.bootstrap.unknown',
+                extraDetail: 123
+              })
+            ).toBe(true)
+          })
+
+          it('returns false when kind or id is empty, non-string, missing, or value is not an object', () => {
+            expect(checkTezosRpcError({ kind: '', id: 'proto.error' })).toBe(false)
+            expect(checkTezosRpcError({ kind: 'temporary', id: '' })).toBe(false)
+            expect(checkTezosRpcError({ kind: 123, id: 'proto.error' })).toBe(false)
+            expect(checkTezosRpcError({ kind: 'temporary', id: 456 })).toBe(false)
+            expect(checkTezosRpcError({ kind: 'temporary' })).toBe(false)
+            expect(checkTezosRpcError({ id: 'proto.error' })).toBe(false)
+            expect(checkTezosRpcError(null)).toBe(false)
+            expect(checkTezosRpcError(undefined)).toBe(false)
+            expect(checkTezosRpcError('string')).toBe(false)
+            expect(checkTezosRpcError(123)).toBe(false)
+            expect(checkTezosRpcError([])).toBe(false)
+          })
         })
-
-        it('returns false when kind or id is empty, non-string, missing, or value is not an object', () => {
-          expect(checkTezosRpcError({ kind: '', id: 'proto.error' })).toBe(false)
-          expect(checkTezosRpcError({ kind: 'temporary', id: '' })).toBe(false)
-          expect(checkTezosRpcError({ kind: 123, id: 'proto.error' })).toBe(false)
-          expect(checkTezosRpcError({ kind: 'temporary', id: 456 })).toBe(false)
-          expect(checkTezosRpcError({ kind: 'temporary' })).toBe(false)
-          expect(checkTezosRpcError({ id: 'proto.error' })).toBe(false)
-          expect(checkTezosRpcError(null)).toBe(false)
-          expect(checkTezosRpcError(undefined)).toBe(false)
-          expect(checkTezosRpcError('string')).toBe(false)
-          expect(checkTezosRpcError(123)).toBe(false)
-          expect(checkTezosRpcError([])).toBe(false)
-        })
-      })
-    })
+      }
+    )
   })
 })

@@ -1,6 +1,6 @@
 name: Maintenance request
 description: Propose an upstream intake, release hardening change, or repo maintenance task
-title: "[Maintenance]: "
+title: '[Maintenance]: '
 labels:
   - maintenance
 body:

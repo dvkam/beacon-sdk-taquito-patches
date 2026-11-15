@@ -12,7 +12,12 @@ function getPriority(priority) {
 }
 
 function getSolution(fixAvailable) {
-  if (fixAvailable && typeof fixAvailable === 'object' && fixAvailable.name && fixAvailable.version) {
+  if (
+    fixAvailable &&
+    typeof fixAvailable === 'object' &&
+    fixAvailable.name &&
+    fixAvailable.version
+  ) {
     return `Upgrade to ${fixAvailable.name}@${fixAvailable.version}`
   }
 

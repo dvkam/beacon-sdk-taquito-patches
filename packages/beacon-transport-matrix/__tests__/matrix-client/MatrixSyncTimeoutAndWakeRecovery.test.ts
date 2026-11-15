@@ -14,9 +14,7 @@ const loginResponse = {
 }
 
 type Outcome<T = unknown> =
-  | { status: 'pending' }
-  | { status: 'resolved'; value: T }
-  | { status: 'rejected'; reason: unknown }
+  { status: 'pending' } | { status: 'resolved'; value: T } | { status: 'rejected'; reason: unknown }
 
 const observe = <T>(promise: Promise<T>) => {
   let outcome: Outcome<T> = { status: 'pending' }
@@ -276,7 +274,9 @@ describe('Matrix /sync client-side fetch timeout and wake/visibility recovery (I
       })
       expect(loggerErrorSpy).not.toHaveBeenCalled()
 
-      const timedOut = observe(client.get<MatrixSyncResponse>('/sync', undefined, { timeoutMs: 5_000 }))
+      const timedOut = observe(
+        client.get<MatrixSyncResponse>('/sync', undefined, { timeoutMs: 5_000 })
+      )
       await vi.advanceTimersByTimeAsync(5_000)
       await timedOut.settled
       expect(timedOut.outcome).toMatchObject({
@@ -289,9 +289,21 @@ describe('Matrix /sync client-side fetch timeout and wake/visibility recovery (I
 
   describe('MatrixEventService.sync client-side timeout and cache eviction', () => {
     it.each([
-      { label: 'default 30000ms when pollingTimeout is undefined', pollingTimeout: undefined, expectedTimeoutMs: 30_000 },
-      { label: 'pollingTimeout + 10000ms for custom 15000ms long-poll', pollingTimeout: 15_000, expectedTimeoutMs: 25_000 },
-      { label: 'pollingTimeout + 10000ms for standard 30000ms long-poll', pollingTimeout: 30_000, expectedTimeoutMs: 40_000 }
+      {
+        label: 'default 30000ms when pollingTimeout is undefined',
+        pollingTimeout: undefined,
+        expectedTimeoutMs: 30_000
+      },
+      {
+        label: 'pollingTimeout + 10000ms for custom 15000ms long-poll',
+        pollingTimeout: 15_000,
+        expectedTimeoutMs: 25_000
+      },
+      {
+        label: 'pollingTimeout + 10000ms for standard 30000ms long-poll',
+        pollingTimeout: 30_000,
+        expectedTimeoutMs: 40_000
+      }
     ])(
       'enforces $label ($expectedTimeoutMs ms) and evicts the cached promise on timeout',
       async ({ pollingTimeout, expectedTimeoutMs }) => {
@@ -304,9 +316,7 @@ describe('Matrix /sync client-side fetch timeout and wake/visibility recovery (I
         const firstSync = observe(
           eventService.sync(
             'access-token-1',
-            pollingTimeout !== undefined
-              ? { pollingTimeout, syncToken: 'batch-1' }
-              : undefined
+            pollingTimeout !== undefined ? { pollingTimeout, syncToken: 'batch-1' } : undefined
           )
         )
 
@@ -570,9 +580,7 @@ describe('Matrix /sync client-side fetch timeout and wake/visibility recovery (I
           expect(syncCallCount).toBe(2)
 
           // Start a concurrent outbound send while the long-poll /sync is in flight
-          const pendingSend = observe(
-            client.sendTextMessage('!room:relay.example', 'outbound-ack')
-          )
+          const pendingSend = observe(client.sendTextMessage('!room:relay.example', 'outbound-ack'))
           await flushMicrotasks()
           expect(sendSignal).toBeDefined()
           expect(sendSignal?.aborted).toBe(false)
@@ -950,7 +958,9 @@ describe('Matrix /sync client-side fetch timeout and wake/visibility recovery (I
       await expect(client.start(user)).rejects.toThrow('Failed to fetch login')
 
       const addedOnline = windowAddSpy.mock.calls.filter(([event]) => event === 'online').length
-      const removedOnline = windowRemoveSpy.mock.calls.filter(([event]) => event === 'online').length
+      const removedOnline = windowRemoveSpy.mock.calls.filter(
+        ([event]) => event === 'online'
+      ).length
       const addedFocus = windowAddSpy.mock.calls.filter(([event]) => event === 'focus').length
       const removedFocus = windowRemoveSpy.mock.calls.filter(([event]) => event === 'focus').length
       const addedVisibility = documentAddSpy.mock.calls.filter(

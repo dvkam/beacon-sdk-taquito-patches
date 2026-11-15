@@ -1217,11 +1217,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         event.content.message.sender,
         senderPublicKey
       )
-      if (
-        !trustedSenderRelay ||
-        replay !== this.initialReplay ||
-        !this.isCurrentSession(session)
-      ) {
+      if (!trustedSenderRelay || replay !== this.initialReplay || !this.isCurrentSession(session)) {
         return
       }
       const encryptedPayload = decodeEncryptedPayload(event.content.message.content)

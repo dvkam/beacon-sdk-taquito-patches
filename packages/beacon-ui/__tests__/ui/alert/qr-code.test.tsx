@@ -35,40 +35,58 @@ const wallet = (
 })
 
 describe('Pairing alert QRCode', () => {
-  it.each(['pending', 'resolved', 'rejected'])('replaces fallback inputs after the old code resolved: %s', async (outcome) => {
-    const first = deferred<string>()
-    const next = deferred<string>()
-    const firstLoading = vi.fn()
-    const latestLoading = vi.fn()
-    const beacon = wallet(['beacon'])
-    const view = render(
-      <QRCode wallet={beacon} isWCWorking isMobile={false}
-        defaultPairing={first.promise} handleIsLoading={firstLoading} />
-    )
-    if (outcome === 'resolved') {
+  it.each(['pending', 'resolved', 'rejected'])(
+    'replaces fallback inputs after the old code resolved: %s',
+    async (outcome) => {
+      const first = deferred<string>()
+      const next = deferred<string>()
+      const firstLoading = vi.fn()
+      const latestLoading = vi.fn()
+      const beacon = wallet(['beacon'])
+      const view = render(
+        <QRCode
+          wallet={beacon}
+          isWCWorking
+          isMobile={false}
+          defaultPairing={first.promise}
+          handleIsLoading={firstLoading}
+        />
+      )
+      if (outcome === 'resolved') {
+        await act(async () => first.resolve('old-code'))
+        expect(screen.getByTestId('qr')).toHaveTextContent('old-code')
+      }
+      view.rerender(
+        <QRCode
+          wallet={beacon}
+          isWCWorking
+          isMobile={false}
+          defaultPairing={next.promise}
+          handleIsLoading={latestLoading}
+        />
+      )
+      expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
       await act(async () => first.resolve('old-code'))
-      expect(screen.getByTestId('qr')).toHaveTextContent('old-code')
+      expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
+      expect(latestLoading).not.toHaveBeenCalled()
+      view.rerender(
+        <QRCode
+          wallet={beacon}
+          isWCWorking
+          isMobile={false}
+          defaultPairing={next.promise}
+          handleIsLoading={latestLoading}
+        />
+      )
+      await act(async () => {
+        if (outcome === 'rejected') next.reject(new Error('pairing unavailable'))
+        else next.resolve('new-code')
+      })
+      if (outcome === 'rejected') expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
+      else expect(screen.getByTestId('qr')).toHaveTextContent('new-code')
+      expect(latestLoading).toHaveBeenCalledExactlyOnceWith(false)
     }
-    view.rerender(
-      <QRCode wallet={beacon} isWCWorking isMobile={false}
-        defaultPairing={next.promise} handleIsLoading={latestLoading} />
-    )
-    expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
-    await act(async () => first.resolve('old-code'))
-    expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
-    expect(latestLoading).not.toHaveBeenCalled()
-    view.rerender(
-      <QRCode wallet={beacon} isWCWorking isMobile={false}
-        defaultPairing={next.promise} handleIsLoading={latestLoading} />
-    )
-    await act(async () => {
-      if (outcome === 'rejected') next.reject(new Error('pairing unavailable'))
-      else next.resolve('new-code')
-    })
-    if (outcome === 'rejected') expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
-    else expect(screen.getByTestId('qr')).toHaveTextContent('new-code')
-    expect(latestLoading).toHaveBeenCalledExactlyOnceWith(false)
-  })
+  )
 
   it('does not substitute the Matrix pairing QR for a WalletConnect wallet', async () => {
     const p2pPairing = deferred<string>()

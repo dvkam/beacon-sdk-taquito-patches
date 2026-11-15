@@ -50,12 +50,12 @@ describe('getAddressFromPublicKey', () => {
   describe('BLpk (tz4)', () => {
     it('converts BLpk public key to tz4 address', async () => {
       // This is the failing case from the bug report
-      const publicKey = 'BLpk1zPXKmbZebsByVGqLej8k5ffsUmhfAKLR8xGphdRn7bptb61HdcBQ1gQ7NcrhAYoff1meYY4'
+      const publicKey =
+        'BLpk1zPXKmbZebsByVGqLej8k5ffsUmhfAKLR8xGphdRn7bptb61HdcBQ1gQ7NcrhAYoff1meYY4'
       const address = await getAddressFromPublicKey(publicKey)
       expect(address.startsWith('tz4')).toBe(true)
       expect(isValidAddress(address)).toBe(true)
     })
-
   })
 
   describe('raw hex public key', () => {
@@ -80,7 +80,9 @@ describe('isPublicKeySC', () => {
   })
 
   it('returns true for BLpk keys', () => {
-    expect(isPublicKeySC('BLpk1zPXKmbZebsByVGqLej8k5ffsUmhfAKLR8xGphdRn7bptb61HdcBQ1gQ7NcrhAYoff1meYY4')).toBe(true)
+    expect(
+      isPublicKeySC('BLpk1zPXKmbZebsByVGqLej8k5ffsUmhfAKLR8xGphdRn7bptb61HdcBQ1gQ7NcrhAYoff1meYY4')
+    ).toBe(true)
   })
 
   it('returns false for invalid keys', () => {
@@ -158,7 +160,6 @@ describe('getHexHash', () => {
     const hash = await getHexHash(Buffer.from('test'))
     expect(hash).toHaveLength(64)
   })
-
 })
 
 describe('recipientString', () => {
@@ -166,7 +167,6 @@ describe('recipientString', () => {
     expect(recipientString('abc123', 'matrix.org')).toBe('@abc123:matrix.org')
   })
 })
-
 
 describe('getKeypairFromSeed', () => {
   it('generates a keypair from seed', async () => {
@@ -176,7 +176,6 @@ describe('getKeypairFromSeed', () => {
     expect(keypair.publicKey).toHaveLength(32)
     expect(keypair.secretKey).toHaveLength(64)
   })
-
 })
 
 describe('symmetric encryption', () => {
@@ -190,10 +189,7 @@ describe('symmetric encryption', () => {
     expect(encrypted).toMatch(/^[0-9a-f]+$/)
     expect(encrypted.length).toBeGreaterThan(message.length * 2) // Includes nonce + mac
 
-    const decrypted = await decryptCryptoboxPayload(
-      Buffer.from(encrypted, 'hex'),
-      sharedKey
-    )
+    const decrypted = await decryptCryptoboxPayload(Buffer.from(encrypted, 'hex'), sharedKey)
     expect(decrypted).toBe(message)
   })
 
@@ -247,14 +243,9 @@ describe('asymmetric encryption', () => {
     const encrypted = await sealCryptobox('secret', keypair1.publicKey)
 
     await expect(
-      openCryptobox(
-        Buffer.from(encrypted, 'hex'),
-        keypair2.publicKey,
-        keypair2.secretKey
-      )
+      openCryptobox(Buffer.from(encrypted, 'hex'), keypair2.publicKey, keypair2.secretKey)
     ).rejects.toThrow('Decryption failed')
   })
-
 })
 
 describe('signMessage', () => {
@@ -333,5 +324,4 @@ describe('encodePoeChallengePayload', () => {
     expect(encoded).toBeTruthy()
     expect(typeof encoded).toBe('string')
   })
-
 })

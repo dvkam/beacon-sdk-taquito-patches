@@ -21,7 +21,10 @@ describe('createErrorResponseInput', () => {
   })
 
   it('creates an ErrorResponseInput from a request ID string and BeaconErrorType', () => {
-    const result = createErrorResponseInput('req-string-2', BeaconErrorType.TRANSACTION_INVALID_ERROR)
+    const result = createErrorResponseInput(
+      'req-string-2',
+      BeaconErrorType.TRANSACTION_INVALID_ERROR
+    )
 
     expect(result).toEqual({
       type: BeaconMessageType.Error,

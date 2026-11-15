@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pairing Alert</title>
 
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
     <script>
       // Enable debug mode for beacon
@@ -24,7 +24,7 @@
       const { openAlert } = beacon
 
       // Make the function available to the parent window
-      window.showPairingAlert = function() {
+      window.showPairingAlert = function () {
         const dummyPromise = Promise.resolve('dummy-sync-code')
 
         const config = {
@@ -53,7 +53,7 @@
         if (event.data.type === 'themeChange') {
           // Update document theme
           document.documentElement.setAttribute('data-theme', event.data.theme)
-          
+
           // Update Beacon color mode
           if (beacon.setColorMode) {
             beacon.setColorMode(
@@ -64,4 +64,4 @@
       })
     </script>
   </body>
-</html> 
+</html>

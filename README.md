@@ -20,13 +20,13 @@
 >
 > ### Current branch and package strategy
 >
-> | Item | Role |
-> |------|------|
-> | `taquito-patches` | Main ECAD maintenance branch for the package line. |
-> | `fix/*` | Short-lived ECAD fix branches when a focused patch is easier to stage separately. |
-> | `@ecadlabs/beacon-*` | Public package names published from this repo. |
-> | `trilitech` remote | External maintenance line we evaluate for import candidates. |
-> | `upstream` remote | Historical AirGap lineage reference. |
+> | Item                 | Role                                                                              |
+> | -------------------- | --------------------------------------------------------------------------------- |
+> | `taquito-patches`    | Main ECAD maintenance branch for the package line.                                |
+> | `fix/*`              | Short-lived ECAD fix branches when a focused patch is easier to stage separately. |
+> | `@ecadlabs/beacon-*` | Public package names published from this repo.                                    |
+> | `trilitech` remote   | External maintenance line we evaluate for import candidates.                      |
+> | `upstream` remote    | Historical AirGap lineage reference.                                              |
 >
 > ### Release and review posture
 >

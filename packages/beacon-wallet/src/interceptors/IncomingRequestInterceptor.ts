@@ -24,7 +24,10 @@ interface IncomingRequestInterceptorOptions {
   message: BeaconRequestMessage | BeaconMessageEnvelopeV3
   connectionInfo: ConnectionContext
   appMetadataManager: AppMetadataManager
-  interceptorCallback: (message: WalletRequestOutputMessage, connectionInfo: ConnectionContext) => void
+  interceptorCallback: (
+    message: WalletRequestOutputMessage,
+    connectionInfo: ConnectionContext
+  ) => void
 }
 
 interface IncomingRequestInterceptorOptionsV2 extends IncomingRequestInterceptorOptions {
@@ -59,7 +62,6 @@ export class IncomingRequestInterceptor {
       }
 
       return IncomingRequestInterceptor.handleV3Message({ ...config, message: config.message })
-
     }
   }
 
@@ -198,7 +200,6 @@ export class IncomingRequestInterceptor {
     }: IncomingRequestInterceptorOptionsV3 = config
 
     const v3Message = msg.message
-
 
     switch (v3Message.type) {
       case BeaconMessageType.PermissionRequest:

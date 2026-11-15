@@ -15,15 +15,18 @@ describe('BeaconErrorType WalletConnect JSON-RPC wire mapping', () => {
     expect(new Set(codes).size).toBe(allErrorTypes.length)
   })
 
-  it.each(allErrorTypes)('round-trips %s through JSON-RPC serialization and parsing', (errorType) => {
-    const jsonRpcError = serializeBeaconErrorToJsonRpcError(errorType)
-    expect(jsonRpcError.code).toBe(BEACON_JSON_RPC_ERROR_CODES[errorType])
-    expect(typeof jsonRpcError.message).toBe('string')
-    expect(jsonRpcError.message.length).toBeGreaterThan(0)
+  it.each(allErrorTypes)(
+    'round-trips %s through JSON-RPC serialization and parsing',
+    (errorType) => {
+      const jsonRpcError = serializeBeaconErrorToJsonRpcError(errorType)
+      expect(jsonRpcError.code).toBe(BEACON_JSON_RPC_ERROR_CODES[errorType])
+      expect(typeof jsonRpcError.message).toBe('string')
+      expect(jsonRpcError.message.length).toBeGreaterThan(0)
 
-    const parsed = parseJsonRpcErrorToBeaconError(jsonRpcError)
-    expect(parsed).toEqual({ errorType })
-  })
+      const parsed = parseJsonRpcErrorToBeaconError(jsonRpcError)
+      expect(parsed).toEqual({ errorType })
+    }
+  )
 
   it('round-trips TRANSACTION_INVALID_ERROR with TezosRpcError[] errorData', () => {
     const rpcErrors: TezosRpcError[] = [

@@ -39,7 +39,8 @@ const BEACON_ERROR_MESSAGES: Record<BeaconErrorType, string> = {
   [BeaconErrorType.NOT_GRANTED_ERROR]: 'The requested permission or signature was not granted.',
   [BeaconErrorType.PARAMETERS_INVALID_ERROR]: 'The operation parameters are invalid.',
   [BeaconErrorType.TOO_MANY_OPERATIONS]: 'Too many operations in a single request.',
-  [BeaconErrorType.TRANSACTION_INVALID_ERROR]: 'The transaction is invalid or rejected by the node.',
+  [BeaconErrorType.TRANSACTION_INVALID_ERROR]:
+    'The transaction is invalid or rejected by the node.',
   [BeaconErrorType.SIGNATURE_TYPE_NOT_SUPPORTED]: 'The requested signing type is not supported.',
   [BeaconErrorType.ABORTED_ERROR]: 'The request was aborted by the user or wallet.',
   [BeaconErrorType.PEER_UNREACHABLE]: 'The wallet peer is unreachable.',

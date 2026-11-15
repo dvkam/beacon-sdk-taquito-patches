@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Basic Toast</title>
-   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
     <script>
       // Enable debug mode for beacon
@@ -22,7 +22,7 @@
       const { openToast } = beacon
 
       // Make the function available to the parent window
-      window.showBasicToast = function() {
+      window.showBasicToast = function () {
         const config = {
           body: 'This is a basic toast notification',
           state: 'finished',
@@ -51,4 +51,4 @@
       })
     </script>
   </body>
-</html> 
+</html>

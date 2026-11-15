@@ -915,9 +915,7 @@ export class DAppClient extends Client {
     switch (message.kind) {
       case 'v2':
       case 'v3':
-        this.prepareRequest(message).catch((error: unknown) =>
-          logger.warn('prepareRequest', error)
-        )
+        this.prepareRequest(message).catch((error: unknown) => logger.warn('prepareRequest', error))
         break
       case 'response': {
         const request = this.requestTracker.get(message.id)
@@ -1187,7 +1185,8 @@ export class DAppClient extends Client {
 
   private buildDelegatedRequestError(id: string, error: unknown): RequestErrorResponse {
     if (isErrorResponse(error)) {
-      const origin = 'errorOrigin' in error && isErrorOrigin(error.errorOrigin) ? error.errorOrigin : 'local'
+      const origin =
+        'errorOrigin' in error && isErrorOrigin(error.errorOrigin) ? error.errorOrigin : 'local'
 
       return {
         id,
@@ -2267,9 +2266,13 @@ export class DAppClient extends Client {
 
     if (!activeAccountAlreadyCleared && !this.isGetActiveAccountHandled) {
       reportDiagnostic({
-        level: 'warn', service: 'DAppClient', method: 'commitActiveAccount',
-        args: [`An active account has been received, but no active subscription was found for BeaconEvent.ACTIVE_ACCOUNT_SET.
-        For more information, visit: https://docs.walletbeacon.io/guides/migration-guide`]
+        level: 'warn',
+        service: 'DAppClient',
+        method: 'commitActiveAccount',
+        args: [
+          `An active account has been received, but no active subscription was found for BeaconEvent.ACTIVE_ACCOUNT_SET.
+        For more information, visit: https://docs.walletbeacon.io/guides/migration-guide`
+        ]
       })
     }
 
@@ -2303,14 +2306,11 @@ export class DAppClient extends Client {
    * Reconcile replacement adapters before publishing the selected account.
    * Keep active-account notifications deferred until the ready state is committed.
    */
-  private async persistPreparedAccountSelection(selection: PreparedAccountCommit): Promise<boolean> {
-    const {
-      account,
-      transition,
-      source,
-      activeAccountAlreadyCleared,
-      hasPendingAccountWrite
-    } = selection
+  private async persistPreparedAccountSelection(
+    selection: PreparedAccountCommit
+  ): Promise<boolean> {
+    const { account, transition, source, activeAccountAlreadyCleared, hasPendingAccountWrite } =
+      selection
     let prepared = selection.prepared
     if (source === 'local' && (!activeAccountAlreadyCleared || hasPendingAccountWrite)) {
       await this.persistActiveAccount(account, transition)
@@ -3496,7 +3496,8 @@ export class DAppClient extends Client {
         case SigningType.OPERATION:
           if (!payload.startsWith('03')) {
             throw new ParametersInvalidBeaconError({
-              description: 'When using signing type "OPERATION", the payload must start with prefix "03"',
+              description:
+                'When using signing type "OPERATION", the payload must start with prefix "03"',
               errorOrigin: 'local',
               id: '',
               senderId: '',
@@ -3509,7 +3510,8 @@ export class DAppClient extends Client {
         case SigningType.MICHELINE:
           if (!payload.startsWith('05')) {
             throw new ParametersInvalidBeaconError({
-              description: 'When using signing type "MICHELINE", the payload must start with prefix "05"',
+              description:
+                'When using signing type "MICHELINE", the payload must start with prefix "05"',
               errorOrigin: 'local',
               id: '',
               senderId: '',
@@ -3704,8 +3706,12 @@ export class DAppClient extends Client {
     // TODO: Remove when we remove deprecated preferredNetwork
     if (input.network !== undefined && this.network.type !== input.network?.type) {
       reportDiagnostic({
-        level: 'error', service: 'DAppClient', method: 'requestBroadcast',
-        args: ['[BEACON] The network specified in the DAppClient constructor does not match the network set in the broadcast request. Please set the network in the constructor. Setting it during the Broadcast Request is deprecated.']
+        level: 'error',
+        service: 'DAppClient',
+        method: 'requestBroadcast',
+        args: [
+          '[BEACON] The network specified in the DAppClient constructor does not match the network set in the broadcast request. Please set the network in the constructor. Setting it during the Broadcast Request is deprecated.'
+        ]
       })
     }
 
@@ -3815,7 +3821,8 @@ export class DAppClient extends Client {
     }
 
     if (transport) {
-      const previous = this.lastEmittedTransportStatus.get(transport) ?? TransportStatus.NOT_CONNECTED
+      const previous =
+        this.lastEmittedTransportStatus.get(transport) ?? TransportStatus.NOT_CONNECTED
       const current = transport.connectionStatus
       if (previous !== current) {
         this.lastEmittedTransportStatus.set(transport, current)
@@ -5058,8 +5065,7 @@ export class DAppClient extends Client {
         return
       }
 
-      const previous =
-        this.lastEmittedTransportStatus.get(transport) ?? transition.previous
+      const previous = this.lastEmittedTransportStatus.get(transport) ?? transition.previous
       this.lastEmittedTransportStatus.set(transport, transition.status)
       const payload: TransportStatusChangedInfo = {
         transport: transition.transport,
@@ -5101,8 +5107,7 @@ export class DAppClient extends Client {
         : Number.isFinite(timeoutMs) && timeoutMs > 0
           ? timeoutMs
           : undefined
-    const deadline =
-      effectiveTimeoutMs !== undefined ? sentAt + effectiveTimeoutMs : undefined
+    const deadline = effectiveTimeoutMs !== undefined ? sentAt + effectiveTimeoutMs : undefined
     const acknowledged = transportType === TransportType.WALLETCONNECT ? undefined : false
     const metadata: {
       key: RequestKey
@@ -5285,7 +5290,9 @@ export class DAppClient extends Client {
     }
   }
 
-  private async loadResponseAppMetadata(message: ResponseMessage): Promise<AppMetadata | undefined> {
+  private async loadResponseAppMetadata(
+    message: ResponseMessage
+  ): Promise<AppMetadata | undefined> {
     const storedMetadata = await Promise.all([
       this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
       this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
@@ -5394,9 +5401,7 @@ export class DAppClient extends Client {
     response: RequestResponse
     receivedAt: number
     fromAdapter: boolean
-    preparation:
-      | { kind: 'permission'; appMetadata: AppMetadata | undefined }
-      | { kind: 'ordinary' }
+    preparation: { kind: 'permission'; appMetadata: AppMetadata | undefined } | { kind: 'ordinary' }
     transportType: TransportType | undefined
   }): Promise<void> {
     const { message, connectionInfo } = response

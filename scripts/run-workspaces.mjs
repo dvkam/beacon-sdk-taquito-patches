@@ -9,7 +9,9 @@ if (!scriptName) {
 }
 
 const topological = flags.includes('--topological')
-const packages = topological ? topologicallySortWorkspaces(getWorkspacePackages()) : getWorkspacePackages()
+const packages = topological
+  ? topologicallySortWorkspaces(getWorkspacePackages())
+  : getWorkspacePackages()
 
 for (const pkg of packages) {
   if (!pkg.manifest.scripts?.[scriptName]) {

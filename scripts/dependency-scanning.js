@@ -33,6 +33,10 @@ const { audit, exitCode } = runAudit()
 const report = createDependencyScanningReport(audit)
 
 fs.writeFileSync('audit.json', `${JSON.stringify(audit, null, 2)}\n`, 'utf8')
-fs.writeFileSync('gl-dependency-scanning-report.json', `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+fs.writeFileSync(
+  'gl-dependency-scanning-report.json',
+  `${JSON.stringify(report, null, 2)}\n`,
+  'utf8'
+)
 
 process.exitCode = exitCode

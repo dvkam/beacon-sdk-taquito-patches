@@ -149,27 +149,39 @@ describe('WalletConnect pairing approval ownership', () => {
     expect(disconnect).toHaveBeenCalledWith(expect.objectContaining({ topic: 'stale' }))
   }
 
-  it.each([false, true])('awaits a declined callback and preserves previous peer=%s', async (existing) => {
-    const previous = {
-      id: 'wallet-key', publicKey: 'wallet-key', senderId: 'previous',
-      type: 'walletconnect-pairing-response' as const, name: 'previous', version: 'first',
-      extensionId: 'previous'
+  it.each([false, true])(
+    'awaits a declined callback and preserves previous peer=%s',
+    async (existing) => {
+      const previous = {
+        id: 'wallet-key',
+        publicKey: 'wallet-key',
+        senderId: 'previous',
+        type: 'walletconnect-pairing-response' as const,
+        name: 'previous',
+        version: 'first',
+        extensionId: 'previous'
+      }
+      if (existing) await transport.addPeer(previous)
+      const decision = new ExposedPromise<boolean>()
+      const entered = new ExposedPromise<void>()
+      paired.mockImplementation(() => {
+        entered.resolve()
+        return decision.promise
+      })
+      await start()
+      approval.resolve(session('stale'))
+      await entered.promise
+      decision.resolve(false)
+      await flush()
+      expect(await storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)).toEqual(
+        existing ? [previous] : []
+      )
+      expect(client.listenerKeys()).toEqual(existing ? ['wallet-key'] : [])
+      expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
+      expect(client.currentSession()).toBeUndefined()
+      expect(disconnect).toHaveBeenCalledWith(expect.objectContaining({ topic: 'stale' }))
     }
-    if (existing) await transport.addPeer(previous)
-    const decision = new ExposedPromise<boolean>()
-    const entered = new ExposedPromise<void>()
-    paired.mockImplementation(() => { entered.resolve(); return decision.promise })
-    await start()
-    approval.resolve(session('stale'))
-    await entered.promise
-    decision.resolve(false)
-    await flush()
-    expect(await storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)).toEqual(existing ? [previous] : [])
-    expect(client.listenerKeys()).toEqual(existing ? ['wallet-key'] : [])
-    expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
-    expect(client.currentSession()).toBeUndefined()
-    expect(disconnect).toHaveBeenCalledWith(expect.objectContaining({ topic: 'stale' }))
-  })
+  )
 
   it('rejects delayed approval after pairing cancellation', async () => {
     await start()
@@ -477,9 +489,13 @@ describe('WalletConnect pairing approval ownership', () => {
     const close = vi.spyOn(client, 'closeSignClient').mockResolvedValue(undefined)
     const previous = session('previous')
     const peer = {
-      id: 'wallet-key', publicKey: 'wallet-key', senderId: 'previous',
-      type: 'walletconnect-pairing-response' as const, name: 'Previous wallet',
-      version: '3', extensionId: 'Previous wallet'
+      id: 'wallet-key',
+      publicKey: 'wallet-key',
+      senderId: 'previous',
+      type: 'walletconnect-pairing-response' as const,
+      name: 'Previous wallet',
+      version: '3',
+      extensionId: 'Previous wallet'
     }
     await transport.addPeer(peer)
     Reflect.set(client, 'session', previous)

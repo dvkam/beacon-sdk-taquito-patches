@@ -693,9 +693,16 @@ describe('P2PCommunicationClient', () => {
         const message = { id: 'message', version: '2', type: 'disconnect', senderId }
         const payload =
           encoding === 'json' ? JSON.stringify(message) : await new Serializer().serialize(message)
-        for (const invalid of [null, {}, { senderId: 42 }, { ...message, senderId: 'another-wallet' }]) {
+        for (const invalid of [
+          null,
+          {},
+          { senderId: 42 },
+          { ...message, senderId: 'another-wallet' }
+        ]) {
           ;(decryptCryptoboxPayload as Mock).mockResolvedValue(
-            encoding === 'json' ? JSON.stringify(invalid) : await new Serializer().serialize(invalid)
+            encoding === 'json'
+              ? JSON.stringify(invalid)
+              : await new Serializer().serialize(invalid)
           )
           await listener(event)
           expect(callback).not.toHaveBeenCalled()
@@ -712,7 +719,8 @@ describe('P2PCommunicationClient', () => {
       const key = '11'.repeat(32)
       const senderId = await getSenderId(key)
       const callback = vi.fn()
-      const actualUtils = await vi.importActual<typeof import('@ecadlabs/beacon-utils')>('@ecadlabs/beacon-utils')
+      const actualUtils =
+        await vi.importActual<typeof import('@ecadlabs/beacon-utils')>('@ecadlabs/beacon-utils')
       const sharedKey = new Uint8Array(32).fill(7)
       mockStorage.get.mockResolvedValue([{ publicKey: key, relayServer: 'relay.server' }])
       vi.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: sharedKey })
@@ -927,7 +935,13 @@ describe('P2PCommunicationClient', () => {
       ['wrong homeserver', '@hex-hash:evil.server', '@hex-hash:relay.server', false, false],
       ['wrong target', '@hex-hash:relay.server', '@other:relay.server', false, false],
       ['unknown peer', '@unknown:relay.server', '@hex-hash:relay.server', false, false],
-      ['pending pairing, wrong target', '@unknown:relay.server', '@other:relay.server', true, false],
+      [
+        'pending pairing, wrong target',
+        '@unknown:relay.server',
+        '@other:relay.server',
+        true,
+        false
+      ],
       ['pending pairing', '@unknown:relay.server', '@hex-hash:relay.server', true, true]
     ])('%s', async (_name, sender, target, pending, allowed) => {
       mockStorage.get.mockResolvedValue([

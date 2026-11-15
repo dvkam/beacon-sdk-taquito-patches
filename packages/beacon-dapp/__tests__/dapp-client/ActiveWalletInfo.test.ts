@@ -482,7 +482,12 @@ describe('DAppClient.getActiveWalletInfo', () => {
     'null',
     '[1,2]',
     JSON.stringify({ name: 'Missing Key', type: 'web', icon: 'https://stored.test/icon' }),
-    JSON.stringify({ key: 123, name: 'Numeric Key', type: 'web', icon: 'https://stored.test/icon' }),
+    JSON.stringify({
+      key: 123,
+      name: 'Numeric Key',
+      type: 'web',
+      icon: 'https://stored.test/icon'
+    }),
     JSON.stringify({
       key: 'invalid_type',
       name: 'Invalid Type',

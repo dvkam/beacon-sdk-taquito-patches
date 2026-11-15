@@ -116,7 +116,8 @@ export class WalletClient extends Client {
   /**
    * This array stores pending requests, meaning requests we received and have not yet handled / sent a response.
    */
-  private pendingRequests: [BeaconRequestMessage | BeaconMessageEnvelopeV3, ConnectionContext][] = []
+  private pendingRequests: [BeaconRequestMessage | BeaconMessageEnvelopeV3, ConnectionContext][] =
+    []
   private walletPendingRequests: WalletPendingRequestInfo[] = []
   private readonly pendingRequestListeners = new Map<
     (event: WalletPendingRequestEvent) => void,
@@ -358,7 +359,9 @@ export class WalletClient extends Client {
     this.knownPeerPublicKeys.clear()
     this.knownPeersByPublicKey.clear()
 
-    const primaryTransport = this._transport.isResolved() ? this._transport.promiseResult : undefined
+    const primaryTransport = this._transport.isResolved()
+      ? this._transport.promiseResult
+      : undefined
     const extraP2P =
       this.p2pTransport && this.p2pTransport !== primaryTransport ? this.p2pTransport : undefined
     const extraWC =
@@ -921,10 +924,7 @@ export class WalletClient extends Client {
         'senderId' in peer && typeof peer.senderId === 'string'
           ? peer
           : (this.knownPeersByPublicKey.get(peer.publicKey) ?? (await this.getPeerInfo(peer)))
-      if (
-        extended.publicKey === publicKeyOrSenderId ||
-        extended.senderId === publicKeyOrSenderId
-      ) {
+      if (extended.publicKey === publicKeyOrSenderId || extended.senderId === publicKeyOrSenderId) {
         return extended
       }
     }
@@ -962,10 +962,7 @@ export class WalletClient extends Client {
     })
   }
 
-  public async removePeer(
-    peer: PeerInfo,
-    sendDisconnectToPeer: boolean = false
-  ): Promise<void> {
+  public async removePeer(peer: PeerInfo, sendDisconnectToPeer: boolean = false): Promise<void> {
     const extendedPeer =
       this.knownPeersByPublicKey.get(peer.publicKey) ?? (await this.getPeerInfo(peer))
     const transport = await this.getTransportForPeer(extendedPeer)
@@ -1476,10 +1473,7 @@ export class WalletClient extends Client {
       throw new Error(`Invalid address: "${address}"`)
     }
 
-    if (
-      walletType === 'abstracted_account' &&
-      address.substring(0, 3) !== CONTRACT_PREFIX
-    ) {
+    if (walletType === 'abstracted_account' && address.substring(0, 3) !== CONTRACT_PREFIX) {
       throw new Error(
         `Invalid abstracted account address "${address}", it should be a ${CONTRACT_PREFIX} address`
       )
@@ -1694,10 +1688,7 @@ export class WalletClient extends Client {
           return
         }
         this.knownPeersByPublicKey.set(peer.publicKey, extendedPeer)
-        if (
-          isP2P &&
-          (this._transport.isResolved() || this.transport !== this._transport.promise)
-        ) {
+        if (isP2P && (this._transport.isResolved() || this.transport !== this._transport.promise)) {
           try {
             const transport = this.p2pTransport ?? (await this.transport)
             if (this.destroyed) {

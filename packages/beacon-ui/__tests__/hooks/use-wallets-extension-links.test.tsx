@@ -125,10 +125,8 @@ describe('extension discovery ownership', () => {
       const accepted = { id: 'accepted-extension', name: 'Accepted Wallet' }
       const obsolete = { id: 'obsolete-extension', name: 'Obsolete Wallet' }
       const newest = { id: 'newest-extension', name: 'Newest Wallet' }
-      const olderRequest =
-        deferred<Awaited<ReturnType<typeof getAvailableExtensions>>>()
-      const newestRequest =
-        deferred<Awaited<ReturnType<typeof getAvailableExtensions>>>()
+      const olderRequest = deferred<Awaited<ReturnType<typeof getAvailableExtensions>>>()
+      const newestRequest = deferred<Awaited<ReturnType<typeof getAvailableExtensions>>>()
       vi.mocked(getAvailableExtensions)
         .mockResolvedValueOnce([accepted])
         .mockReturnValueOnce(olderRequest.promise)
@@ -159,8 +157,7 @@ describe('extension discovery ownership', () => {
 it('ignores discovery from a disposed effect after StrictMode replay', async () => {
   const disposed = { id: 'disposed-extension', name: 'Disposed Wallet' }
   const current = { id: 'current-extension', name: 'Current Wallet' }
-  const disposedRequest =
-    deferred<Awaited<ReturnType<typeof getAvailableExtensions>>>()
+  const disposedRequest = deferred<Awaited<ReturnType<typeof getAvailableExtensions>>>()
   vi.mocked(getAvailableExtensions)
     .mockReturnValueOnce(disposedRequest.promise)
     .mockResolvedValueOnce([current])

@@ -23,8 +23,10 @@ const run = (pattern) => {
 const mutations = [
   {
     name: 'outbound disconnect retires requests only after the relay responds',
-    before: '          this.clearTopic(topic)\n          await signClient.disconnect({ topic, reason: WC_USER_DISCONNECTED })',
-    after: '          await signClient.disconnect({ topic, reason: WC_USER_DISCONNECTED })\n          this.clearTopic(topic)',
+    before:
+      '          this.clearTopic(topic)\n          await signClient.disconnect({ topic, reason: WC_USER_DISCONNECTED })',
+    after:
+      '          await signClient.disconnect({ topic, reason: WC_USER_DISCONNECTED })\n          this.clearTopic(topic)',
     test: 'bounds request ownership'
   },
   {

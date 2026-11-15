@@ -10,7 +10,12 @@ import {
   type WalletConnectAccountEntry
 } from './transports/WalletWalletConnectTransport'
 
-export { WalletClient, WalletClientOptions, WalletWalletConnectTransport, type WalletConnectAccountEntry }
+export {
+  WalletClient,
+  WalletClientOptions,
+  WalletWalletConnectTransport,
+  type WalletConnectAccountEntry
+}
 export { createErrorResponseInput } from './interceptors/createErrorResponseInput'
 export {
   buildPermissionResponse,

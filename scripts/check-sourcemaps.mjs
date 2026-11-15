@@ -38,7 +38,9 @@ for (const mapPath of distMapFiles) {
   }
 
   if (!sourcesContent || sourcesContent.length !== sources.length) {
-    failures.push(`${path.relative(repoRoot, mapPath)} is missing sourcesContent for one or more sources`)
+    failures.push(
+      `${path.relative(repoRoot, mapPath)} is missing sourcesContent for one or more sources`
+    )
     continue
   }
 

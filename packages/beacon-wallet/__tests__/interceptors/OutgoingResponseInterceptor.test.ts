@@ -308,7 +308,11 @@ const credentialCases = [
   },
   {
     name: 'explicit contract address does not derive an invalid key',
-    fields: { address: contractAddress, publicKey: 'invalid-key', walletType: 'abstracted_account' },
+    fields: {
+      address: contractAddress,
+      publicKey: 'invalid-key',
+      walletType: 'abstracted_account'
+    },
     expected: { kind: 'accepted', address: contractAddress }
   },
   {
@@ -317,37 +321,40 @@ const credentialCases = [
     expected: { kind: 'rejected', error: invalidAbstractedAddress }
   }
 ] satisfies CredentialCase[]
-it.each(credentialCases)('preserves permission credentials: $name', async ({ fields, expected }) => {
-  const config = setup()
-  if (expected.kind === 'accepted') {
-    await config.appMetadataManager.addAppMetadata(metadata)
+it.each(credentialCases)(
+  'preserves permission credentials: $name',
+  async ({ fields, expected }) => {
+    const config = setup()
+    if (expected.kind === 'accepted') {
+      await config.appMetadataManager.addAppMetadata(metadata)
+    }
+    // Exercise JavaScript callers too: some compatibility and rejection cases violate the input union.
+    const outcome: Promise<void> = Reflect.apply(
+      OutgoingResponseInterceptor.intercept,
+      OutgoingResponseInterceptor,
+      [{ ...config, message: { ...permission, ...fields } }]
+    )
+    if (expected.kind === 'accepted') {
+      await outcome
+      expect(await config.permissionManager.getPermissions()).toEqual([
+        expect.objectContaining({ address: expected.address })
+      ])
+      expect((await config.permissionManager.getPermissions())[0]?.publicKey).toBe(fields.publicKey)
+      expect(config.interceptorCallback).toHaveBeenCalledWith({
+        senderId: 'wallet',
+        version: '2',
+        appMetadata: ownAppMetadata,
+        ...permission,
+        ...fields,
+        walletType: fields.walletType ?? 'implicit'
+      })
+    } else {
+      await expect(outcome).rejects.toThrow(expected.error)
+      expect(await config.permissionManager.getPermissions()).toEqual([])
+      expect(config.interceptorCallback).not.toHaveBeenCalled()
+    }
   }
-  // Exercise JavaScript callers too: some compatibility and rejection cases violate the input union.
-  const outcome: Promise<void> = Reflect.apply(
-    OutgoingResponseInterceptor.intercept,
-    OutgoingResponseInterceptor,
-    [{ ...config, message: { ...permission, ...fields } }]
-  )
-  if (expected.kind === 'accepted') {
-    await outcome
-    expect(await config.permissionManager.getPermissions()).toEqual([
-      expect.objectContaining({ address: expected.address })
-    ])
-    expect((await config.permissionManager.getPermissions())[0]?.publicKey).toBe(fields.publicKey)
-    expect(config.interceptorCallback).toHaveBeenCalledWith({
-      senderId: 'wallet',
-      version: '2',
-      appMetadata: ownAppMetadata,
-      ...permission,
-      ...fields,
-      walletType: fields.walletType ?? 'implicit'
-    })
-  } else {
-    await expect(outcome).rejects.toThrow(expected.error)
-    expect(await config.permissionManager.getPermissions()).toEqual([])
-    expect(config.interceptorCallback).not.toHaveBeenCalled()
-  }
-})
+)
 
 it('propagates permission persistence failure without sending the response', async () => {
   const config = setup()

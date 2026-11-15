@@ -78,7 +78,9 @@ describe('WalletConnectCommunicationClient BeaconErrorType round-trip', () => {
     await client.sendMessage(serializedReq)
     await flush()
 
-    mockRequests[0].reply.reject(serializeBeaconErrorToJsonRpcError(BeaconErrorType.PARAMETERS_INVALID_ERROR))
+    mockRequests[0].reply.reject(
+      serializeBeaconErrorToJsonRpcError(BeaconErrorType.PARAMETERS_INVALID_ERROR)
+    )
     await flush()
 
     expect(responses).toHaveLength(1)

@@ -35,8 +35,13 @@ describe('Toast UI lifecycle (openToast / closeToast)', () => {
       const { openToast, closeToast } = await import('../../../src/ui/toast')
       const diagnostic = vi.fn()
       setLogger({
-        debug: vi.fn(), log: vi.fn(), warn: vi.fn(), error: vi.fn(),
-        time: vi.fn(), timeLog: vi.fn(), diagnostic
+        debug: vi.fn(),
+        log: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        time: vi.fn(),
+        timeLog: vi.fn(),
+        diagnostic
       })
       const failure = new Error('callback failed')
       const starts: string[] = []
@@ -51,19 +56,22 @@ describe('Toast UI lifecycle (openToast / closeToast)', () => {
           starts.push(this.body)
           return finish()
         },
-        actions: [{
-          text: 'Action label',
-          actionText: 'Run action',
-          actionCallback() {
-            starts.push(this.text)
-            return finish()
+        actions: [
+          {
+            text: 'Action label',
+            actionText: 'Run action',
+            actionCallback() {
+              starts.push(this.text)
+              return finish()
+            }
           }
-        }]
+        ]
       }
       try {
         await act(async () => openToast(config))
-        const buttons = document.querySelector('beacon-toast')?.shadowRoot
-          ?.querySelectorAll<HTMLElement>('.toast-action-button')
+        const buttons = document
+          .querySelector('beacon-toast')
+          ?.shadowRoot?.querySelectorAll<HTMLElement>('.toast-action-button')
         expect(buttons).toHaveLength(2)
         await act(async () => {
           buttons?.forEach((button) => fireEvent.click(button))
@@ -71,9 +79,13 @@ describe('Toast UI lifecycle (openToast / closeToast)', () => {
         })
         expect(diagnostic).toHaveBeenCalledTimes(outcome === 'success' ? 0 : 2)
         if (outcome !== 'success') {
-          expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({
-            level: 'error', service: 'Toast', args: [failure]
-          }))
+          expect(diagnostic).toHaveBeenCalledWith(
+            expect.objectContaining({
+              level: 'error',
+              service: 'Toast',
+              args: [failure]
+            })
+          )
         }
       } finally {
         await act(async () => closeToast())

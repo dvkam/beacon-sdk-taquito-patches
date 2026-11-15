@@ -162,9 +162,7 @@ describe('WalletClient with walletConnectOptions', () => {
           method: 'tezos_send',
           params: {
             account: pkh,
-            operations: [
-              { kind: TezosOperationType.TRANSACTION, amount: '500', destination: pkh }
-            ]
+            operations: [{ kind: TezosOperationType.TRANSACTION, amount: '500', destination: pkh }]
           }
         }
       }
@@ -207,7 +205,11 @@ describe('WalletClient with walletConnectOptions', () => {
     const rpcErrors: TezosRpcError[] = [
       { kind: 'permanent', id: 'proto.021-PsQuebec.michelson_v1.script_rejected' }
     ]
-    await walletClient.respondError(signRequest, BeaconErrorType.TRANSACTION_INVALID_ERROR, rpcErrors)
+    await walletClient.respondError(
+      signRequest,
+      BeaconErrorType.TRANSACTION_INVALID_ERROR,
+      rpcErrors
+    )
     expect(currentSignClient.respond).toHaveBeenLastCalledWith({
       topic: 'topic-11',
       response: {

@@ -33,7 +33,6 @@ interface OutgoingResponseInterceptorOptions {
   permissionManager: PermissionManager
   appMetadataManager: AppMetadataManager
   interceptorCallback: (message: WalletResponseOutputMessage) => unknown
-
 }
 
 interface OutgoingResponseInterceptorOptionsV2 extends OutgoingResponseInterceptorOptions {
@@ -91,7 +90,6 @@ export class OutgoingResponseInterceptor {
       return OutgoingResponseInterceptor.handleV2Message({ ...config, message })
     } else if (config.request.version === '3') {
       return OutgoingResponseInterceptor.handleV3Message(config)
-
     }
   }
 
@@ -101,7 +99,6 @@ export class OutgoingResponseInterceptor {
     logger.log('LOGGING OUTGOING V3', payload, appMetadataManager)
 
     await interceptorCallback(message)
-
   }
 
   private static async handleV2Message(config: OutgoingResponseInterceptorOptionsV2) {
@@ -119,7 +116,10 @@ export class OutgoingResponseInterceptor {
         if (message.errorType === BeaconErrorType.TRANSACTION_INVALID_ERROR && message.errorData) {
           const errorData = message.errorData
           // Check only the RPC identifiers required for forwarding; preserve all other fields.
-          if (Array.isArray(errorData) && errorData.every((item: unknown) => isTezosRpcError(item))) {
+          if (
+            Array.isArray(errorData) &&
+            errorData.every((item: unknown) => isTezosRpcError(item))
+          ) {
             response.errorData = errorData
           } else {
             logger.warn(
@@ -167,7 +167,8 @@ export class OutgoingResponseInterceptor {
       message: Extract<BeaconResponseInputMessage, { type: BeaconMessageType.PermissionResponse }>
     }
   ): Promise<PermissionResponse> {
-    const { senderId, request, message, ownAppMetadata, permissionManager, appMetadataManager } = config
+    const { senderId, request, message, ownAppMetadata, permissionManager, appMetadataManager } =
+      config
     const walletType = message.walletType ?? 'implicit'
     const response: PermissionResponse = {
       senderId,

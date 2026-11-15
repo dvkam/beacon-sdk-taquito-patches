@@ -39,9 +39,7 @@ interface ActiveSyncAttempt {
 const WAKE_REFRESH_SENTINEL = Symbol('MatrixWakeRefresh')
 
 export type MatrixHealthTransition =
-  | { health: 'degraded'; reason: 'sync_failing' }
-  | { health: 'ok' }
-  | { reason: 'token_renewed' }
+  { health: 'degraded'; reason: 'sync_failing' } | { health: 'ok' } | { reason: 'token_renewed' }
 
 /**
  * The matrix client used to connect to the matrix network
@@ -502,11 +500,7 @@ export class MatrixClient {
     while (this.isActive && session === this.session) {
       let syncingRetries = 0
       try {
-        const response = await this.syncWithRenewal(
-          session,
-          isStartupSettled,
-          renewAuthorization
-        )
+        const response = await this.syncWithRenewal(session, isStartupSettled, renewAuthorization)
         if (!response) {
           return
         }

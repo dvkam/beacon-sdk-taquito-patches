@@ -120,7 +120,9 @@ const validEdpkAlt = 'edpkuBknW28nW72KG6RoHtYW7p12T6GKc7nAbwYX5m8Wd9sDVC9yav'
 const validContractAddress = 'KT1TxqZ8QtKvLu3V3JH7Gx58n7Co8pgtpQU5'
 const network: Network = { type: NetworkType.MAINNET }
 
-const makePeer = (overrides: Partial<ExtendedP2PPairingRequest> = {}): ExtendedP2PPairingRequest => ({
+const makePeer = (
+  overrides: Partial<ExtendedP2PPairingRequest> = {}
+): ExtendedP2PPairingRequest => ({
   id: 'peer-id-1',
   name: 'DApp One',
   publicKey: 'peer-pk-1',
@@ -144,10 +146,7 @@ const makePermissionRequest = (
   scopes: [PermissionScope.SIGN]
 })
 
-const makeOperationRequest = (
-  id: string,
-  senderId: string = 'sender-1'
-): BeaconRequestMessage => ({
+const makeOperationRequest = (id: string, senderId: string = 'sender-1'): BeaconRequestMessage => ({
   id,
   senderId,
   version: '2',
@@ -637,9 +636,7 @@ describe('WalletClient observability, pending requests, changeAccount, and lifec
       await emptyNodesStorage.set(StorageKey.MATRIX_SELECTED_NODE, 'beacon-node-1.sky.papers.tech')
       await expect(emptyNodesWallet.getSelectedMatrixNode()).resolves.toBeUndefined()
       await emptyNodesStorage.set(StorageKey.MATRIX_SELECTED_NODE, 'beacon-node-1.octez.io')
-      await expect(emptyNodesWallet.getSelectedMatrixNode()).resolves.toBe(
-        'beacon-node-1.octez.io'
-      )
+      await expect(emptyNodesWallet.getSelectedMatrixNode()).resolves.toBe('beacon-node-1.octez.io')
 
       // Stored node when matrixNodes is completely omitted/default -> validates against default REGIONS_AND_SERVERS
       const { wallet: omittedNodesWallet, storage: omittedNodesStorage } = await createWallet({
@@ -672,11 +669,16 @@ describe('WalletClient observability, pending requests, changeAccount, and lifec
       await expect(multiRegionWallet.getSelectedMatrixNode()).resolves.toBeUndefined()
 
       // Stored node with matrixNodes containing undefined region value -> returns stored node
-      const { wallet: undefinedRegionWallet, storage: undefinedRegionStorage } = await createWallet({
-        attachTransport: false,
-        matrixNodes: { [Regions.EUROPE_WEST]: undefined as unknown as string[] }
-      })
-      await undefinedRegionStorage.set(StorageKey.MATRIX_SELECTED_NODE, 'undefined-region.example.com')
+      const { wallet: undefinedRegionWallet, storage: undefinedRegionStorage } = await createWallet(
+        {
+          attachTransport: false,
+          matrixNodes: { [Regions.EUROPE_WEST]: undefined as unknown as string[] }
+        }
+      )
+      await undefinedRegionStorage.set(
+        StorageKey.MATRIX_SELECTED_NODE,
+        'undefined-region.example.com'
+      )
       await expect(undefinedRegionWallet.getSelectedMatrixNode()).resolves.toBe(
         'undefined-region.example.com'
       )

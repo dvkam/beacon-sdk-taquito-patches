@@ -8,7 +8,6 @@ Restoration checks that the shared pointer still names the account and that the 
 
 Custom storage must deliver change notifications for writes from other clients. The storage interface has no conditional transaction operation, so it does not provide atomic ordering across clients using arbitrary asynchronous storage backends.
 
-
 ## Storage change subscriptions
 
 `StorageChangeEvent` carries physical keys and serialized string values, including

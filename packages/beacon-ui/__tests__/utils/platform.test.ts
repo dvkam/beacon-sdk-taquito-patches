@@ -34,11 +34,16 @@ describe('Trust Wallet browser detection', () => {
   })
 
   it('reads injected provider flags without checking inherited properties', () => {
-    setProvider(new Proxy({ isTrust: true }, {
-      has() {
-        throw new Error('Provider does not support property checks')
-      }
-    }))
+    setProvider(
+      new Proxy(
+        { isTrust: true },
+        {
+          has() {
+            throw new Error('Provider does not support property checks')
+          }
+        }
+      )
+    )
     expect(isTwBrowser(window)).toBe(true)
   })
 

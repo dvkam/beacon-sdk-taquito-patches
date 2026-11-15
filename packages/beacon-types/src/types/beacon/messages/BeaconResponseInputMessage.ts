@@ -53,8 +53,7 @@ export type AbstractedPermissionResponseInput = PermissionResponseBaseInput & {
  * @category Wallet
  */
 export type PermissionResponseInput =
-  | ImplicitPermissionResponseInput
-  | AbstractedPermissionResponseInput
+  ImplicitPermissionResponseInput | AbstractedPermissionResponseInput
 /**
  * @category Wallet
  */

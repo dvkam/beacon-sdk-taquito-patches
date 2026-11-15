@@ -60,9 +60,7 @@ describe('WalletClient simultaneous P2P and WalletConnect transports', () => {
         await Transport.prototype.disconnect.call(this)
       })
     const p2pAddListenerSpy = vi.spyOn(WalletP2PTransport.prototype, 'addListener')
-    const p2pSendSpy = vi
-      .spyOn(WalletP2PTransport.prototype, 'send')
-      .mockResolvedValue(undefined)
+    const p2pSendSpy = vi.spyOn(WalletP2PTransport.prototype, 'send').mockResolvedValue(undefined)
     const p2pGetPeersSpy = vi
       .spyOn(WalletP2PTransport.prototype, 'getPeers')
       .mockImplementation(async () => [...p2pPeers])

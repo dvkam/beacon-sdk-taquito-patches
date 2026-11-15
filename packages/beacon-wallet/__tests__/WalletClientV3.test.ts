@@ -104,8 +104,12 @@ it('awaits V3 response transport delivery and propagates its original failure', 
     transport.onSend = async (serialized) => {
       const message: unknown = await new Serializer().deserialize(serialized)
       // Cold-start ACKs may still be draining when respond starts.
-      if (message !== null && typeof message === 'object' && 'type' in message &&
-          message.type === BeaconMessageType.BlockchainResponse) {
+      if (
+        message !== null &&
+        typeof message === 'object' &&
+        'type' in message &&
+        message.type === BeaconMessageType.BlockchainResponse
+      ) {
         sent(message)
         await gate
         throw failure

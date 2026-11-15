@@ -7,15 +7,9 @@ import {
   type BeaconRequestOutputMessage,
   type PermissionRequestOutput
 } from '@ecadlabs/beacon-types'
-import {
-  isV3Envelope,
-  isBeaconMessageType,
-  type WalletRequestOutputMessage
-} from '../../src'
+import { isV3Envelope, isBeaconMessageType, type WalletRequestOutputMessage } from '../../src'
 
-const asWalletRequest = (
-  message: WalletRequestOutputMessage
-): WalletRequestOutputMessage => message
+const asWalletRequest = (message: WalletRequestOutputMessage): WalletRequestOutputMessage => message
 
 describe('message-guards public exports', () => {
   const v3Envelope: BeaconMessageEnvelopeV3 = {

@@ -4,10 +4,10 @@ import { readJson, repoRoot } from './workspace-utils.mjs'
 
 const minimumVersions = {
   '@stablelib/ed25519': '2.1.0',
-  'unstorage': '1.17.5',
-  'h3': '1.15.9',
-  'defu': '6.1.7',
-  'picomatch': '2.3.2'
+  unstorage: '1.17.5',
+  h3: '1.15.9',
+  defu: '6.1.7',
+  picomatch: '2.3.2'
 }
 
 // WalletConnect stays at exactly 2.18.0 because Kukai iOS depends on it.
@@ -77,14 +77,19 @@ if (!declaredVersion) {
 }
 
 if (beaconCoreManifest.dependencies?.['@stablelib/ed25519']) {
-  failures.push('@ecadlabs/beacon-core should consume ed25519 through @ecadlabs/beacon-utils, not declare it directly')
+  failures.push(
+    '@ecadlabs/beacon-core should consume ed25519 through @ecadlabs/beacon-utils, not declare it directly'
+  )
 }
 
 if (walletConnectTransportManifest.dependencies?.elliptic) {
   failures.push('@ecadlabs/beacon-transport-walletconnect must not declare elliptic')
 }
 
-if (beaconDappManifest.dependencies?.['@walletconnect/types'] !== pinnedVersions['@walletconnect/types']) {
+if (
+  beaconDappManifest.dependencies?.['@walletconnect/types'] !==
+  pinnedVersions['@walletconnect/types']
+) {
   failures.push(
     `@ecadlabs/beacon-dapp declares @walletconnect/types@${beaconDappManifest.dependencies?.['@walletconnect/types'] ?? 'missing'}, expected exact ${pinnedVersions['@walletconnect/types']}`
   )
