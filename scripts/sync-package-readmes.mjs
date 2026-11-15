@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const repoRoot = process.cwd()
@@ -95,6 +95,12 @@ for (const dirName of packageDirs) {
   const packageJson = JSON.parse(readFileSync(path.join(packageDir, 'package.json'), 'utf8'))
   const readmePath = path.join(packageDir, 'README.md')
 
+  // Everything from this marker to EOF is authored package documentation.
+  const previousReadme = existsSync(readmePath) ? readFileSync(readmePath, 'utf8') : ''
+  const documentationStart = previousReadme.indexOf('<!-- Package-specific documentation -->')
+  const documentation =
+    documentationStart < 0 ? '' : `\n${previousReadme.slice(documentationStart)}`
+
   mkdirSync(packageDir, { recursive: true })
   writeFileSync(
     readmePath,
@@ -102,7 +108,7 @@ for (const dirName of packageDirs) {
       packageName: packageJson.name,
       description: packageJson.description,
       dirName
-    }),
+    }) + documentation,
     'utf8'
   )
 }

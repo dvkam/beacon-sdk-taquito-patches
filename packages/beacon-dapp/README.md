@@ -23,6 +23,8 @@ This package is published from the ECAD-maintained Beacon SDK repository:
 - Taquito consumes this package line directly where Beacon patches are needed
 - Release notes, package policy, and the current package list live in the repository README
 
+<!-- Package-specific documentation -->
+
 ## Restoring persisted dApp sessions
 
 Applications should restore Beacon connection state from the SDK, for example by
