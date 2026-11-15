@@ -1,13 +1,29 @@
-#
-.history
-.dockerignore
-.DS_Store
-.gitignore
-.nyc_output
-.prettierignore
-.prettierrc
-coverage
-dist
-node_modules
-npm-ci-publish-beta-only.sh
-npm-ci-publish.sh
+# Dependencies and generated build, coverage and browser artifacts.
+**/node_modules/**
+**/dist/**
+**/coverage/**
+**/test-results/**
+**/playwright-report/**
+/webpack_builds/**
+/e2e/output/**
+/.history/**
+/local-tarballs/**
+/lib/**
+
+# TypeDoc output shares docs/ with authored top-level Markdown guides.
+/docs/*
+!/docs/*.md
+
+# Package-manager and snapshot output is owned by its generator.
+**/package-lock.json
+**/__snapshots__/**
+**/*.min.js
+**/*.min.css
+
+# SDK source emitted by scripts/generate-wallet-list.mjs.
+packages/*/src/ui/alert/alert-templates.ts
+packages/*/src/ui/alert/wallet-lists.ts
+packages/*/src/ui/toast/toast-templates.ts
+
+# Package documentation emitted by scripts/sync-package-readmes.mjs.
+/packages/*/README.md

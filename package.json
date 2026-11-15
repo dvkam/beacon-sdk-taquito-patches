@@ -34,7 +34,7 @@
     "webpack:sdk": "webpack --mode=development --config webpack.config.js --entry=./packages/beacon-sdk/dist/cjs/index.js --output-path ./webpack_builds/sdk && terser --ecma=12 ./webpack_builds/sdk/main.js -o ./packages/beacon-sdk/dist/walletbeacon.min.js && cp ./packages/beacon-sdk/dist/walletbeacon.min.js ./examples/walletbeacon.min.js",
     "webpack:dapp": "webpack --mode=development --entry=./packages/beacon-dapp/dist/cjs/index.js --output-path ./webpack_builds/dapp && terser --ecma=12 ./webpack_builds/dapp/main.js -o ./packages/beacon-dapp/dist/walletbeacon.dapp.min.js",
     "webpack:wallet": "webpack --mode=development --entry=./packages/beacon-wallet/dist/cjs/index.js --output-path ./webpack_builds/wallet && terser --ecma=12 ./webpack_builds/wallet/main.js -o ./packages/beacon-wallet/dist/walletbeacon.wallet.min.js",
-    "prettier": "prettier --write 'src/**/*' '**/src/**/*' 'docs/**/*.md' 'example-dapp.html' 'example-wallet.html'",
+    "prettier": "npm run format --",
     "lint": "eslint 'packages/*/src/**/*.{ts,tsx}'",
     "lint:fix": "eslint 'packages/*/src/**/*.{ts,tsx}' --fix",
     "lint:new": "node scripts/lint-new-findings.mjs",
@@ -54,7 +54,9 @@
     "build:ui": "cd packages/beacon-ui && npm run tsc && cd ../.. && npm run webpack:sdk",
     "test:node-consumers": "node scripts/test-node-consumers.mjs",
     "lint:baseline": "node scripts/lint-new-findings.mjs --update-baseline",
-    "lint:tooling": "eslint --config eslint.tooling.config.mjs --max-warnings 0 ."
+    "lint:tooling": "eslint --config eslint.tooling.config.mjs --max-warnings 0 .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "author": "ECAD Labs",
   "dependencies": {
