@@ -50,7 +50,7 @@ function parseWallet(
 }
 
 export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
-  const { ui, dapp } = getBeaconMessages()
+  const { ui, dapp, aria } = getBeaconMessages()
   const [showMoreInfo, setShowMoreInfo] = useState<boolean>(true)
   const hasWalletObject = /\{\{\s*wallet\s*\}\}/.test(props.label) && Boolean(props.walletInfo)
   const localizedSentPrefix = dapp.requestSent.replace(/\{\{\s*wallet\s*\}\}/g, '').trim()
@@ -99,8 +99,22 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
     }
   }
 
+  const resolvedAnnouncement = [
+    hasWalletObject && props.walletInfo
+      ? props.label.replace(/\{\{\s*wallet\s*\}\}/g, props.walletInfo.name)
+      : props.label,
+    ...(props.actions && showMoreInfo ? props.actions.map((a) => a.text) : [])
+  ]
+    .map((s) => s.replace(/\s+/g, ' ').trim())
+    .filter((s) => s.length > 0)
+    .join('. ')
+
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      aria-label={resolvedAnnouncement}
       onAnimationEnd={handleAnimationEnd}
       style={{
         transform: `translate3d(${x}px, ${y}px, 0)`,
@@ -123,15 +137,23 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
         {!isMobileOS(window) && props.openWalletAction && (
           <div
             className="toast-action-button"
+            role="button"
+            tabIndex={0}
             onClick={() =>
               runUICallback(() => props.openWalletAction?.(), 'Toast', 'openWalletAction')
             }
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                runUICallback(() => props.openWalletAction?.(), 'Toast', 'openWalletAction')
+              }
+            }}
           >
             {ui.openWallet}
           </div>
         )}
 
-        <ButtonIcon onClick={props.onClickClose}>
+        <ButtonIcon ariaLabel={aria.closeToast} onClick={props.onClickClose}>
           <CloseIcon />
         </ButtonIcon>
       </div>
@@ -146,9 +168,17 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
               {action.actionText && (
                 <div
                   className="toast-action-button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() =>
                     runUICallback(() => action.actionCallback?.(), 'Toast', 'actionCallback')
                   }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      runUICallback(() => action.actionCallback?.(), 'Toast', 'actionCallback')
+                    }
+                  }}
                 >
                   {action.actionText}
                 </div>
