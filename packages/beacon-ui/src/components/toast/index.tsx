@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { getBeaconMessages, interpolateBeaconMessage } from '@ecadlabs/beacon-types'
 import { CloseIcon } from '../icons'
 import { Loader } from '../loader'
 import { isMobileOS } from '../../utils/platform'
@@ -16,31 +17,47 @@ function parseWallet(
     type?: string
   }
 ) {
+  const { aria } = getBeaconMessages()
   const regex = /({{\s*wallet\s*}})/g
   const parts = inputString.split(regex)
 
   return parts.map((part, index) => {
     if (part.match(regex)) {
       return (
-        <React.Fragment key={index}>
-          <img draggable={false} src={walletInfo.icon} alt={`${walletInfo.name} icon`} />
-          <h3>{walletInfo.name}</h3>
-        </React.Fragment>
+        <span key={index} className="toast-wallet-inline">
+          {walletInfo.icon && (
+            <img
+              draggable={false}
+              src={walletInfo.icon}
+              alt={interpolateBeaconMessage(aria.walletIconAlt, { wallet: walletInfo.name })}
+            />
+          )}
+          <h3>
+            <bdi>{walletInfo.name}</bdi>
+          </h3>
+        </span>
       )
-    } else {
+    } else if (part.length > 0) {
       return (
         <p key={index} className="toast-label">
           {part}
         </p>
       )
     }
+
+    return null
   })
 }
 
 export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
+  const { ui, dapp } = getBeaconMessages()
   const [showMoreInfo, setShowMoreInfo] = useState<boolean>(true)
-  const hasWalletObject = props.label.includes('{{wallet}}') && props.walletInfo
-  const isRequestSentToast = props.label.includes('Request sent to')
+  const hasWalletObject = /\{\{\s*wallet\s*\}\}/.test(props.label) && Boolean(props.walletInfo)
+  const localizedSentPrefix = dapp.requestSent.replace(/\{\{\s*wallet\s*\}\}/g, '').trim()
+  const isRequestSentToast =
+    props.state === 'loading' ||
+    props.label.includes('Request sent to') ||
+    (localizedSentPrefix.length > 0 && props.label.includes(localizedSentPrefix))
 
   // Track the toast position (x, y)
   const [[x, y], setPosition] = useState<[number, number]>([0, 0])
@@ -97,8 +114,11 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
     >
       <div className="toast-header">
         <Loader />
-        {hasWalletObject && props.walletInfo && <>{parseWallet(props.label, props.walletInfo)}</>}
-        {!hasWalletObject && <p className="toast-label">{props.label}</p>}
+        {hasWalletObject && props.walletInfo ? (
+          <div className="toast-content">{parseWallet(props.label, props.walletInfo)}</div>
+        ) : (
+          <p className="toast-label toast-content">{props.label}</p>
+        )}
 
         {!isMobileOS(window) && props.openWalletAction && (
           <div
@@ -107,7 +127,7 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
               runUICallback(() => props.openWalletAction?.(), 'Toast', 'openWalletAction')
             }
           >
-            Open Wallet
+            {ui.openWallet}
           </div>
         )}
 
