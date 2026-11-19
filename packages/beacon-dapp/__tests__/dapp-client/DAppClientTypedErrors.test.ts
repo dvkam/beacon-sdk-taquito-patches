@@ -24,7 +24,6 @@ import {
   BlockchainRequestV3,
   ConnectionContext,
   ExtendedPostMessagePairingResponse,
-  ErrorResponse,
   NetworkType,
   Origin,
   PeerInfoType,
@@ -84,7 +83,7 @@ class ControlledTransport extends Transport<
     )
   }
   async listen(): Promise<void> {}
-  async receive(message: ErrorResponse): Promise<void> {
+  async receive(message: unknown): Promise<void> {
     await this.notifyListeners(await new Serializer().serialize(message), context)
   }
 }
@@ -254,6 +253,18 @@ describe('DAppClient typed error rejections', () => {
       }
     )
 
+    it('retains an uncloneable diagnostic by identity for a direct request', async () => {
+      const failure = { message: 'storage read failed', retry() {} }
+      vi.spyOn(dapp, 'getActiveAccount').mockRejectedValueOnce(failure)
+      const error: unknown = await dapp
+        .requestOperation({ operationDetails: [] })
+        .catch((error: unknown) => error)
+      if (!isBeaconError(error)) throw new Error('Expected direct request error')
+      expect(error).toBeInstanceOf(UnknownBeaconError)
+      expect(error.errorData).toBe(failure)
+      expect(transport.send).not.toHaveBeenCalled()
+    })
+
     it.each(['rate limit reached', 'No permissions to send this request to wallet!'])(
       'preserves unrelated V3 validator errors matching admission text: %s',
       async (message) => {
@@ -391,6 +402,68 @@ describe('DAppClient typed error rejections', () => {
   })
 
   describe('wallet error response rejections', () => {
+    it.each(['2', '3'] as const)(
+      'rejects a public V%s request when the wallet error omits senderId',
+      async (version) => {
+        const succeeded = vi.fn()
+        const failed = vi.fn()
+        const handleResponse = vi.fn()
+        await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_SUCCESS, succeeded)
+        await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, failed)
+        dapp.addBlockchain({
+          identifier: 'senderless-chain',
+          async validateRequest() {},
+          handleResponse,
+          async getAccountInfosFromPermissionResponse() {
+            return []
+          },
+          async getWalletLists() {
+            return { extensionList: [], desktopList: [], webList: [], iOSList: [] }
+          }
+        })
+        const pending = (
+          version === '2'
+            ? dapp.requestOperation({ operationDetails: [] })
+            : dapp.request({
+                type: BeaconMessageType.BlockchainRequest,
+                blockchainIdentifier: 'senderless-chain',
+                accountId: account.accountIdentifier,
+                blockchainData: { type: 'operation', scope: 'operation_request' }
+              })
+        ).then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error })
+        )
+        await vi.advanceTimersByTimeAsync(0)
+        const id = await getLastSentRequestId()
+        const payload = {
+          type: BeaconMessageType.Error,
+          errorType: BeaconErrorType.NOT_GRANTED_ERROR,
+          errorData: { detail: 'wallet declined' }
+        }
+        await transport.receive(
+          version === '2' ? { id, version, ...payload } : { id, version, message: payload }
+        )
+        const outcome = await pending
+        expect(outcome).toHaveProperty('error')
+        if (!('error' in outcome) || !isBeaconError(outcome.error))
+          throw new Error('Expected senderless wallet rejection')
+        expect(outcome.error).toBeInstanceOf(NotGrantedBeaconError)
+        expect(outcome.error).toMatchObject({
+          id,
+          version,
+          senderId: '',
+          errorOrigin: 'wallet',
+          errorData: payload.errorData
+        })
+        expect(isRequestErrorResponse(outcome.error)).toBe(true)
+        expect(succeeded).not.toHaveBeenCalled()
+        expect(handleResponse).not.toHaveBeenCalled()
+        if (version === '2') expect(failed).toHaveBeenCalledTimes(1)
+        expect(dapp['requestTracker'].size).toBe(0)
+      }
+    )
+
     it('rejects with NotGrantedBeaconError when wallet replies with NOT_GRANTED_ERROR and keeps event errorResponse plain', async () => {
       const onOperationError = vi.fn()
       await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, onOperationError)

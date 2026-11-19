@@ -1,5 +1,6 @@
 import {
   CommunicationClient,
+  isBeaconError,
   LocalStorage,
   PeerManager,
   Serializer,
@@ -82,7 +83,7 @@ class ControlledTransport extends Transport<
 
   async listen(): Promise<void> {}
 
-  async receive(message: BeaconMessage | BeaconMessageWrapper<{ type: unknown }>): Promise<void> {
+  async receive(message: unknown): Promise<void> {
     await this.notifyListeners(await new Serializer().serialize(message), connectionInfo)
   }
 }
@@ -361,6 +362,10 @@ describe('Response metadata preparation', () => {
       const expected = expectedError(pending.id, BeaconErrorType.UNKNOWN_ERROR)
       expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expected })
       await expect(pending.outcome).resolves.toEqual({ error: expected })
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected metadata failure diagnostic')
+      expect(outcome.error.errorData).toBe(storageError)
       expect(deliveryErrors).toEqual([])
       expect(incoming.map((record) => record.disposition)).toEqual([undefined, 'handled'])
       expect(failed).toHaveBeenCalledExactlyOnceWith(

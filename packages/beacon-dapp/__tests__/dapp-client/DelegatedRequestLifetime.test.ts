@@ -20,8 +20,11 @@ import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 import { BeaconEvent } from '../../src/events'
 import { ResponseMessage } from '../../src/dapp-client/request-error'
+import { parseBroadcastMessage } from '../../src/dapp-client/broadcast-messages'
+import { isValidIncomingResponseMessage } from '../../src/dapp-client/message-observer'
 
 const bus = vi.hoisted(() => ({
+  cloneErrors: [] as unknown[],
   endpoints: [] as {
     leader: boolean
     receive: (message: unknown) => Promise<void>
@@ -47,7 +50,11 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
     async getLeadership() {}
     async close() {}
     postMessage(message: unknown) {
-      this.endpoint.sent.push(message)
+      try {
+        this.endpoint.sent.push(structuredClone(message))
+      } catch (error) {
+        bus.cloneErrors.push(error)
+      }
     }
   },
   IndexedDBStorage: class {
@@ -163,6 +170,7 @@ describe('Delegated request lifetime', () => {
     vi.useFakeTimers()
     localStorage.clear()
     bus.endpoints.length = 0
+    bus.cloneErrors.length = 0
     delivered.clear()
     deliveryErrors.length = 0
     ready = new ExposedPromise<boolean>()
@@ -228,6 +236,7 @@ describe('Delegated request lifetime', () => {
     vi.clearAllTimers()
     vi.useRealTimers()
     expect(deliveryErrors).toEqual([])
+    expect(bus.cloneErrors).toEqual([])
   })
 
   function deliverTo(endpoint: number, message: unknown) {
@@ -322,31 +331,109 @@ describe('Delegated request lifetime', () => {
     }
   )
 
-  it('preserves unknown envelope diagnostics on delegated preparation rejection', async () => {
-    const response = {
-      id: 'preparation-id',
-      senderId: 'wallet',
-      version: '2',
-      type: BeaconMessageType.Error,
-      errorOrigin: 'wallet',
-      errorType: 'FUTURE_WALLET_ERROR',
-      errorData: { detail: 'preparation diagnostic' }
+  it.each(['2', '3'] as const)(
+    'rejects a V%s follower when the wallet error has no sender',
+    async (version) => {
+      const pending = await begin(version)
+      const payload = {
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.NOT_GRANTED_ERROR
+      }
+      const response =
+        version === '2'
+          ? { id: pending.id, version, ...payload }
+          : { id: pending.id, version, message: payload }
+      if (!isValidIncomingResponseMessage(response))
+        throw new Error('Expected routable legacy error')
+      await receiveWallet(response)
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          id: pending.id,
+          version,
+          senderId: '',
+          errorOrigin: 'wallet',
+          errorType: payload.errorType
+        }
+      })
     }
-    vi.spyOn(leader, 'checkPermissions').mockRejectedValueOnce(response)
+  )
+
+  it.each(['2', '3'] as const)(
+    'preserves V%s unknown envelope diagnostics on delegated preparation rejection',
+    async (version) => {
+      const response = {
+        id: 'preparation-id',
+        senderId: 'wallet',
+        version,
+        type: BeaconMessageType.Error,
+        errorOrigin: 'wallet',
+        errorType: 'FUTURE_WALLET_ERROR',
+        errorData: { detail: 'preparation diagnostic' }
+      }
+      vi.mocked(leader.init).mockRejectedValueOnce(response)
+      const pending = await begin(version)
+      expect(parseBroadcastMessage(bus.endpoints[0].sent[0])).toHaveProperty('kind', 'response')
+      await deliverResponses()
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected delegated Beacon error')
+      expect(outcome.error).toMatchObject({
+        id: pending.id,
+        senderId: 'wallet',
+        version,
+        errorOrigin: 'wallet',
+        errorType: BeaconErrorType.UNKNOWN_ERROR
+      })
+      expect(outcome.error.errorData).toMatchObject(response)
+      if (version === '2')
+        expect(isRequestErrorResponse(followerFailed.mock.calls[0][0].errorResponse)).toBe(true)
+    }
+  )
+
+  it.each(['2', '3'] as const)(
+    'settles a V%s follower after an uncloneable preparation failure',
+    async (version) => {
+      const failure = { message: 'storage read failed', retry() {} }
+      vi.mocked(leader.init).mockRejectedValueOnce(failure)
+      const pending = await begin(version)
+      expect(bus.cloneErrors).toEqual([])
+      expect(parseBroadcastMessage(bus.endpoints[0].sent[0])).toHaveProperty('kind', 'response')
+      await deliverResponses()
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected clone-safe follower rejection')
+      expect(outcome.error).toBeInstanceOf(UnknownBeaconError)
+      expect(outcome.error).toMatchObject({ id: pending.id, errorOrigin: 'local' })
+      expect(outcome.error.errorData).toEqual({
+        message: 'storage read failed',
+        diagnostic: 'Uncloneable request diagnostic'
+      })
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+      await deliverResponses()
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it('preserves cloneable preparation diagnostics without reducing their data', async () => {
+    const failure = {
+      message: 'storage read failed',
+      details: new Map([['attempt', 2]]),
+      related: new Set(['permission-cache'])
+    }
+    vi.mocked(leader.init).mockRejectedValueOnce(failure)
     const pending = await begin('2')
     await deliverResponses()
+    expect(pending.settled).toHaveBeenCalledTimes(1)
     const outcome = await pending.outcome
     if (!('error' in outcome) || !isBeaconError(outcome.error))
-      throw new Error('Expected delegated Beacon error')
-    expect(outcome.error).toMatchObject({
-      id: pending.id,
-      senderId: 'wallet',
-      version: '2',
-      errorOrigin: 'wallet',
-      errorType: BeaconErrorType.UNKNOWN_ERROR
-    })
-    expect(outcome.error.errorData).toMatchObject(response)
-    expect(isRequestErrorResponse(followerFailed.mock.calls[0][0].errorResponse)).toBe(true)
+      throw new Error('Expected follower diagnostic')
+    expect(outcome.error.errorData).toEqual(failure)
+    expect(outcome.error.errorData).not.toBe(failure)
+    expect(bus.cloneErrors).toEqual([])
   })
 
   it('does not let a tab response settle a request sent directly by this tab', async () => {
