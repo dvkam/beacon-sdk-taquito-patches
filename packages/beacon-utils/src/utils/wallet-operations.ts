@@ -2,9 +2,11 @@ import type { WalletPartialTezosOperation } from '@ecadlabs/beacon-types'
 import { packDataBytes, type MichelsonData } from '@taquito/michel-codec'
 
 declare const validatedWalletOperation: unique symbol
-export type ValidatedWalletPartialTezosOperation = WalletPartialTezosOperation & {
-  readonly [validatedWalletOperation]: true
+declare class WalletOperationValidation {
+  private readonly [validatedWalletOperation]: true
 }
+export type ValidatedWalletPartialTezosOperation = WalletPartialTezosOperation &
+  WalletOperationValidation
 
 type Parser = (value: unknown, strict: boolean, depth: number) => unknown
 type Field = Parser | { parse: Parser; optional: true }

@@ -31,7 +31,8 @@ properties, and rejects dApp-supplied `source`, `fee` and `counter`. A successfu
 guard narrows to `ValidatedWalletPartialTezosOperation`, a type-only export from
 `@ecadlabs/beacon-utils/wallet` assignable to the public wire type. Libraries can
 publish inferred guarded return values and filtered arrays in their declarations.
-The validation symbol stays private and validation adds no property to the input.
+Validation adds no property to the input. A spread copy needs its own guard check
+before it can be used as a validated operation.
 A failed guard does not exclude the wire type, because structurally assignable
 operations can still have rejected extra properties. Optional fields must be absent
 or contain their declared value; a present `undefined` is rejected, including in
