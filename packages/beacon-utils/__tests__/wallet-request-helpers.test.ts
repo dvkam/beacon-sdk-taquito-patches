@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SigningType } from '@ecadlabs/beacon-types'
+import { packDataBytes } from '@taquito/michel-codec'
 import { managerOperations as operations } from './type-fixtures/manager-operations'
 import {
   packMessageText,
@@ -196,6 +197,61 @@ describe('wallet manager operation helpers', () => {
 })
 
 describe('signing payload inspection', () => {
+  it.each(['', 'hello', 'é', '🌍', '\uFEFFa'])(
+    'packs scalar text identically to the codec for %j',
+    (text) => {
+      expect(packMessageText(text)).toBe(packDataBytes({ string: text }).bytes)
+    }
+  )
+
+  it.each(['', '00', 'ff00ab'])('retains canonical scalar byte framing for %j', (bytes) => {
+    const payload = packDataBytes({ bytes }).bytes
+    expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({
+      valid: true,
+      normalizedHex: payload
+    })
+  })
+
+  it.each([
+    '050007',
+    '05010000000161',
+    '050200000002030b',
+    '05030b',
+    '05040b000000022561',
+    '0505090306',
+    '0506090306000000022561',
+    '050707030b030b',
+    '050807030b030b000000022561',
+    '05090700000006030b030b030b00000000',
+    '050a0000000100',
+    '05050905090a000000020000'
+  ])('retains canonical Micheline tag and nested decoding for %s', (payload) => {
+    expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({
+      valid: true,
+      validation: 'canonical_micheline'
+    })
+  })
+
+  it('supports a flat string at the encoded byte limit', () => {
+    const text = 'a'.repeat(1024 * 1024 - 6)
+    const payload = packMessageText(text)
+    expect(payload.length / 2).toBe(1024 * 1024)
+    expect(payload.startsWith('0501000ffffa')).toBe(true)
+    expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({
+      valid: true,
+      decodedText: text
+    })
+  })
+
+  it('supports a flat byte value at the encoded byte limit', () => {
+    const payload = '050a000ffffa' + 'ab'.repeat(1024 * 1024 - 6)
+    expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({
+      valid: true,
+      normalizedHex: payload
+    })
+    expect(() => packMessageText('a'.repeat(1024 * 1024 - 5))).toThrow(/1 MiB/)
+  })
+
   it('preserves BOM-leading text and recognizes packed previews for explicit RAW requests', () => {
     expect(packMessageText('\uFEFFa')).toBe('050100000004efbbbf61')
     expect(inspectSignPayload('050100000004efbbbf61', SigningType.MICHELINE)).toMatchObject({

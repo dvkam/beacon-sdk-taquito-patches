@@ -71,3 +71,46 @@ test('the installed strict guard rejects own undefined optional fields at every 
   assert.equal(isPartialTezosOperation({ kind: 'delegation' }), true)
   assert.equal(isPartialTezosOperation({ kind: 'delegation', delegate: 'tz1delegate' }), true)
 })
+
+test('the installed preview bounds repeated codec work and preserves small nested data', () => {
+  const { inspectSignPayload } = require('@ecadlabs/beacon-utils/wallet')
+  const { SigningType } = require('@ecadlabs/beacon-types')
+  for (const payload of ['0505090306', '05050905090a000000020000']) {
+    assert.equal(inspectSignPayload(payload, SigningType.MICHELINE).valid, true)
+  }
+  const codec = require('@taquito/michel-codec')
+  const unpack = codec.unpackDataBytes
+  let calls = 0
+  codec.unpackDataBytes = () => {
+    calls++
+    throw new Error('Over-budget payload must not reach the decoder')
+  }
+  try {
+    const payload = '05' + '0509'.repeat(18) + '0306'
+    assert.equal(inspectSignPayload(payload, SigningType.MICHELINE).valid, false)
+    assert.equal(calls, 0)
+    assert.equal(inspectSignPayload(payload, SigningType.RAW).kind, 'raw_bytes')
+    assert.equal(calls, 0)
+  } finally {
+    codec.unpackDataBytes = unpack
+  }
+})
+
+test('installed scalar framing matches the codec and supports the encoded byte limit', () => {
+  const { packMessageText, inspectSignPayload } = require('@ecadlabs/beacon-utils/wallet')
+  const { packDataBytes } = require('@taquito/michel-codec')
+  const { SigningType } = require('@ecadlabs/beacon-types')
+  for (const text of ['', 'hello', 'é', '🌍', '\uFEFFa']) {
+    assert.equal(packMessageText(text), packDataBytes({ string: text }).bytes)
+  }
+  for (const bytes of ['', '00', 'ff00ab']) {
+    const payload = packDataBytes({ bytes }).bytes
+    assert.equal(inspectSignPayload(payload, SigningType.MICHELINE).valid, true)
+  }
+  const text = 'a'.repeat(1024 * 1024 - 6)
+  const payload = packMessageText(text)
+  assert.equal(payload.length / 2, 1024 * 1024)
+  assert.equal(inspectSignPayload(payload, SigningType.MICHELINE).decodedText, text)
+  const bytePayload = '050a000ffffa' + 'ab'.repeat(1024 * 1024 - 6)
+  assert.equal(inspectSignPayload(bytePayload, SigningType.MICHELINE).valid, true)
+})
