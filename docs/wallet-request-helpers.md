@@ -27,7 +27,10 @@ Importing the wallet subpath without its peer reports a missing-codec module err
 
 `WalletPartialTezosOperation` is exported by `@ecadlabs/beacon-types`.
 `isPartialTezosOperation(value)` checks its supported shapes, rejects unknown
-properties, and rejects dApp-supplied `source`, `fee` and `counter`.
+properties, and rejects dApp-supplied `source`, `fee` and `counter`. A successful
+guard narrows to a validated subtype assignable to the public wire type. A failed
+guard does not exclude that wire type, because structurally assignable operations
+can still have rejected extra properties. Validation adds no property to the input.
 
 `sanitizePartialTezosOperations(operations)` creates a fresh array and nested
 objects. It removes unknown properties and `source`, `fee` and `counter`.
@@ -62,6 +65,10 @@ the check does not validate each primitive's arity or Michelson semantics.
 Micheline integers retain accepted decimal spellings such as "01" or "-0"; the
 codec and node canonicalize them when encoding. Canonical spelling is required
 only for the manager amounts and optional gas/storage limits described above.
+For example, Taquito can send `transfer_ticket` with numeric `ticket_amount: 3`.
+These helpers reject that value and require `ticket_amount: "3"`, matching Beacon's
+wire type. Applications adapting Taquito requests must account for this boundary
+before using the helpers.
 The existing PVM and refutation enums are public exports for constructing the
 advanced manager variants.
 

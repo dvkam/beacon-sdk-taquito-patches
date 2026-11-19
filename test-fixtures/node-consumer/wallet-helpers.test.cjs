@@ -40,3 +40,14 @@ test('public wallet helpers inspect and sanitize installed package values', asyn
     [{ kind: 'transaction', amount: '1', destination: 'tz1destination' }]
   )
 })
+
+test('the strict operation guard rejects structural extras without mutating inputs', () => {
+  const { isPartialTezosOperation } = require('@ecadlabs/beacon-utils/wallet')
+  const operation = { kind: 'delegation', metadata: { label: 'untrusted' } }
+  assert.equal(isPartialTezosOperation(operation), false)
+  assert.deepEqual(operation, { kind: 'delegation', metadata: { label: 'untrusted' } })
+
+  const valid = { kind: 'delegation' }
+  assert.equal(isPartialTezosOperation(valid), true)
+  assert.deepEqual(Reflect.ownKeys(valid), ['kind'])
+})
