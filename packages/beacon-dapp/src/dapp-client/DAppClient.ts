@@ -166,6 +166,7 @@ import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import {
   classifyLateResponse,
+  diagnosticMessage,
   errorEventResponse,
   isBeaconError,
   isErrorResponse,
@@ -410,7 +411,7 @@ export class DAppClient extends Client {
 
   // Object ownership keeps receipt times through async preparation without retaining settled IDs.
   private readonly responseReceivedAt = new WeakMap<object, number>()
-  private readonly admissionErrors = new WeakSet<BeaconError>()
+  private readonly admissionErrors = new WeakSet()
 
   private readonly messageObserver = new MessageObserver()
 
@@ -718,7 +719,6 @@ export class DAppClient extends Client {
       // The WalletConnect adapter builds every message it delivers from WalletConnect results, so
       // the marks it sets are trusted. Messages relayed between tabs arrive without a transport.
       const fromAdapter = transportType === TransportType.WALLETCONNECT
-      const isV3WrappedMessage = message.version === '3' && 'message' in message
 
       const typedMessage = responseOutput(message)
 
@@ -764,11 +764,11 @@ export class DAppClient extends Client {
         this.clearPendingRequestAckTimer(message.id, request.key)
       }
 
-      let appMetadata = responseAppMetadata(message)
-
-      if (!appMetadata && isV3WrappedMessage) {
-        appMetadata = await this.loadResponseAppMetadata(message)
-      }
+      const appMetadata = responseAppMetadata(message)
+      const metadata =
+        !appMetadata && this.needsResponseMetadata(message, typedMessage.type)
+          ? await this.loadResponseAppMetadata(message)
+          : { appMetadata }
 
       if (!request || !this.isRequestCurrent(request.key)) {
         // The deadline can fire while V3 metadata loads. The response is then late, not unknown.
@@ -789,6 +789,12 @@ export class DAppClient extends Client {
         return
       }
 
+      if ('cause' in metadata) {
+        this.rejectMetadataFailure(request.key, metadata.cause, preparing === true, receivedAt)
+        this.messageObserver.notifyIncoming(transportType, message, 'handled')
+
+        return
+      }
       if (typedMessage.type === BeaconMessageType.Acknowledge) {
         return this.handleResponseAcknowledgement({
           key: request.key,
@@ -806,7 +812,9 @@ export class DAppClient extends Client {
         response: { message, connectionInfo },
         receivedAt,
         fromAdapter,
-        preparation: preparing ? { kind: 'permission', appMetadata } : { kind: 'ordinary' },
+        preparation: preparing
+          ? { kind: 'permission', appMetadata: metadata.appMetadata }
+          : { kind: 'ordinary' },
         transportType
       })
     }
@@ -4181,7 +4189,7 @@ export class DAppClient extends Client {
     const typedRequest = request as BeaconRequestInputMessage
     const requestError = rawError as ErrorResponse
     logger.time(false, logId)
-    if (isBeaconError(rawError) && this.admissionErrors.has(rawError)) {
+    if (typeof rawError === 'object' && rawError !== null && this.admissionErrors.has(rawError)) {
       return
     }
     await this.handleRequestError(typedRequest, requestError, resetPermissionState).catch(
@@ -4212,28 +4220,32 @@ export class DAppClient extends Client {
    * for backward compatibility.
    */
   private toPublicError(error: unknown): unknown {
-    if (isBeaconError(error)) {
-      return error
+    return this.knownRequestError(error) ?? error
+  }
+
+  private knownRequestError(error: unknown): BeaconError | undefined {
+    try {
+      if (isBeaconError(error)) {
+        return error
+      }
+    } catch {
+      // A proxy may throw during prototype inspection.
+      return undefined
     }
     const response = normalizeErrorResponse(error)
-    if (response) {
-      return toBeaconError(response)
-    }
 
-    return error
+    return response ? toBeaconError(response) : undefined
   }
 
   private toPublicRequestError(error: unknown): BeaconError {
-    const normalized = this.toPublicError(error)
-    if (isBeaconError(normalized)) {
-      return normalized
-    }
-
-    return new UnknownBeaconError({
-      ...(error instanceof Error ? { description: error.message } : {}),
-      errorOrigin: 'local',
-      errorData: error
-    })
+    return (
+      this.knownRequestError(error) ??
+      new UnknownBeaconError({
+        description: diagnosticMessage(error, 'error'),
+        errorOrigin: 'local',
+        errorData: error
+      })
+    )
   }
 
   /**
@@ -5539,28 +5551,64 @@ export class DAppClient extends Client {
     }
   }
 
+  private needsResponseMetadata(message: ResponseMessage, type: unknown): boolean {
+    return message.version === '3' && 'message' in message && type !== BeaconMessageType.Error
+  }
+
+  private rejectMetadataFailure(
+    key: RequestKey,
+    errorData: unknown,
+    preparing: boolean,
+    receivedAt: number
+  ): void {
+    const error = localError({
+      id: key.id,
+      type: BeaconMessageType.Error,
+      errorType: BeaconErrorType.UNKNOWN_ERROR,
+      senderId: '',
+      version: '2',
+      errorData
+    })
+    this.responseReceivedAt.set(error, receivedAt)
+    if (preparing) {
+      this.requestTracker.preparationFailed(key, error)
+    } else {
+      this.requestTracker.reject(key, error)
+    }
+  }
+
   private async loadResponseAppMetadata(
     message: ResponseMessage
-  ): Promise<AppMetadata | undefined> {
-    const storedMetadata = await Promise.all([
-      this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
-      this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
-      this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
-    ])
+  ): Promise<{ appMetadata: AppMetadata | undefined } | { cause: unknown }> {
+    try {
+      const storedMetadata = await Promise.all([
+        this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
+        this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
+        this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
+      ])
 
-    for (const peers of storedMetadata) {
-      const peer = peers.find(
-        (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
-      )
-      if (!peer) {
-        continue
+      for (const peers of storedMetadata) {
+        const peer = peers.find(
+          (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
+        )
+        if (!peer) {
+          continue
+        }
+        const wallet = await this.getWalletInfo()
+
+        return { appMetadata: { name: peer.name, senderId: message.senderId, icon: wallet.icon } }
       }
-      const wallet = await this.getWalletInfo()
 
-      return { name: peer.name, senderId: message.senderId, icon: wallet.icon }
+      return { appMetadata: undefined }
+    } catch (cause) {
+      // An acknowledgement is advisory. A failed lookup leaves the request's
+      // deadline and wallet response ownership intact.
+      if (responseOutput(message).type === BeaconMessageType.Acknowledge) {
+        throw cause
+      }
+
+      return { cause }
     }
-
-    return undefined
   }
 
   private async handleResponseAcknowledgement({
@@ -5674,17 +5722,7 @@ export class DAppClient extends Client {
         try {
           await this.appMetadataManager.addAppMetadata(preparation.appMetadata)
         } catch (errorData) {
-          this.requestTracker.preparationFailed(
-            key,
-            localError({
-              id: message.id,
-              type: BeaconMessageType.Error,
-              errorType: BeaconErrorType.UNKNOWN_ERROR,
-              senderId: '',
-              version: '2',
-              errorData
-            })
-          )
+          this.rejectMetadataFailure(key, errorData, true, receivedAt)
           this.messageObserver.notifyIncoming(transportType, message, 'handled')
 
           return

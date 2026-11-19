@@ -8,7 +8,7 @@ import {
   ConnectionContext,
   Origin
 } from '@ecadlabs/beacon-types'
-import { ResponseMessage } from './request-error'
+import { diagnosticMessage, ResponseMessage } from './request-error'
 
 /** Only the routing contract is owned here; operation data is validated by the wallet. */
 export interface ForwardedV2Request {
@@ -232,25 +232,62 @@ export const parseBroadcastMessage = (value: unknown): BroadcastPacket | undefin
   }
 }
 
-/** Local diagnostics retain identity until they cross into another tab. */
+// JSON.stringify omits properties, coerces special values, and invokes toJSON.
+// Reject values that the localStorage channel would silently change.
+function hasJsonFields(value: object): boolean {
+  const array = Array.isArray(value)
+  const prototype: object | null = Object.getPrototypeOf(value)
+  if (!array && prototype !== null && Object.getPrototypeOf(prototype) !== null) {
+    return false
+  }
+  const keys = Reflect.ownKeys(value)
+  if (array && keys.length !== value.length + 1) {
+    return false
+  }
+
+  return keys.every((key, index) => {
+    if (array && key === 'length') {
+      return true
+    }
+    const field = Object.getOwnPropertyDescriptor(value, key)
+
+    return (
+      typeof key === 'string' &&
+      (!array || key === String(index)) &&
+      field?.enumerable === true &&
+      'value' in field
+    )
+  })
+}
+
+function jsonDiagnosticField(this: object, key: string, value: unknown): unknown {
+  const field = Object.getOwnPropertyDescriptor(this, key)
+  if (
+    field &&
+    'value' in field &&
+    Object.is(field.value, value) &&
+    (value === null ||
+      typeof value === 'string' ||
+      typeof value === 'boolean' ||
+      (typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0)) ||
+      (typeof value === 'object' && hasJsonFields(value)))
+  ) {
+    return value
+  }
+
+  throw new TypeError('Request diagnostic has no lossless JSON representation')
+}
+
+/** Detach diagnostics before handing a terminal reply to any broadcast-channel transport. */
 export const broadcastErrorData = (value: unknown): unknown => {
   try {
-    return structuredClone(value)
+    return JSON.parse(JSON.stringify(value, jsonDiagnosticField))
   } catch {
-    const summary = { message: 'The request diagnostic could not be copied between tabs.' }
-    try {
-      if (
-        typeof value === 'object' &&
-        value !== null &&
-        'message' in value &&
-        typeof value.message === 'string'
-      ) {
-        summary.message = value.message
-      }
-    } catch {
-      // Reading an application-supplied diagnostic can itself throw.
+    return {
+      message:
+        diagnosticMessage(value, 'diagnostic')?.slice(0, 256) ??
+        'The request diagnostic could not be copied between tabs.',
+      diagnostic: 'Uncloneable request diagnostic'
     }
-
-    return { ...summary, diagnostic: 'Uncloneable request diagnostic' }
   }
 }

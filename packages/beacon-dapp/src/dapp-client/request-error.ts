@@ -191,28 +191,50 @@ const normalizeErrorPayload = (
   }
 }
 
-/** Normalize verified error envelopes while retaining unfamiliar wallet diagnostics. */
-export const normalizeErrorResponse = (
-  value: unknown,
-  diagnostic: unknown = value
-): RequestErrorResponse | undefined => {
-  if (
-    !isErrorMessage(value) ||
-    !('id' in value) ||
-    typeof value.id !== 'string' ||
-    !('senderId' in value) ||
-    typeof value.senderId !== 'string' ||
-    !('version' in value) ||
-    typeof value.version !== 'string'
-  ) {
+// Application hooks can reject with accessors or proxies. Read only the fields
+// needed for classification, and keep an unreadable rejection as the diagnostic.
+export const normalizeErrorResponse = (value: unknown): RequestErrorResponse | undefined => {
+  try {
+    if (!isErrorMessage(value)) {
+      return undefined
+    }
+    const id = 'id' in value ? value.id : undefined
+    const senderId = 'senderId' in value ? value.senderId : undefined
+    const version = 'version' in value ? value.version : undefined
+    if (typeof id !== 'string' || typeof senderId !== 'string' || typeof version !== 'string') {
+      return undefined
+    }
+
+    return normalizeErrorPayload(
+      {
+        type: BeaconMessageType.Error,
+        errorType: 'errorType' in value ? value.errorType : undefined,
+        errorOrigin: 'errorOrigin' in value ? value.errorOrigin : undefined,
+        ...('errorData' in value ? { errorData: value.errorData } : {})
+      },
+      { id, senderId, version },
+      value
+    )
+  } catch {
     return undefined
   }
+}
 
-  return normalizeErrorPayload(
-    value,
-    { id: value.id, senderId: value.senderId, version: value.version },
-    diagnostic
-  )
+export const diagnosticMessage = (
+  value: unknown,
+  source: 'error' | 'diagnostic'
+): string | undefined => {
+  try {
+    if (source === 'error' && !(value instanceof Error)) {
+      return undefined
+    }
+    const message =
+      typeof value === 'object' && value !== null && 'message' in value ? value.message : undefined
+
+    return typeof message === 'string' ? message : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export const localError = (error: ErrorResponse): RequestErrorResponse => ({

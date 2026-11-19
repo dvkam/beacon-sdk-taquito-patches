@@ -11,18 +11,28 @@ diagnostics. The same rule applies to direct responses and leader/follower
 forwarding. Known error codes keep their existing event shape, and the raw
 response observation still retains the original wallet code.
 
-Delegated preparation failures cross a tab boundary. Cloneable diagnostics are
-retained as structured-clone copies. Uncloneable diagnostics become a two-field
-summary in `errorData`: `message` contains the original string message when it
-can be read, or a generic explanation, and `diagnostic` is
-`"Uncloneable request diagnostic"`. Direct requests in the same tab keep the
-original diagnostic identity.
+A delegated preparation failure crosses a tab boundary. Beacon sends a detached
+copy of JSON data so that the localStorage fallback can encode the same reply as
+the native channel. Plain objects with string data fields, arrays, strings,
+booleans, null and numbers that round-trip through JSON retain their values. If the diagnostic
+would change or fail during encoding, including a Map, Set, BigInt, cycle or
+callback, the follower receives a summary in `errorData`. Its `diagnostic`
+field is `"Uncloneable request diagnostic"`. Its `message` contains up to
+256 UTF-16 code units of the original string message when readable, or a generic
+explanation. A same-tab caller keeps the original diagnostic by identity, even
+when reading its message throws.
+
+V3 wallet errors and delegated preparation errors settle without looking up peer
+metadata. If that lookup fails while processing a V3 success response, the
+request rejects with a local `UnknownBeaconError` carrying the storage or wallet
+lookup failure. Permission preparation stops before storing an account or
+reporting success.
 
 Local permission denials and rate limits create typed errors at their admission
 checks and keep their existing `NO_PERMISSIONS` or `LOCAL_RATE_LIMIT_REACHED`
 events. Unrelated plugin or dependency failures with the same message text remain
 `UnknownBeaconError` with their original rejection in `errorData` within the same
-tab, or a clone-safe copy or summary when delegated.
+tab, or a JSON copy or summary when delegated.
 
 `TransactionInvalidBeaconError` preserves its first argument as transaction data. Pass envelope metadata as the second argument so RPC payload fields such as `id` cannot be mistaken for a Beacon request ID:
 
