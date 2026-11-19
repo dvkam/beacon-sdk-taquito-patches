@@ -1,5 +1,9 @@
 /** Opt-in wallet request validation and signing-byte helpers. */
-export { isPartialTezosOperation, sanitizePartialTezosOperations } from './utils/wallet-operations'
+export {
+  isPartialTezosOperation,
+  sanitizePartialTezosOperations,
+  type ValidatedWalletPartialTezosOperation
+} from './utils/wallet-operations'
 export {
   packMessageText,
   inspectSignPayload,
