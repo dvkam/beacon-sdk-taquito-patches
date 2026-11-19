@@ -27,6 +27,78 @@ describe('wallet manager operation helpers', () => {
     expect(isPartialTezosOperation({ kind: 'delegation', delegate: 'tz1delegate' })).toBe(true)
   })
 
+  it('requires ordinary dense arrays with only indexed data properties', () => {
+    const messages = (message: unknown) => ({ kind: 'smart_rollup_add_messages', message })
+    const shadowed = Object.assign(['aa'], { map: null })
+    const extra = Object.defineProperty(['aa'], '00', { value: 'aa' })
+    const holeWithExtraKey = Object.assign(new Array(1), { '01': 'aa' })
+    const symbol = Object.assign(['aa'], { [Symbol('extra')]: true })
+    const customPrototype = Object.setPrototypeOf(['aa'], Object.create(Array.prototype))
+    const accessor = Object.defineProperty(['aa'], 0, { get: () => 'aa' })
+    for (const array of [
+      shadowed,
+      structuredClone(shadowed),
+      extra,
+      holeWithExtraKey,
+      symbol,
+      customPrototype,
+      accessor
+    ]) {
+      expect(isPartialTezosOperation(messages(array))).toBe(false)
+    }
+    expect(isPartialTezosOperation(messages(['aa']))).toBe(true)
+  })
+
+  it('sanitizes indexed items into fresh arrays even when batch and nested iterators are overridden', () => {
+    const overrides = {
+      map: null,
+      [Symbol.iterator]() {
+        throw new Error('An input iterator was invoked')
+      }
+    }
+    const message = Object.assign(['aa'], overrides)
+    const batch = Object.assign([{ kind: 'smart_rollup_add_messages', message }], overrides)
+    const [sanitized] = sanitizePartialTezosOperations(batch)
+    expect(sanitized).toEqual({ kind: 'smart_rollup_add_messages', message: ['aa'] })
+    if (sanitized.kind !== 'smart_rollup_add_messages') {
+      throw new Error('Unexpected operation kind')
+    }
+    expect(sanitized.message).not.toBe(message)
+    expect(sanitized.message.map((item) => item.toUpperCase())).toEqual(['AA'])
+    expect(Reflect.ownKeys(sanitized.message)).toEqual(['0', 'length'])
+    expect(isPartialTezosOperation(sanitized)).toBe(true)
+  })
+
+  it('rejects accessor fields and discriminants without invoking them', () => {
+    let reads = 0
+    const accessor = {
+      get() {
+        reads++
+        return 'delegation'
+      }
+    }
+    const kind = Object.defineProperty({}, 'kind', accessor)
+    const delegate = Object.defineProperty({ kind: 'delegation' }, 'delegate', accessor)
+    const message = Object.defineProperty(['aa'], 0, accessor)
+    const refutation = Object.defineProperty({}, 'refutation_kind', accessor)
+    const rollup = {
+      kind: 'smart_rollup_refute',
+      rollup: 'sr1rollup',
+      opponent: 'tz1opponent',
+      refutation
+    }
+    for (const operation of [
+      kind,
+      delegate,
+      rollup,
+      { kind: 'smart_rollup_add_messages', message }
+    ]) {
+      expect(isPartialTezosOperation(operation)).toBe(false)
+      expect(() => sanitizePartialTezosOperations([operation])).toThrow(/index 0/)
+    }
+    expect(reads).toBe(0)
+  })
+
   it('rejects sparse operation batches and sparse nested sequences', () => {
     expect(() => sanitizePartialTezosOperations(new Array(1))).toThrow(/index 0/)
     expect(isPartialTezosOperation({ kind: 'register_global_constant', value: new Array(1) })).toBe(
