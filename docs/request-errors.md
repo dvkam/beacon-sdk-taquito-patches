@@ -4,6 +4,11 @@ DAppClient permission, blockchain, operation, signing, broadcast and proof reque
 
 This normalization also covers preparation and response processing. It does not add request-error events to failures that did not emit them before. Request-error events continue to carry plain response objects. `isErrorResponse` validates a known error type and string `id`, `version` and `senderId` headers; `isRequestErrorResponse` also validates the optional `errorOrigin` (`wallet` or `local`). Empty string headers remain valid for local failures before admission. An admitted wallet error that omits `senderId` still rejects the request; its normalized sender is an empty string.
 
+The response guards return false if field inspection throws. A local error can
+still have empty metadata before admission. When forwarding that error to a
+follower, Beacon supplies version `2` if its version is empty so the terminal
+reply passes incoming routing. The original local error remains unchanged.
+
 Unfamiliar wallet error codes normalize to `UNKNOWN_ERROR` while preserving the
 verified request ID, sender, version and trusted origin. The original attributed
 response remains in `errorData`, including the unfamiliar code and wallet
