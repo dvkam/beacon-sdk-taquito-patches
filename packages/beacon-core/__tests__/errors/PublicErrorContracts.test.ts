@@ -52,6 +52,67 @@ describe('public error guards', () => {
     expect(isRequestErrorResponse(value)).toBe(false)
   })
 
+  it.each([isErrorResponse, isRequestErrorResponse])(
+    'does not inspect unrelated exception metadata',
+    (guard) => {
+      const error = new Error('driver unavailable')
+      Object.defineProperty(error, 'id', {
+        get() {
+          throw new Error('unreadable optional id')
+        }
+      })
+      expect(guard(error)).toBe(false)
+    }
+  )
+
+  it.each(['type', 'id', 'version', 'senderId', 'errorType'] as const)(
+    'rejects an unreadable %s without throwing',
+    (field) => {
+      const value = Object.defineProperty({ ...response }, field, {
+        get() {
+          throw new Error('unreadable error field')
+        }
+      })
+      expect(isErrorResponse(value)).toBe(false)
+      expect(isRequestErrorResponse(value)).toBe(false)
+    }
+  )
+
+  it('rejects an unreadable request-error origin without throwing', () => {
+    const value = Object.defineProperty({ ...response }, 'errorOrigin', {
+      get() {
+        throw new Error('unreadable origin')
+      }
+    })
+    expect(isErrorResponse(value)).toBe(true)
+    expect(isRequestErrorResponse(value)).toBe(false)
+  })
+
+  it('reads error type and origin once per guard invocation', () => {
+    let codeReads = 0
+    let originReads = 0
+    const value = Object.defineProperties(
+      { ...response },
+      {
+        errorType: {
+          get() {
+            codeReads++
+            return BeaconErrorType.NOT_GRANTED_ERROR
+          }
+        },
+        errorOrigin: {
+          get() {
+            originReads++
+            return 'local'
+          }
+        }
+      }
+    )
+    expect(isRequestErrorResponse(value)).toBe(true)
+    expect(codeReads).toBe(1)
+    expect(originReads).toBe(1)
+  })
+
   it('checks request-error origin without restricting unrelated wire extensions', () => {
     for (const errorOrigin of [undefined, 'wallet', 'local']) {
       expect(isRequestErrorResponse({ ...response, errorOrigin })).toBe(true)
