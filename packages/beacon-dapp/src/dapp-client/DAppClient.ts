@@ -107,6 +107,7 @@ import {
   observeMultiTabChannel,
   getError,
   getPairingPeerOwnership,
+  BeaconError,
   AbortedBeaconError,
   NoAddressBeaconError,
   NotGrantedBeaconError,
@@ -3166,6 +3167,12 @@ export class DAppClient extends Client {
   }
 
   public async permissionRequest(input: PermissionRequestV3): Promise<PermissionResponseV3> {
+    return this.runPublicRequest(() => this.permissionRequestInternal(input))
+  }
+
+  private async permissionRequestInternal(
+    input: PermissionRequestV3
+  ): Promise<PermissionResponseV3> {
     logger.log('permissionRequest', input)
     const blockchainIdentifier = input.blockchainIdentifier
     const blockchain = this.blockchains.get(blockchainIdentifier)
@@ -3270,6 +3277,10 @@ export class DAppClient extends Client {
   }
 
   public async request(input: BlockchainRequestV3): Promise<BlockchainResponseV3> {
+    return this.runPublicRequest(() => this.requestInternal(input))
+  }
+
+  private async requestInternal(input: BlockchainRequestV3): Promise<BlockchainResponseV3> {
     logger.log('request', input)
     const blockchain = this.blockchains.get(input.blockchainIdentifier)
     if (!blockchain) {
@@ -3336,6 +3347,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the PermissionRequest message.
    */
   public async requestPermissions(
+    input?: RequestPermissionInput
+  ): Promise<PermissionResponseOutput> {
+    return this.runPublicRequest(() => this.requestPermissionsCoalesced(input))
+  }
+
+  private async requestPermissionsCoalesced(
     input?: RequestPermissionInput
   ): Promise<PermissionResponseOutput> {
     this.assertNotDestroyed()
@@ -3466,6 +3483,10 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the ProofOfEventChallenge message.
    */
   public async requestProofOfEventChallenge(input: RequestProofOfEventChallengeInput) {
+    return this.runPublicRequest(() => this.requestProofOfEventChallengeInternal(input))
+  }
+
+  private async requestProofOfEventChallengeInternal(input: RequestProofOfEventChallengeInput) {
     const activeAccount = await this.getActiveAccount()
 
     if (!activeAccount || !activeAccount.network) {
@@ -3546,6 +3567,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the SimulatedProofOfEventChallenge message.
    */
   public async requestSimulatedProofOfEventChallenge(
+    input: RequestSimulatedProofOfEventChallengeInput
+  ) {
+    return this.runPublicRequest(() => this.requestSimulatedProofOfEventChallengeInternal(input))
+  }
+
+  private async requestSimulatedProofOfEventChallengeInternal(
     input: RequestSimulatedProofOfEventChallengeInput
   ) {
     const activeAccount = await this.getActiveAccount()
@@ -3631,6 +3658,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the SignPayloadRequest message.
    */
   public async requestSignPayload(
+    input: RequestSignPayloadInput
+  ): Promise<SignPayloadResponseOutput> {
+    return this.runPublicRequest(() => this.requestSignPayloadInternal(input))
+  }
+
+  private async requestSignPayloadInternal(
     input: RequestSignPayloadInput
   ): Promise<SignPayloadResponseOutput> {
     if (!input.payload) {
@@ -3797,6 +3830,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the OperationRequest message.
    */
   public async requestOperation(input: RequestOperationInput): Promise<OperationResponseOutput> {
+    return this.runPublicRequest(() => this.requestOperationInternal(input))
+  }
+
+  private async requestOperationInternal(
+    input: RequestOperationInput
+  ): Promise<OperationResponseOutput> {
     if (!input.operationDetails) {
       throw await this.sendInternalError('operationDetailsRequired')
     }
@@ -3857,6 +3896,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the BroadcastRequest message.
    */
   public async requestBroadcast(input: RequestBroadcastInput): Promise<BroadcastResponseOutput> {
+    return this.runPublicRequest(() => this.requestBroadcastInternal(input))
+  }
+
+  private async requestBroadcastInternal(
+    input: RequestBroadcastInput
+  ): Promise<BroadcastResponseOutput> {
     if (!input.signedTransaction) {
       throw await this.sendInternalError('signedTransactionRequired')
     }
@@ -4135,6 +4180,16 @@ export class DAppClient extends Client {
     )
   }
 
+  // Normalize only at the public seam. Existing dispatch error handlers retain
+  // ownership of wire events, account reset and request settlement side effects.
+  private async runPublicRequest<T>(request: () => Promise<T>): Promise<T> {
+    try {
+      return await request()
+    } catch (error) {
+      throw this.toPublicRequestError(error)
+    }
+  }
+
   /**
    * Normalizes internal errors and wallet error responses into public BeaconError instances.
    * Public DAppClient request methods reject with BeaconError subclasses (isBeaconError(err) === true),
@@ -4176,6 +4231,28 @@ export class DAppClient extends Client {
     }
 
     return error
+  }
+
+  private toPublicRequestError(error: unknown): BeaconError {
+    const normalized = this.toPublicError(error)
+    if (isBeaconError(normalized)) {
+      return normalized
+    }
+    const options = {
+      ...(error instanceof Error ? { description: error.message } : {}),
+      errorOrigin: 'local' as const,
+      errorData: error
+    }
+    if (error instanceof Error) {
+      if (
+        error.message === 'Invalid scopes in V3 permission response' ||
+        error.message === 'Unexpected blockchain in V3 permission response'
+      ) {
+        return new ParametersInvalidBeaconError(options)
+      }
+    }
+
+    return new UnknownBeaconError(options)
   }
 
   /**
