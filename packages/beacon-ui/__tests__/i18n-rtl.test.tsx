@@ -229,4 +229,145 @@ describe('Beacon UI i18n, lang, and RTL support', () => {
     expect(builtUi.getBeaconDirection()).toBe('rtl')
     expect(builtUi.getBeaconMessages().meta.locale).toBe('ar')
   })
+
+  it('resolves named i18n exports from the built @ecadlabs/beacon-dapp browser ESM entrypoint without Rollup NAMESPACE_CONFLICT or MISSING_EXPORT warnings', async () => {
+    const path = await import('node:path')
+    const { rollup } = await import('rollup')
+    const { nodeResolve } = await import('@rollup/plugin-node-resolve')
+    const dappEsmEntry = path.resolve(__dirname, '../../beacon-dapp/dist/esm/index.js')
+    const warnings: Array<{ code?: string; message: string }> = []
+
+    const bundle = await rollup({
+      input: 'entry.js',
+      onwarn(warning) {
+        if (warning.code === 'NAMESPACE_CONFLICT' || warning.code === 'MISSING_EXPORT') {
+          warnings.push({ code: warning.code, message: warning.message })
+        }
+      },
+      external: (id) =>
+        id !== 'entry.js' &&
+        !id.startsWith('.') &&
+        !id.startsWith('/') &&
+        !id.startsWith('@ecadlabs/beacon-'),
+      plugins: [
+        {
+          name: 'virtual-entry',
+          resolveId(id) {
+            return id === 'entry.js' ? id : null
+          },
+          load(id) {
+            if (id !== 'entry.js') {
+              return null
+            }
+            return `export {
+              configureBeaconI18n,
+              detectBrowserLocale,
+              hasBuiltInLocale,
+              normalizeLocaleTag,
+              resolveBuiltInLocaleCatalog,
+              setBeaconLocale,
+              getBeaconLocale,
+              resolveBeaconLang,
+              setBeaconDirection,
+              getBeaconDirection,
+              setBeaconTranslations,
+              getBeaconTranslations,
+              getBeaconMessages,
+              getBeaconErrorCopy,
+              interpolateBeaconMessage,
+              resetBeaconI18n,
+              subscribeBeaconI18n,
+              builtInLocales,
+              enMessages,
+              frMessages,
+              esMessages,
+              deMessages,
+              jaMessages,
+              arMessages
+            } from ${JSON.stringify(dappEsmEntry)}`
+          }
+        },
+        nodeResolve({ browser: true })
+      ]
+    })
+    await bundle.close()
+    expect(warnings).toEqual([])
+  })
+
+  it('repaints mounted <beacon-alert> and <beacon-toast> on runtime setColorMode, window languagechange, and <html lang/dir> mutations', async () => {
+    const { ColorMode } = await import('@ecadlabs/beacon-types')
+    const { setColorMode, getColorMode } = await import('../src/utils/colorMode')
+    const { openAlert, closeAlert } = await import('../src/ui/alert')
+    const { openToast, closeToast } = await import('../src/ui/toast')
+
+    setColorMode(ColorMode.LIGHT)
+    document.documentElement.lang = 'en'
+    document.documentElement.dir = 'ltr'
+
+    await act(async () => {
+      openAlert({ title: 'Test', body: 'Body' })
+      openToast({
+        body: builtInLocales.en.dapp.requestSent,
+        state: 'loading',
+        walletInfo: { name: 'Kukai' },
+        openWalletAction: vi.fn()
+      })
+    })
+
+    const alertHost = document.querySelector('beacon-alert')
+    const alertThemeContainer = alertHost?.shadowRoot?.querySelector('[dir]')
+    const toastHost = document.querySelector('beacon-toast')
+    const toastThemeContainer = toastHost?.shadowRoot?.querySelector('[dir]')
+
+    expect(alertThemeContainer?.className).toContain('theme__light')
+    expect(toastThemeContainer?.className).toContain('theme__light')
+
+    // Runtime colorMode update repaints both open roots
+    await act(async () => {
+      setColorMode(ColorMode.DARK)
+    })
+    expect(getColorMode()).toBe(ColorMode.DARK)
+    expect(alertThemeContainer?.className).toContain('theme__dark')
+    expect(toastThemeContainer?.className).toContain('theme__dark')
+
+    // Host SPA mutating <html lang="de"> updates open modals/toasts when browser language is default English
+    const languagesSpy = vi
+      .spyOn(window.navigator, 'languages', 'get')
+      .mockReturnValue(['en-US', 'en'])
+    const languageSpy = vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('en-US')
+
+    await act(async () => {
+      document.documentElement.lang = 'de'
+      await Promise.resolve()
+    })
+    expect(alertHost?.getAttribute('lang')).toBe('de')
+    expect(alertHost?.shadowRoot?.textContent).toContain(builtInLocales.de.ui.close)
+    expect(toastHost?.getAttribute('lang')).toBe('de')
+    expect(toastHost?.shadowRoot?.textContent).toContain(builtInLocales.de.ui.openWallet)
+
+    // Browser languagechange event updates open modals/toasts when <html lang="en"> is boilerplate
+    document.documentElement.lang = 'en'
+    languagesSpy.mockReturnValue(['ar-EG', 'ar'])
+    languageSpy.mockReturnValue('ar-EG')
+
+    await act(async () => {
+      window.dispatchEvent(new Event('languagechange'))
+    })
+    expect(alertHost?.getAttribute('lang')).toBe('ar-EG')
+    expect(alertHost?.getAttribute('dir')).toBe('rtl')
+    expect(alertHost?.shadowRoot?.textContent).toContain(builtInLocales.ar.ui.close)
+    expect(toastHost?.getAttribute('lang')).toBe('ar-EG')
+    expect(toastHost?.getAttribute('dir')).toBe('rtl')
+    expect(toastHost?.shadowRoot?.textContent).toContain(builtInLocales.ar.ui.openWallet)
+
+    languagesSpy.mockRestore()
+    languageSpy.mockRestore()
+    setColorMode(ColorMode.LIGHT)
+
+    await act(async () => {
+      closeAlert()
+      closeToast()
+      vi.advanceTimersByTime(350)
+    })
+  })
 })
