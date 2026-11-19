@@ -2,7 +2,19 @@
 
 DAppClient permission, blockchain, operation, signing, broadcast and proof request methods reject with a `BeaconError` subclass. Use `isBeaconError(error)` to narrow an unknown rejection. Existing typed errors retain their identity. Unexpected local failures become `UnknownBeaconError`, with the original value in `errorData`; invalid V3 permission scopes and mismatched blockchain identifiers become `ParametersInvalidBeaconError`.
 
-This normalization also covers preparation and response processing. It does not add request-error events to failures that did not emit them before. Request-error events continue to carry plain wire objects. `isErrorResponse` validates a known error type and string `id`, `version` and `senderId` headers; `isRequestErrorResponse` also validates the optional `errorOrigin` (`wallet` or `local`). Empty string headers remain valid for local failures before admission.
+This normalization also covers preparation and response processing. It does not add request-error events to failures that did not emit them before. Request-error events continue to carry plain response objects. `isErrorResponse` validates a known error type and string `id`, `version` and `senderId` headers; `isRequestErrorResponse` also validates the optional `errorOrigin` (`wallet` or `local`). Empty string headers remain valid for local failures before admission.
+
+Unfamiliar wallet error codes normalize to `UNKNOWN_ERROR` while preserving the
+verified request ID, sender, version and trusted origin. The original attributed
+response remains in `errorData`, including the unfamiliar code and wallet
+diagnostics. The same rule applies to direct responses and leader/follower
+forwarding. Known error codes keep their existing event shape, and the raw
+response observation still retains the original wallet code.
+
+Local permission denials and rate limits create typed errors at their admission
+checks and keep their existing `NO_PERMISSIONS` or `LOCAL_RATE_LIMIT_REACHED`
+events. Unrelated plugin or dependency failures with the same message text remain
+`UnknownBeaconError` with their original rejection in `errorData`.
 
 `TransactionInvalidBeaconError` preserves its first argument as transaction data. Pass envelope metadata as the second argument so RPC payload fields such as `id` cannot be mistaken for a Beacon request ID:
 
