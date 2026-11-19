@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { SigningType } from '@ecadlabs/beacon-types'
 import { managerOperations as operations } from './type-fixtures/manager-operations'
 import {
-  encodeTzip10RawPayload,
+  packMessageText,
   inspectSignPayload,
   isPartialTezosOperation,
   sanitizePartialTezosOperations
@@ -16,6 +16,81 @@ describe('wallet manager operation helpers', () => {
     )
   })
 
+  it.each([
+    'UNPAIR',
+    'PUSH',
+    'VIEW',
+    'EMIT',
+    'Lambda_rec',
+    'constant',
+    'SUB_MUTEZ',
+    'ticket',
+    'TICKET',
+    'Ticket'
+  ])('accepts the codec-known primitive %s during structural inspection', (prim) => {
+    const operation = { kind: 'register_global_constant', value: { prim } }
+    expect(isPartialTezosOperation(operation)).toBe(true)
+    expect(sanitizePartialTezosOperations([operation])).toEqual([operation])
+  })
+  it('preserves an origination using UNPAIR and a Ticket parameter value', () => {
+    const origination = {
+      kind: 'origination',
+      balance: '0',
+      script: {
+        code: [
+          { prim: 'parameter', args: [{ prim: 'unit' }] },
+          { prim: 'storage', args: [{ prim: 'unit' }] },
+          {
+            prim: 'code',
+            args: [
+              [
+                { prim: 'UNPAIR' },
+                { prim: 'DROP' },
+                { prim: 'PUSH', args: [{ prim: 'unit' }, { prim: 'Unit' }] },
+                { prim: 'DROP' },
+                { prim: 'NIL', args: [{ prim: 'operation' }] },
+                { prim: 'PAIR' }
+              ]
+            ]
+          }
+        ],
+        storage: { prim: 'Unit' }
+      }
+    }
+    const transaction = {
+      kind: 'transaction',
+      amount: '0',
+      destination: 'KT1GFkBEDZtngCS737gNgtt6LemG2a8kaifC',
+      parameters: {
+        entrypoint: 'default',
+        value: {
+          prim: 'Ticket',
+          args: [
+            { string: 'KT1GFkBEDZtngCS737gNgtt6LemG2a8kaifC' },
+            { prim: 'unit' },
+            { prim: 'Unit' },
+            { int: '1' }
+          ]
+        }
+      }
+    }
+    expect(isPartialTezosOperation(origination)).toBe(true)
+    expect(isPartialTezosOperation(transaction)).toBe(true)
+    expect(sanitizePartialTezosOperations([origination, transaction])).toEqual([
+      origination,
+      transaction
+    ])
+  })
+  it.each(['-0', '00', '01', '-01'])('preserves accepted Micheline decimal spelling %j', (int) => {
+    const operation = { kind: 'register_global_constant', value: { int } }
+    expect(isPartialTezosOperation(operation)).toBe(true)
+    expect(sanitizePartialTezosOperations([operation])).toEqual([operation])
+  })
+  it.each(['0', '1', '-1'])('preserves canonical Micheline integer %j', (int) => {
+    const operation = { kind: 'register_global_constant', value: { int } }
+    expect(isPartialTezosOperation(operation)).toBe(true)
+    expect(sanitizePartialTezosOperations([operation])).toEqual([operation])
+  })
   it.each(operations)('preserves the supported $kind fields', (operation) => {
     expect(isPartialTezosOperation(operation)).toBe(true)
     expect(sanitizePartialTezosOperations([operation])).toEqual([operation])
@@ -55,7 +130,11 @@ describe('wallet manager operation helpers', () => {
     { kind: 'transaction', amount: 1, destination: 'tz1' },
     { kind: 'transaction', amount: '-1', destination: 'tz1' },
     { kind: 'origination', balance: '0' },
-    { kind: 'register_global_constant', value: { prim: 'NOT_A_PRIMITIVE' } }
+    { kind: 'register_global_constant', value: { prim: 'NOT_A_PRIMITIVE' } },
+    ...['__proto__', 'constructor', 'toString', '', '1ADD', 'ADD;DROP', 'a-b'].map((prim) => ({
+      kind: 'register_global_constant',
+      value: { prim }
+    }))
   ])('rejects invalid or unsupported input %j', (operation) => {
     expect(isPartialTezosOperation(operation)).toBe(false)
     expect(() => sanitizePartialTezosOperations([operations[0], operation])).toThrow(/index 1/)
@@ -101,15 +180,15 @@ describe('wallet manager operation helpers', () => {
 
 describe('signing payload inspection', () => {
   it('preserves BOM-leading text and recognizes packed previews for explicit RAW requests', () => {
-    expect(encodeTzip10RawPayload('\uFEFFa')).toBe('050100000004efbbbf61')
+    expect(packMessageText('\uFEFFa')).toBe('050100000004efbbbf61')
     expect(inspectSignPayload('050100000004efbbbf61', SigningType.MICHELINE)).toMatchObject({
       valid: true,
       decodedText: '\uFEFFa'
     })
-    expect(() => encodeTzip10RawPayload('\ud800')).toThrow(/Unicode/)
+    expect(() => packMessageText('\ud800')).toThrow(/Unicode/)
     expect(
-      inspectSignPayload(encodeTzip10RawPayload('Tezos Signed Message: hello'), SigningType.RAW)
-    ).toMatchObject({ valid: true, kind: 'tzip10_message' })
+      inspectSignPayload(packMessageText('Tezos Signed Message: hello'), SigningType.RAW)
+    ).toMatchObject({ valid: true, kind: 'signed_message_text' })
     expect(inspectSignPayload('0300', SigningType.RAW)).toMatchObject({
       valid: true,
       kind: 'operation',
@@ -123,18 +202,18 @@ describe('signing payload inspection', () => {
   })
 
   it('encodes UTF-8 byte length and only labels the signed-message convention when present', () => {
-    expect(encodeTzip10RawPayload('é')).toBe('050100000002c3a9')
-    expect(inspectSignPayload(encodeTzip10RawPayload('é'), SigningType.MICHELINE)).toMatchObject({
+    expect(packMessageText('é')).toBe('050100000002c3a9')
+    expect(inspectSignPayload(packMessageText('é'), SigningType.MICHELINE)).toMatchObject({
       valid: true,
       kind: 'micheline',
       decodedText: 'é',
       validation: 'canonical_micheline'
     })
     const text = 'Tezos Signed Message: example.org hello 🌍'
-    const encoded = encodeTzip10RawPayload(text)
+    const encoded = packMessageText(text)
     expect(inspectSignPayload('0x' + encoded.toUpperCase())).toMatchObject({
       valid: true,
-      kind: 'tzip10_message',
+      kind: 'signed_message_text',
       decodedText: text,
       normalizedHex: encoded
     })

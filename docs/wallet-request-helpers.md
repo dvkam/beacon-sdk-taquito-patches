@@ -4,6 +4,25 @@ Wallets can opt into these helpers from `@ecadlabs/beacon-utils/wallet`. The roo
 entrypoints do not load these helpers or the codec. Receiving a request still behaves as before; the SDK
 does not automatically validate or rewrite requests.
 
+## Install the optional codec
+
+Only the wallet subpath needs `@taquito/michel-codec`. It is an optional peer,
+so installing Beacon alone does not install the codec or `@taquito/core`.
+The root utility, SDK and wallet-client entrypoints work without it.
+
+The supported range is `^25.1.1 || ^25.2.0-beta3`. It covers stable 25.x releases
+from 25.1.1 and the 25.2.0 prereleases from beta3, and excludes 26.x.
+The installed-consumer checks exercise 25.1.1 and 25.2.0-beta3.
+An application must provide a compatible codec before importing the wallet
+subpath. Taquito applications can reuse their compatible installed version.
+Applications without it can install the tested stable version:
+
+```sh
+npm install @taquito/michel-codec@25.1.1
+```
+
+Importing the wallet subpath without its peer reports a missing-codec module error.
+
 ## Operations
 
 `WalletPartialTezosOperation` is exported by `@ecadlabs/beacon-types`.
@@ -37,23 +56,33 @@ These are structural checks against Beacon's operation types. They do not check
 address checksums, keys or proof cryptography, Michelson execution, current
 protocol availability, fees, permissions, or the user's intent. Consensus,
 evidence, governance and other operation kinds are rejected. Nested objects and
-arrays have a maximum validation depth of 64. Micheline primitives follow the
-existing `MichelsonPrimitives` type inventory; newer protocol primitives absent
-from that inventory are conservatively rejected. The existing PVM and refutation
-enums are public exports for constructing the advanced manager variants.
+arrays have a maximum validation depth of 64. Micheline names must exist in the
+installed codec's tag inventory. This includes instruction, type and data names;
+the check does not validate each primitive's arity or Michelson semantics.
+Micheline integers retain accepted decimal spellings such as "01" or "-0"; the
+codec and node canonicalize them when encoding. Canonical spelling is required
+only for the manager amounts and optional gas/storage limits described above.
+The existing PVM and refutation enums are public exports for constructing the
+advanced manager variants.
+
+The shared Micheline wire type accepts string names so new protocol names can
+be represented without updating Beacon's type inventory. The existing
+MichelsonPrimitives export remains available for compatibility; it does not
+define the validator's accepted names. Constructing a typed operation does not
+replace runtime validation.
 
 ## Signing bytes
 
-`encodeTzip10RawPayload(text)` packs the exact supplied UTF-8 text as
+`packMessageText(text)` packs the exact supplied UTF-8 text as
 `0501` + four-byte byte length + UTF-8 bytes. It preserves a leading Unicode BOM
 and rejects lone surrogates. It does not prepend text or invent a domain, nonce
 or expiry. The caller supplies those values.
 
 ```ts
-import { encodeTzip10RawPayload, inspectSignPayload } from '@ecadlabs/beacon-utils/wallet'
+import { packMessageText, inspectSignPayload } from '@ecadlabs/beacon-utils/wallet'
 import { SigningType } from '@ecadlabs/beacon-types'
 
-const payload = encodeTzip10RawPayload('Tezos Signed Message: example.org hello')
+const payload = packMessageText('Tezos Signed Message: example.org hello')
 const preview = inspectSignPayload(payload, SigningType.MICHELINE)
 ```
 
@@ -64,7 +93,7 @@ at 1 MiB of encoded bytes.
 
 The `kind` describes recognized bytes; it does not change the requested signing
 type. Canonical packed data, including RAW requests, produces `micheline` or
-`tzip10_message` with `validation: 'canonical_micheline'`. Only a top-level string
+`signed_message_text` with `validation: 'canonical_micheline'`. Only a top-level string
 starting with `Tezos Signed Message: ` gets the latter label. This is a display
 convention, not proof of authentication, domain binding or replay protection.
 The decoded string is available as `decodedText`.
@@ -84,17 +113,11 @@ containing `"\uFEFFa"` but returns an unsupported/noncanonical result. Top-level
 strings have a narrow UTF-8 correction and preserve their BOM. Other codec errors
 and noncanonical/trailing bytes are rejected.
 
-The added runtime dependency is pinned `@taquito/michel-codec` 25.1.1 and its
-`@taquito/core` dependency. It adds no Taquito SDK, native module, RPC or forging
-dependency. A controlled browser ESM bundle of the original complete utility API measured
-53,068 bytes minified / 18,476 bytes gzip. Adding all wallet helpers to that same
-bundle measured 232,004 / 63,987 bytes. That 45,511-byte gzip cost is why the
-helpers have a separate public entrypoint. After separation, the default utility bundle is byte-identical to the original
-53,068 / 18,476-byte result and its module graph has no Taquito input. The optional
-wallet entrypoint alone measures 178,412 bytes minified / 45,463 bytes gzip with
-the same browser ESM settings. Default SDK, dApp and wallet-client bundles do not
-include the codec; the new advanced-type enum exports have a separate small
-runtime cost in beacon-types.
+The helpers have a separate public entrypoint so applications that use only
+the existing utility, SDK, dApp or wallet-client entrypoints do not load the codec.
+Applications opting into the helpers include the codec in that module's bundle.
+The packed browser test exercises this entrypoint independently of the default
+SDK bundle.
 
 ## Sources
 
@@ -103,3 +126,6 @@ defines the wallet interaction messages and arbitrary signing payloads. It does
 not define the signed-message text prefix or an authentication format.
 [Beacon's signing guide](https://docs.walletbeacon.io/guides/sign-payload/)
 provides the `05` packed-string, `03` operation and RAW conventions used here.
+
+[Octez's Micheline guide](https://octez.tezos.com/docs/shell/micheline.html)
+describes the wire expression format and protocol-specific primitive vocabulary.

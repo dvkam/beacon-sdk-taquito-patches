@@ -6,7 +6,7 @@ export type SignPayloadInspection =
   | {
       valid: true
       normalizedHex: string
-      kind: 'tzip10_message' | 'micheline'
+      kind: 'signed_message_text' | 'micheline'
       validation: 'canonical_micheline'
       decodedText?: string
     }
@@ -20,7 +20,7 @@ const SIGNED_MESSAGE_PREFIX = 'Tezos Signed Message: '
  * Pack the exact supplied UTF-8 text as a Micheline string (0501 + byte length + bytes).
  * Callers add their own message prefix/domain/nonce. This does not construct an authentication protocol.
  */
-export const encodeTzip10RawPayload = (text: string): string => {
+export const packMessageText = (text: string): string => {
   if (typeof text !== 'string') {
     throw new TypeError('Expected message text')
   }
@@ -56,7 +56,7 @@ const inspectMicheline = (normalizedHex: string): SignPayloadInspection => {
     return {
       valid: true,
       normalizedHex,
-      kind: decodedText?.startsWith(SIGNED_MESSAGE_PREFIX) ? 'tzip10_message' : 'micheline',
+      kind: decodedText?.startsWith(SIGNED_MESSAGE_PREFIX) ? 'signed_message_text' : 'micheline',
       validation: 'canonical_micheline',
       ...(decodedText !== undefined ? { decodedText } : {})
     }
