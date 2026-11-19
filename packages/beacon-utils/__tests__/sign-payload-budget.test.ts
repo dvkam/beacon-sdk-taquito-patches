@@ -1,15 +1,20 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { SigningType } from '@ecadlabs/beacon-types'
-import { unpackDataBytes } from '@taquito/michel-codec'
+import { packDataBytes, unpackDataBytes } from '@taquito/michel-codec'
 import { inspectSignPayload } from '../src/wallet'
 
 vi.mock('@taquito/michel-codec', async (importOriginal) => {
   const codec = await importOriginal<typeof import('@taquito/michel-codec')>()
-  return { ...codec, unpackDataBytes: vi.fn(codec.unpackDataBytes) }
+  return {
+    ...codec,
+    unpackDataBytes: vi.fn(codec.unpackDataBytes),
+    packDataBytes: vi.fn(codec.packDataBytes)
+  }
 })
 
 beforeEach(() => {
   vi.mocked(unpackDataBytes).mockReset()
+  vi.mocked(packDataBytes).mockReset()
 })
 
 it.each([
@@ -56,4 +61,34 @@ it('preserves explicit RAW fallback when the preview exceeds its work budget', (
     validation: 'hex'
   })
   expect(unpackDataBytes).not.toHaveBeenCalled()
+})
+
+it('skips both codec calls for a PUSH instruction at any depth', () => {
+  // PUSH unit Unit and the same instruction inside a sequence inside Some.
+  for (const payload of ['050743036c030b', '05050902000000060743036c030b']) {
+    for (const signingType of [undefined, SigningType.MICHELINE]) {
+      expect(inspectSignPayload(payload, signingType)).toMatchObject({
+        valid: false,
+        reason: expect.stringMatching(/unsupported/i)
+      })
+    }
+    expect(inspectSignPayload(payload, SigningType.RAW)).toEqual({
+      valid: true,
+      kind: 'raw_bytes',
+      normalizedHex: payload,
+      validation: 'hex'
+    })
+  }
+  expect(unpackDataBytes).not.toHaveBeenCalled()
+  expect(packDataBytes).not.toHaveBeenCalled()
+})
+
+it('treats the PUSH opcode inside scalar data as ordinary bytes', () => {
+  const payload = '05020000000c0100000001430a0000000143'
+  expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({
+    valid: true,
+    validation: 'canonical_micheline'
+  })
+  expect(unpackDataBytes).toHaveBeenCalledOnce()
+  expect(packDataBytes).toHaveBeenCalledOnce()
 })

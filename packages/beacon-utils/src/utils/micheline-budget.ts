@@ -1,5 +1,6 @@
 const MAX_DECODE_WORK = 4 * 1024 * 1024
 const MAX_DEPTH = 64
+const MICHELSON_PUSH = 0x43
 
 /** Bound the supported codec's repeated child reads without decoding values or primitive names. */
 export const assertMichelineBudget = (hex: string): void => {
@@ -76,7 +77,10 @@ export const assertMichelineBudget = (hex: string): void => {
         if (tag < 3 || tag > 9) {
           unsupported()
         }
-        readByte(limit, weight)
+        // PUSH activates typed conversions during both decoding and canonical repacking.
+        if (readByte(limit, weight) === MICHELSON_PUSH) {
+          unsupported()
+        }
         const arity = Math.floor((tag - 3) / 2)
         if (arity < 3) {
           for (let index = 0; index < arity; index++) {

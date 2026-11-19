@@ -74,6 +74,7 @@ test('installed public wallet subpath runs in a browser without the default SDK 
     const text = 'Tezos Signed Message: browser é 🌍'
     return {
       inspected: walletHelpers.inspectSignPayload(walletHelpers.packMessageText(text)),
+      pushPreview: walletHelpers.inspectSignPayload('050743036c030b'),
       bom: walletHelpers.packMessageText('\uFEFFa'),
       primitiveChecks: [
         'UNPAIR',
@@ -97,6 +98,10 @@ test('installed public wallet subpath runs in a browser without the default SDK 
     valid: true,
     kind: 'signed_message_text',
     decodedText: 'Tezos Signed Message: browser é 🌍'
+  })
+  expect(result.pushPreview).toMatchObject({
+    valid: false,
+    reason: expect.stringMatching(/unsupported/i)
   })
   expect(result.bom).toBe('050100000004efbbbf61')
   expect(result.primitiveChecks).toEqual([true, true, true, true, true, true, true, false, false])
