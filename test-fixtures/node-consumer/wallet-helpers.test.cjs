@@ -51,3 +51,23 @@ test('the strict operation guard rejects structural extras without mutating inpu
   assert.equal(isPartialTezosOperation(valid), true)
   assert.deepEqual(Reflect.ownKeys(valid), ['kind'])
 })
+
+test('the installed strict guard rejects own undefined optional fields at every depth', () => {
+  const {
+    isPartialTezosOperation,
+    sanitizePartialTezosOperations
+  } = require('@ecadlabs/beacon-utils/wallet')
+  const delegation = { kind: 'delegation', delegate: undefined }
+  const constant = {
+    kind: 'register_global_constant',
+    value: { prim: 'Some', args: undefined }
+  }
+  assert.equal(isPartialTezosOperation(delegation), false)
+  assert.equal(isPartialTezosOperation(constant), false)
+  assert.deepEqual(sanitizePartialTezosOperations([delegation, constant]), [
+    { kind: 'delegation' },
+    { kind: 'register_global_constant', value: { prim: 'Some' } }
+  ])
+  assert.equal(isPartialTezosOperation({ kind: 'delegation' }), true)
+  assert.equal(isPartialTezosOperation({ kind: 'delegation', delegate: 'tz1delegate' }), true)
+})

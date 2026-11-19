@@ -30,7 +30,9 @@ Importing the wallet subpath without its peer reports a missing-codec module err
 properties, and rejects dApp-supplied `source`, `fee` and `counter`. A successful
 guard narrows to a validated subtype assignable to the public wire type. A failed
 guard does not exclude that wire type, because structurally assignable operations
-can still have rejected extra properties. Validation adds no property to the input.
+can still have rejected extra properties. Validation adds no property to the input. Optional fields must be absent or contain
+their declared value. Present undefined fields are rejected, including in nested
+objects; sanitization continues to omit them.
 
 `sanitizePartialTezosOperations(operations)` creates a fresh array and nested
 objects. It removes unknown properties and `source`, `fee` and `counter`.

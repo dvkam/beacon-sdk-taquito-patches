@@ -75,7 +75,11 @@ const shape =
     const result: Record<string, unknown> = {}
     for (const [name, field] of Object.entries(fields)) {
       const parse = typeof field === 'function' ? field : field.parse
-      if (value[name] === undefined && typeof field !== 'function') {
+      if (
+        value[name] === undefined &&
+        typeof field !== 'function' &&
+        (!strict || !Object.prototype.hasOwnProperty.call(value, name))
+      ) {
         continue
       }
       result[name] = parse(value[name], strict, depth + 1)
