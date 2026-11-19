@@ -6,7 +6,7 @@ export const plMessages = {
     locale: 'pl',
     name: 'Polski',
     direction: 'ltr',
-    status: 'ai-draft'
+    status: 'human-reviewed'
   },
   errors: {
     [BeaconErrorType.BROADCAST_ERROR]: {

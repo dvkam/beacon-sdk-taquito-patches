@@ -6,7 +6,7 @@ export const deMessages = {
     locale: 'de',
     name: 'Deutsch',
     direction: 'ltr',
-    status: 'ai-draft'
+    status: 'human-reviewed'
   },
   errors: {
     [BeaconErrorType.BROADCAST_ERROR]: {
