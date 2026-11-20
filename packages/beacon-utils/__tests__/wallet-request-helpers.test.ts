@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import tz5 from '../../../test-fixtures/tz5-account.json'
 import { SigningType } from '@ecadlabs/beacon-types'
 import { packDataBytes } from '@taquito/michel-codec'
 import { managerOperations as operations } from './type-fixtures/manager-operations'
@@ -10,6 +11,17 @@ import {
 } from '../src/wallet'
 
 describe('wallet manager operation helpers', () => {
+  it('preserves tz5 destinations and mdpk reveal keys from the shared account fixture', () => {
+    const operations = [
+      { kind: 'transaction', amount: '0', destination: tz5.publicKeyHash },
+      { kind: 'reveal', public_key: tz5.publicKey }
+    ]
+    for (const operation of operations) {
+      expect(isPartialTezosOperation(operation)).toBe(true)
+    }
+    expect(sanitizePartialTezosOperations(operations)).toEqual(operations)
+  })
+
   it('rejects present undefined optional fields while sanitizing them away', () => {
     const delegation = { kind: 'delegation', delegate: undefined }
     const constant = {

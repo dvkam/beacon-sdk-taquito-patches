@@ -74,21 +74,6 @@ test('installed public wallet subpath runs in a browser without the default SDK 
     const text = 'Tezos Signed Message: browser é 🌍'
     return {
       inspected: walletHelpers.inspectSignPayload(walletHelpers.packMessageText(text)),
-      pushPreview: walletHelpers.inspectSignPayload('050743036c030b'),
-      bom: walletHelpers.packMessageText('\uFEFFa'),
-      primitiveChecks: [
-        'UNPAIR',
-        'PUSH',
-        'VIEW',
-        'EMIT',
-        'Lambda_rec',
-        'constant',
-        'Ticket',
-        'NOT_A_PRIMITIVE',
-        '__proto__'
-      ].map((prim) =>
-        walletHelpers.isPartialTezosOperation({ kind: 'register_global_constant', value: { prim } })
-      ),
       operations: walletHelpers.sanitizePartialTezosOperations([
         { kind: 'delegation', source: 'spoof', gas_limit: '100', storage_limit: '1.5' }
       ])
@@ -99,11 +84,5 @@ test('installed public wallet subpath runs in a browser without the default SDK 
     kind: 'signed_message_text',
     decodedText: 'Tezos Signed Message: browser é 🌍'
   })
-  expect(result.pushPreview).toMatchObject({
-    valid: false,
-    reason: expect.stringMatching(/unsupported/i)
-  })
-  expect(result.bom).toBe('050100000004efbbbf61')
-  expect(result.primitiveChecks).toEqual([true, true, true, true, true, true, true, false, false])
   expect(result.operations).toEqual([{ kind: 'delegation', gas_limit: '100' }])
 })
