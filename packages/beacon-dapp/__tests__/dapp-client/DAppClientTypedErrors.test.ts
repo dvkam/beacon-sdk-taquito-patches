@@ -296,6 +296,20 @@ describe('DAppClient typed error rejections', () => {
       expect(transport.send).not.toHaveBeenCalled()
     })
 
+    it('retains a revoked proxy rejection without inspecting its properties', async () => {
+      const failure = Proxy.revocable({}, {})
+      failure.revoke()
+      addBlockchain(async () => {
+        throw failure.proxy
+      })
+      const error: unknown = await dapp.request(requestInput).catch((error: unknown) => error)
+      expect(error).toBeInstanceOf(UnknownBeaconError)
+      if (!isBeaconError(error)) throw new Error('Expected typed validator rejection')
+      expect(error.errorData).toBe(failure.proxy)
+      expect(error.errorOrigin).toBe('local')
+      expect(transport.send).not.toHaveBeenCalled()
+    })
+
     it('retains an uncloneable diagnostic by identity for a direct request', async () => {
       const failure = { message: 'storage read failed', retry() {} }
       vi.spyOn(dapp, 'getActiveAccount').mockRejectedValueOnce(failure)

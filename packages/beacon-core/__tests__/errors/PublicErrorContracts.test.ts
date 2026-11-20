@@ -78,6 +78,20 @@ describe('public error guards', () => {
     }
   )
 
+  it('contains proxy inspection failures in both public response guards', () => {
+    const revoked = Proxy.revocable({ ...response }, {})
+    revoked.revoke()
+    const unreadable = new Proxy(response, {
+      has() {
+        throw new Error('unreadable response')
+      }
+    })
+    for (const value of [revoked.proxy, unreadable]) {
+      expect(isErrorResponse(value)).toBe(false)
+      expect(isRequestErrorResponse(value)).toBe(false)
+    }
+  })
+
   it('rejects an unreadable request-error origin without throwing', () => {
     const value = Object.defineProperty({ ...response }, 'errorOrigin', {
       get() {
