@@ -4,6 +4,9 @@ DAppClient permission, blockchain, operation, signing, broadcast and proof reque
 
 This normalization also covers preparation and response processing. It does not add request-error events to failures that did not emit them before. Request-error events continue to carry plain response objects. `isErrorResponse` validates a known error type and string `id`, `version` and `senderId` headers; `isRequestErrorResponse` also validates the optional `errorOrigin` (`wallet` or `local`). Empty string headers remain valid for local failures before admission. An admitted wallet error that omits `senderId` still rejects the request; its normalized sender is an empty string.
 
+An unset origin can be omitted or explicitly undefined. Check its value even when
+the property is present.
+
 The response guards return false if field inspection throws. A local error can
 still have empty metadata before admission. When forwarding that error to a
 follower, Beacon supplies version `2` if its version is empty so the terminal
@@ -23,9 +26,11 @@ booleans, null and numbers that round-trip through JSON retain their values. If 
 would change or fail during encoding, including a Map, Set, BigInt, cycle or
 callback, the follower receives a summary in `errorData`. Its `diagnostic`
 field is `"Uncloneable request diagnostic"`. Its `message` contains up to
-256 UTF-16 code units of the original string message when readable, or a generic
-explanation. A same-tab caller keeps the original diagnostic by identity, even
-when reading its message throws.
+256 UTF-16 code units from an own string `message` data property, including a
+normal Error instance's message, or a generic explanation. Forwarding reads data
+descriptors and does not invoke `toJSON` or property getters. Accessor messages
+use the generic explanation. A same-tab caller keeps the original diagnostic by
+identity.
 
 V3 wallet errors and delegated preparation errors settle without looking up peer
 metadata. If that lookup fails while processing a V3 success response, the

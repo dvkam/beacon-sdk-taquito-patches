@@ -535,6 +535,7 @@ describe('Delegated request lifetime', () => {
     ['callback', () => ({ retry() {} })],
     ['long message', () => ({ message: 'x'.repeat(300), retry() {} })],
     ['custom JSON conversion', () => ({ nested: new Date(0) })],
+    ['error instance', () => new Error('storage read failed')],
     [
       'throwing discriminator',
       () => ({
@@ -573,8 +574,8 @@ describe('Delegated request lifetime', () => {
         errorData: {
           diagnostic: 'Uncloneable request diagnostic',
           message:
-            label === 'changing message'
-              ? 'first read'
+            label === 'error instance'
+              ? 'storage read failed'
               : label === 'long message'
                 ? 'x'.repeat(256)
                 : 'The request diagnostic could not be copied between tabs.'
@@ -622,6 +623,41 @@ describe('Delegated request lifetime', () => {
     expect(follower['requestTracker'].size).toBe(0)
     expect(leader['requestTracker'].size).toBe(0)
   })
+
+  it.each(['own', 'inherited'] as const)(
+    'does not invoke a rejected diagnostic %s message getter during forwarding',
+    async (location) => {
+      const details = { phase: 'original' }
+      const hook = vi.fn(() => {
+        details.phase = 'mutated'
+        throw new Error('message getter must not run')
+      })
+      const failure: unknown =
+        location === 'own'
+          ? Object.defineProperty({ details }, 'message', { enumerable: true, get: hook })
+          : Object.create(Object.defineProperty({}, 'message', { get: hook }), {
+              details: { value: details, enumerable: true }
+            })
+      const packets = captureLocalStoragePosts()
+      vi.mocked(leader.init).mockRejectedValueOnce(failure)
+      const pending = await begin('2')
+      expect(packets).toHaveLength(1)
+      await deliverViaLocalStorage(packets[0])
+      expect(hook).not.toHaveBeenCalled()
+      expect(details.phase).toBe('original')
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          errorData: {
+            message: 'The request diagnostic could not be copied between tabs.',
+            diagnostic: 'Uncloneable request diagnostic'
+          }
+        }
+      })
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+    }
+  )
 
   it('detaches JSON-compatible diagnostic fields before the channel encodes them', async () => {
     const packets = captureLocalStoragePosts()
