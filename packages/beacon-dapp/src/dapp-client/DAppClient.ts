@@ -105,7 +105,6 @@ import {
   StorageValidator,
   MultiTabChannel,
   observeMultiTabChannel,
-  getError,
   getPairingPeerOwnership,
   BeaconError,
   AbortedBeaconError,
@@ -173,6 +172,7 @@ import {
   LateResponseInfo,
   localError,
   RequestErrorResponse,
+  WireRequestErrorResponse,
   ResponseMessage,
   responseOutput,
   stampErrorOrigin,
@@ -368,7 +368,7 @@ type AccountSelectionPublication = Pick<
  * wallets and sending requests.
  *
  * Public DAppClient request methods reject with typed BeaconError subclasses (isBeaconError(err) === true),
- * while *_REQUEST_ERROR events emit { errorResponse } as a plain RequestErrorResponse object
+ * while *_REQUEST_ERROR events emit { errorResponse } as a plain WireRequestErrorResponse object
  * for backward compatibility.
  *
  * @category DApp
@@ -4190,7 +4190,7 @@ export class DAppClient extends Client {
     // handleRequestError only inspects `.type` plus optional fields it already
     // guards on. Catch params are `unknown` under strict TS, same story.
     const typedRequest = request as BeaconRequestInputMessage
-    const requestError = rawError as ErrorResponse
+    const requestError = rawError as WireRequestErrorResponse
     logger.time(false, logId)
     if (typeof rawError === 'object' && rawError !== null && this.admissionErrors.has(rawError)) {
       return
@@ -4219,7 +4219,7 @@ export class DAppClient extends Client {
   /**
    * Normalizes internal errors and wallet error responses into public BeaconError instances.
    * Public DAppClient request methods reject with BeaconError subclasses (isBeaconError(err) === true),
-   * while *_REQUEST_ERROR events emit { errorResponse } as a plain RequestErrorResponse object
+   * while *_REQUEST_ERROR events emit { errorResponse } as a plain WireRequestErrorResponse object
    * for backward compatibility.
    */
   private toPublicError(error: unknown): unknown {
@@ -4259,7 +4259,7 @@ export class DAppClient extends Client {
    */
   private async handleRequestError(
     request: BeaconRequestInputMessage,
-    beaconError: ErrorResponse,
+    beaconError: WireRequestErrorResponse,
     resetPermissionState = true
   ): Promise<void> {
     const receivedAt = this.responseReceivedAt.get(beaconError) ?? Date.now()
@@ -4341,7 +4341,7 @@ export class DAppClient extends Client {
         )
         .catch((emitError) => logger.error('handleRequestError', emitError))
 
-      throw getError(beaconError.errorType, beaconError.errorData)
+      throw toBeaconError(beaconError)
     }
 
     throw beaconError
