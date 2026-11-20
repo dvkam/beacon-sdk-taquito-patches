@@ -312,6 +312,16 @@ describe('Delegated request lifetime', () => {
           ? { id: pending.id, senderId: 'wallet', version, message: payload }
           : { id: pending.id, senderId: 'wallet', version, ...payload }
       await receiveWallet(response)
+      const forwarded =
+        version === '2'
+          ? { ...response, errorOrigin: 'wallet' }
+          : { ...response, message: { ...payload, errorOrigin: 'wallet' } }
+      expect(bus.endpoints[0].sent).toHaveLength(1)
+      expect(bus.endpoints[0].sent[0]).toMatchObject({
+        type: 'RESPONSE',
+        id: pending.id,
+        data: { message: forwarded }
+      })
       const outcome = await pending.outcome
       if (!('error' in outcome) || !isBeaconError(outcome.error))
         throw new Error('Expected forwarded Beacon error')
@@ -323,19 +333,18 @@ describe('Delegated request lifetime', () => {
         errorOrigin: 'wallet',
         errorType: BeaconErrorType.UNKNOWN_ERROR
       })
-      expect(outcome.error.errorData).toMatchObject(response)
-      if (version === '2') {
-        expect(followerFailed).toHaveBeenCalledTimes(1)
-        const event = followerFailed.mock.calls[0][0].errorResponse
-        expect(isRequestErrorResponse(event)).toBe(true)
-        expect(event).toMatchObject({
-          id: pending.id,
-          senderId: 'wallet',
-          version,
-          errorOrigin: 'wallet',
-          errorType: BeaconErrorType.UNKNOWN_ERROR
-        })
-      }
+      expect(outcome.error.errorData).toEqual(payload.errorData)
+      expect(followerFailed).toHaveBeenCalledTimes(1)
+      const event = followerFailed.mock.calls[0][0].errorResponse
+      expect(isRequestErrorResponse(event)).toBe(false)
+      expect(event).toMatchObject({
+        id: pending.id,
+        senderId: 'wallet',
+        version,
+        errorOrigin: 'wallet',
+        errorType: payload.errorType,
+        errorData: payload.errorData
+      })
     }
   )
 
@@ -394,16 +403,35 @@ describe('Delegated request lifetime', () => {
         errorOrigin: 'wallet',
         errorType: BeaconErrorType.UNKNOWN_ERROR
       })
-      expect(outcome.error.errorData).toMatchObject(response)
-      if (version === '2')
-        expect(isRequestErrorResponse(followerFailed.mock.calls[0][0].errorResponse)).toBe(true)
+      expect(outcome.error.errorData).toEqual(response.errorData)
+      const event = followerFailed.mock.calls[0][0].errorResponse
+      expect(isRequestErrorResponse(event)).toBe(false)
+      expect(event).toMatchObject({
+        errorType: response.errorType,
+        errorData: response.errorData
+      })
     }
   )
 
-  it.each(['2', '3'] as const)(
-    'settles a V%s follower after an uncloneable preparation failure',
-    async (version) => {
-      const failure = { message: 'storage read failed', retry() {} }
+  it.each([
+    ['2', 'diagnostic'],
+    ['3', 'diagnostic'],
+    ['2', 'code'],
+    ['3', 'code']
+  ] as const)(
+    'settles a V%s follower after a preparation failure with an uncloneable %s',
+    async (version, field) => {
+      const failure =
+        field === 'diagnostic'
+          ? { message: 'storage read failed', retry() {} }
+          : {
+              type: BeaconMessageType.Error,
+              id: 'initialization',
+              version,
+              senderId: '',
+              errorType() {},
+              message: 'storage read failed'
+            }
       vi.mocked(leader.init).mockRejectedValueOnce(failure)
       const pending = await begin(version)
       expect(bus.cloneErrors).toEqual([])
@@ -537,14 +565,6 @@ describe('Delegated request lifetime', () => {
     ['custom JSON conversion', () => ({ nested: new Date(0) })],
     ['error instance', () => new Error('storage read failed')],
     [
-      'throwing discriminator',
-      () => ({
-        get type() {
-          throw new Error('unreadable type')
-        }
-      })
-    ],
-    [
       'changing message',
       () => {
         let reads = 0
@@ -623,6 +643,51 @@ describe('Delegated request lifetime', () => {
     expect(follower['requestTracker'].size).toBe(0)
     expect(leader['requestTracker'].size).toBe(0)
   })
+
+  it.each(['type', 'id', 'version', 'senderId', 'errorType', 'errorData', 'errorOrigin'] as const)(
+    'forwards a rejected envelope without invoking its %s getter',
+    async (field) => {
+      const details = { phase: 'original' }
+      const hook = vi.fn(() => {
+        details.phase = 'mutated'
+        throw new Error('error envelope getter must not run')
+      })
+      const failure = Object.defineProperty(
+        {
+          type: BeaconMessageType.Error,
+          id: 'preparation',
+          version: '3',
+          senderId: 'wallet',
+          errorType: BeaconErrorType.NOT_GRANTED_ERROR,
+          errorData: details,
+          errorOrigin: 'local',
+          message: 'preparation failed'
+        },
+        field,
+        { enumerable: true, get: hook }
+      )
+      const packets = captureLocalStoragePosts()
+      vi.mocked(leader.init).mockRejectedValueOnce(failure)
+      const pending = await begin('3')
+      expect(packets).toHaveLength(1)
+      await deliverViaLocalStorage(packets[0])
+      expect(hook).not.toHaveBeenCalled()
+      expect(details.phase).toBe('original')
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          errorType: BeaconErrorType.UNKNOWN_ERROR,
+          errorOrigin: 'local',
+          errorData: {
+            message: 'preparation failed',
+            diagnostic: 'Uncloneable request diagnostic'
+          }
+        }
+      })
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+    }
+  )
 
   it.each(['own', 'inherited'] as const)(
     'does not invoke a rejected diagnostic %s message getter during forwarding',

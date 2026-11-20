@@ -573,47 +573,62 @@ describe('DAppClient typed error rejections', () => {
       })
     })
 
-    it('settles an unknown wallet error type with verified headers and a guarded event', async () => {
-      const failed = vi.fn()
-      await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, failed)
-      const pending = dapp
-        .requestOperation({ operationDetails: [] })
-        .catch((error: unknown) => error)
-      await vi.advanceTimersByTimeAsync(0)
-      const id = await getLastSentRequestId()
-      const response = {
-        id,
-        version: '2',
-        senderId: peer.senderId,
-        type: BeaconMessageType.Error,
-        errorType: 'FUTURE_WALLET_ERROR',
-        errorData: { detail: 'wallet diagnostic' }
+    it.each(['2', '3'] as const)(
+      'keeps unfamiliar V%s wallet codes and diagnostics in plain events',
+      async (version) => {
+        const failed = vi.fn()
+        const handleResponse = vi.fn(async () => {})
+        await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, failed)
+        dapp.addBlockchain({
+          identifier: 'future-error-chain',
+          async validateRequest() {},
+          handleResponse,
+          async getAccountInfosFromPermissionResponse() {
+            return []
+          },
+          async getWalletLists() {
+            return { extensionList: [], desktopList: [], webList: [], iOSList: [] }
+          }
+        })
+        const pending = (
+          version === '2'
+            ? dapp.requestOperation({ operationDetails: [] })
+            : dapp.request({
+                type: BeaconMessageType.BlockchainRequest,
+                blockchainIdentifier: 'future-error-chain',
+                accountId: account.accountIdentifier,
+                blockchainData: { type: 'operation', scope: 'operation_request' }
+              })
+        ).catch((error: unknown) => error)
+        await vi.advanceTimersByTimeAsync(0)
+        const id = await getLastSentRequestId()
+        const payload = {
+          type: BeaconMessageType.Error,
+          errorType: 'FUTURE_WALLET_ERROR',
+          errorData: { detail: 'wallet diagnostic' }
+        }
+        const header = { id, version, senderId: peer.senderId }
+        const response =
+          version === '2' ? { ...header, ...payload } : { ...header, message: payload }
+        await dapp['handleResponse'](response, context)
+        const error: unknown = await pending
+        expect(error).toBeInstanceOf(UnknownBeaconError)
+        if (!isBeaconError(error)) throw new Error('Expected typed unknown wallet rejection')
+        expect(error).toMatchObject({
+          ...header,
+          errorOrigin: 'wallet',
+          errorType: BeaconErrorType.UNKNOWN_ERROR
+        })
+        expect(error.errorData).toBe(payload.errorData)
+        expect(handleResponse).not.toHaveBeenCalled()
+        expect(failed).toHaveBeenCalledTimes(1)
+        const event = failed.mock.calls[0][0].errorResponse
+        expect(event).not.toBeInstanceOf(Error)
+        expect(isRequestErrorResponse(event)).toBe(false)
+        expect(event).toEqual({ ...header, ...payload, errorOrigin: 'wallet' })
+        expect(event.errorData).toBe(payload.errorData)
       }
-      await dapp['handleResponse'](response, context)
-      const error: unknown = await pending
-      expect(error).toBeInstanceOf(UnknownBeaconError)
-      if (!isBeaconError(error)) throw new Error('Expected typed unknown wallet rejection')
-      expect(error).toMatchObject({
-        id,
-        senderId: peer.senderId,
-        version: '2',
-        errorOrigin: 'wallet',
-        errorType: BeaconErrorType.UNKNOWN_ERROR
-      })
-      expect(error.errorData).toEqual(expect.objectContaining(response))
-      expect(failed).toHaveBeenCalledTimes(1)
-      const event = failed.mock.calls[0][0].errorResponse
-      expect(event).not.toBeInstanceOf(Error)
-      expect(isRequestErrorResponse(event)).toBe(true)
-      expect(event).toMatchObject({
-        id,
-        senderId: peer.senderId,
-        version: '2',
-        errorOrigin: 'wallet',
-        errorType: BeaconErrorType.UNKNOWN_ERROR
-      })
-      expect(event.errorData).toEqual(expect.objectContaining(response))
-    })
+    )
 
     it('offers removal of only the requested account when the wallet cannot find its private key', async () => {
       const requested = {
