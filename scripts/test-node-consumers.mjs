@@ -190,10 +190,12 @@ try {
           path.join(consumerRoot, 'emitted-wallet-consumer.ts'),
           [
             "import type { ValidatedWalletPartialTezosOperation } from '@ecadlabs/beacon-utils/wallet'",
-            "import { acceptedOperations, acceptedOperation } from './" +
+            "import { acceptedOperations, acceptedOperation, acceptedOperationRequest, existingInputOperation } from './" +
               declarationDirectory +
               "/wallet-helpers-library.types.js'",
             'type Assert<Condition extends true> = Condition',
+            'export type GuardedRequestReturn = ReturnType<typeof acceptedOperationRequest>',
+            'export type InputOperationReturn = ReturnType<typeof existingInputOperation>',
             'export type FilterResult = Assert<ReturnType<typeof acceptedOperations> extends ValidatedWalletPartialTezosOperation[] ? true : false>',
             'export type FilterInput = Assert<ValidatedWalletPartialTezosOperation[] extends ReturnType<typeof acceptedOperations> ? true : false>',
             'export type GuardResult = Assert<ReturnType<typeof acceptedOperation> extends ValidatedWalletPartialTezosOperation | undefined ? true : false>',
