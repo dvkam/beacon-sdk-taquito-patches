@@ -54,27 +54,28 @@ export const packMessageText = (text: string): string => {
 const inspectMicheline = (normalizedHex: string): SignPayloadInspection => {
   try {
     assertMichelineBudget(normalizedHex)
-    let decoded = unpackDataBytes({ bytes: normalizedHex })
     let canonicalHex: string
+    let decodedText: string | undefined
     if (normalizedHex.startsWith('0501')) {
-      // The codec's default TextDecoder drops a leading BOM. Preserve exact top-level text.
-      const bytes = Uint8Array.from(normalizedHex.slice(12).match(/../g) ?? [], (byte) =>
-        parseInt(byte, 16)
-      )
-      decoded = {
-        ['string']: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+      // The budget scan has checked the complete scalar frame. Decode exact UTF-8 once.
+      const scalarHex = normalizedHex.slice(12)
+      const bytes = new Uint8Array(scalarHex.length / 2)
+      for (let index = 0; index < bytes.length; index++) {
+        bytes[index] = parseInt(scalarHex.slice(index * 2, index * 2 + 2), 16)
       }
-      canonicalHex = packMessageText(decoded.string)
-    } else if (normalizedHex.startsWith('050a') && !Array.isArray(decoded) && 'bytes' in decoded) {
-      canonicalHex = frameScalar('0a', decoded.bytes)
+      decodedText = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+      canonicalHex = frameScalar('01', scalarHex)
+    } else if (normalizedHex.startsWith('050a')) {
+      canonicalHex = frameScalar('0a', normalizedHex.slice(12))
     } else {
+      const decoded = unpackDataBytes({ bytes: normalizedHex })
       canonicalHex = packDataBytes(decoded).bytes
+      decodedText = !Array.isArray(decoded) && 'string' in decoded ? decoded.string : undefined
     }
-    // Scalar framing avoids the codec writer's large-array spread limit.
+    // Scalar framing avoids codec allocations and the writer's large-array spread limit.
     if (canonicalHex !== normalizedHex) {
       return { valid: false, reason: 'Unsupported or noncanonical packed Micheline encoding' }
     }
-    const decodedText = !Array.isArray(decoded) && 'string' in decoded ? decoded.string : undefined
 
     return {
       valid: true,

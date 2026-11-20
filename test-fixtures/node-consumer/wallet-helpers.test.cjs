@@ -20,6 +20,7 @@ test('public wallet helpers inspect and sanitize installed package values', asyn
   const { SigningType } = require('@ecadlabs/beacon-types')
   const text = 'Tezos Signed Message: installed consumer é'
   assert.equal(inspectSignPayload(packMessageText(text), SigningType.RAW).decodedText, text)
+  assert.equal(inspectSignPayload('0505090306', SigningType.MICHELINE).valid, true)
   assert.deepEqual(
     sanitizePartialTezosOperations([
       { kind: 'transaction', source: 'spoof', amount: '1', destination: 'tz1destination' }

@@ -126,10 +126,12 @@ The scan rejects the Michelson `PUSH` instruction at any depth because it activa
 typed conversions during decoding and canonical repacking. A packed value containing
 `PUSH` returns an unsupported result, or raw bytes for an explicit RAW request.
 Operation guards still accept `PUSH` in Micheline operation fields.
-The codec still decodes supported values. Canonical checking uses unique wire
-framing for top-level strings and bytes and the codec's encoder for other values.
-The narrow scalar framing avoids the tested codec writer's large-array spread
-limit; it is not a general Micheline encoder.
+After the scan, top-level strings use strict UTF-8 decoding that preserves the
+BOM, and top-level bytes retain their exact hex data. Both use unique scalar
+framing directly. Other supported values use the public codec decoder and encoder
+for canonical checking. The scalar path avoids repeated decoding, large temporary
+arrays and the tested codec writer's spread limit. It is not a general Micheline
+encoder.
 
 This limits repeated work for one preview while retaining large flat scalar
 payloads. It is not a calibrated time limit. A well-formed value can exceed the
@@ -155,7 +157,7 @@ malformed. The public decoder in `@taquito/michel-codec` 25.1.1 strips leading
 BOMs from nested strings, so exact canonical validation conservatively rejects
 those values. For example, `0502000000090100000004efbbbf61` is a valid sequence
 containing `"\uFEFFa"` but returns an unsupported/noncanonical result. Top-level
-strings have a narrow UTF-8 correction and preserve their BOM. Other codec errors
+strings use strict UTF-8 decoding and preserve their BOM. Other codec errors
 and noncanonical/trailing bytes are rejected. Large nested values can remain
 unsupported by the codec even when they fit the preview's work budget.
 
