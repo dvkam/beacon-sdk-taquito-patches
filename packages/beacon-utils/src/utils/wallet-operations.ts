@@ -89,7 +89,10 @@ const shape =
     if (
       strict &&
       Reflect.ownKeys(value).some(
-        (key) => typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(fields, key)
+        (key) =>
+          typeof key !== 'string' ||
+          !Object.prototype.hasOwnProperty.call(fields, key) ||
+          Object.getOwnPropertyDescriptor(value, key)?.enumerable !== true
       )
     ) {
       return invalid()
