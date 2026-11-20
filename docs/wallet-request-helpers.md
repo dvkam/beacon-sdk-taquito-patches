@@ -170,8 +170,8 @@ SDK bundle.
 [TZIP-10](https://gitlab.com/tezos/tzip/-/blob/master/proposals/tzip-10/tzip-10.md)
 defines the wallet interaction messages and arbitrary signing payloads. It does
 not define the signed-message text prefix or an authentication format.
-[Beacon's signing guide](https://docs.walletbeacon.io/guides/sign-payload/)
-provides the `05` packed-string, `03` operation and RAW conventions used here.
+[The SDK's `SigningType` definition](https://github.com/ecadlabs/beacon-sdk-taquito-patches/blob/4d38b5918bf3225555760ebfaa8a1503be1d814b/packages/beacon-types/src/types/beacon/SigningType.ts)
+records the `05` Micheline, `03` operation and RAW conventions used here.
 
 [Octez's Micheline guide](https://octez.tezos.com/docs/shell/micheline.html)
 describes the wire expression format and protocol-specific primitive vocabulary.
