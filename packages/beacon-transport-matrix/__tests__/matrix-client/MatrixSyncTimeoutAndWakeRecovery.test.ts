@@ -1,5 +1,7 @@
+import { MatrixMessageType } from '../../src/matrix-client/models/MatrixMessage'
+import type { MatrixRoomJoinResponse } from '../../src/matrix-client/models/api/MatrixRoomJoin'
+import type { MatrixEventSendResponse } from '../../src/matrix-client/models/api/MatrixEventSend'
 import { LocalStorage, Logger } from '@ecadlabs/beacon-core'
-import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { MatrixClient, MatrixHealthTransition } from '../../src/matrix-client/MatrixClient'
 import { MatrixClientEventType } from '../../src/matrix-client/models/MatrixClientEvent'
 import { MatrixHttpClient } from '../../src/matrix-client/MatrixHttpClient'
@@ -120,15 +122,19 @@ describe('Matrix /sync client-side fetch timeout and wake/visibility recovery (I
       const client = new MatrixHttpClient('https://relay.example')
       const getRequest = observe(client.get('/sync'))
       const postRequest = observe(
-        client.post('/rooms/!room:relay/join', {}, { accessToken: 'access-token-1' })
+        client.post<MatrixRoomJoinResponse>(
+          '/rooms/!room:relay/join',
+          {},
+          { accessToken: 'access-token-1' }
+        )
       )
 
       try {
         await vi.advanceTimersByTimeAsync(10_000)
         const putRequest = observe(
-          client.put(
+          client.put<MatrixEventSendResponse>(
             '/rooms/!room:relay/send/m.room.message/txn-1',
-            { msgtype: 'm.text', body: 'ciphertext' },
+            { msgtype: MatrixMessageType.TEXT, body: 'ciphertext' },
             { accessToken: 'access-token-1' }
           )
         )
@@ -418,6 +424,8 @@ describe('Matrix /sync client-side fetch timeout and wake/visibility recovery (I
       })
       const receivedMessages: string[] = []
       client.subscribe(MatrixClientEventType.MESSAGE, (event) => {
+        if (typeof event.content.message.content !== 'string')
+          throw new Error('Expected Matrix text content')
         receivedMessages.push(event.content.message.content)
       })
 
@@ -570,6 +578,8 @@ describe('Matrix /sync client-side fetch timeout and wake/visibility recovery (I
         })
         const receivedMessages: string[] = []
         client.subscribe(MatrixClientEventType.MESSAGE, (event) => {
+          if (typeof event.content.message.content !== 'string')
+            throw new Error('Expected Matrix text content')
           receivedMessages.push(event.content.message.content)
         })
 

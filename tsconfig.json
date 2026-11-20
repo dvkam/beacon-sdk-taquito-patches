@@ -7,7 +7,7 @@
     "declaration": true,
     "outDir": "./dist/esm",
     "typeRoots": ["./node_modules/@types", "./src/typings", "./node_modules"],
-    "types": ["node", "chrome", "vitest/globals"],
+    "types": ["node", "chrome"],
     "sourceMap": true,
     "inlineSources": true,
     /* Strict Type-Checking Options */

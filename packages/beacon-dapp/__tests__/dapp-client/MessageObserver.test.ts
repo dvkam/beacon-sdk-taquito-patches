@@ -214,10 +214,14 @@ describe('DAppClient plaintext message observers (#149)', () => {
       const sequence: string[] = []
       dapp.subscribeToMessages((record) => sequence.push(record.direction))
       const serialize = Serializer.prototype.serialize
-      vi.spyOn(Serializer.prototype, 'serialize').mockImplementation(function (message) {
+      vi.spyOn(Serializer.prototype, 'serialize').mockImplementation(function (
+        this: Serializer,
+        message
+      ) {
         sequence.push('serialize')
         return serialize.call(this, message)
       })
+      const blockchainData = { type: 'sign', scope: 'sign', payload: 'aa' }
       const outcome = observe(
         version === '2'
           ? dapp.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
@@ -225,7 +229,7 @@ describe('DAppClient plaintext message observers (#149)', () => {
               type: BeaconMessageType.BlockchainRequest,
               blockchainIdentifier: 'tezos',
               accountId: account.accountIdentifier,
-              blockchainData: { type: 'sign', scope: 'sign', payload: 'aa' }
+              blockchainData
             })
       )
       await vi.advanceTimersByTimeAsync(0)

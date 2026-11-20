@@ -594,7 +594,7 @@ describe('WalletConnect startup ownership', () => {
       initialize.mockRejectedValue(new Error('Could not establish socket connection'))
       expectFailure(await client.getPairingRequestInfo(), 'relay-unreachable')
 
-      reportDiagnostic.mockClear()
+      vi.mocked(reportDiagnostic).mockClear()
       initialize.mockResolvedValue(first)
       first.connect.mockImplementationOnce(async () => {
         first.core.relayer.events.emit(
@@ -636,7 +636,7 @@ describe('WalletConnect startup ownership', () => {
         'timeout'
       )
 
-      reportDiagnostic.mockClear()
+      vi.mocked(reportDiagnostic).mockClear()
       initialize.mockResolvedValue(first)
       first.connect.mockImplementationOnce(() => new Promise(() => {}))
       const pairing = observe(client.getPairingRequestInfo())

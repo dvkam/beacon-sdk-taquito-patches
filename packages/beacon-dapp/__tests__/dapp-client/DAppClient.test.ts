@@ -3,6 +3,7 @@ import { openToast, setDesktopList } from '@ecadlabs/beacon-ui'
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
+  StoredAccountInfo,
   AccountInfo,
   Blockchain,
   BeaconMessage,
@@ -32,6 +33,14 @@ import { DappWalletConnectTransport } from '../../src/transports/DappWalletConne
 import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
 import { getDAppClientInstance } from '../../src/utils/get-instance'
+
+const storageSeeds = vi.hoisted(() => new Map<string, Record<string, unknown>>())
+
+function createSeededStorage(values: Record<string, unknown>): LocalStorage {
+  const prefix = `seeded-storage-${storageSeeds.size}`
+  storageSeeds.set(prefix, values)
+  return new LocalStorage(prefix)
+}
 
 type RequestResponse = Awaited<NonNullable<ReturnType<DAppClient['createRequest']>>['promise']>
 type RequestRoute = NonNullable<Parameters<DAppClient['createRequest']>[1]>
@@ -106,17 +115,19 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@ecadlabs/beacon-core')>()
   return {
     ...actual,
-    // A minimal in-memory LocalStorage stub. The constructor is fixture-only;
-    // the real LocalStorage constructor takes an optional key prefix.
+    // The prefix selects an optional raw seed without changing the public constructor.
+    // Seeds include malformed persisted values used to exercise recovery.
     LocalStorage: class {
-      private store = new Map<string, any>()
-      constructor(initialValues?: Record<string, any>) {
-        Object.entries(initialValues ?? {}).forEach(([key, value]) => this.store.set(key, value))
+      private store = new Map<string, unknown>()
+      constructor(prefix?: string) {
+        const values = prefix ? storageSeeds.get(prefix) : undefined
+        this.store = new Map(Object.entries(values ?? {}))
+        if (prefix) storageSeeds.delete(prefix)
       }
       async get(key: string) {
         return this.store.get(key)
       }
-      async set(key: string, value: any) {
+      async set(key: string, value: unknown) {
         this.store.set(key, value)
       }
       async delete(key: string) {
@@ -1038,7 +1049,7 @@ describe('DAppClient: basic unit tests', () => {
   it('does not re-set the active account when accounts storage changes but memory already matches', async () => {
     const account = createStoredAccount()
     const testClient = client as unknown as {
-      _activeAccount: ExposedPromise<unknown>
+      _activeAccount: ExposedPromise<StoredAccountInfo | undefined>
       storage: {
         set: (key: StorageKey, value: unknown) => Promise<void>
         getPrefixedKey: (key: StorageKey) => string
@@ -1046,7 +1057,7 @@ describe('DAppClient: basic unit tests', () => {
       setActiveAccount: (account?: unknown) => Promise<void>
     }
 
-    testClient._activeAccount = ExposedPromise.resolve(account)
+    testClient._activeAccount = ExposedPromise.resolve<StoredAccountInfo | undefined>(account)
     await testClient.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
     await testClient.storage.set(StorageKey.ACCOUNTS, [account])
     const setActiveAccount = vi.spyOn(testClient, 'setActiveAccount').mockResolvedValue(undefined)
@@ -1907,7 +1918,7 @@ describe('DAppClient: basic unit tests', () => {
     const invalidAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
     const p2pPeer = createV480P2PPeer()
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
       [StorageKey.ACCOUNTS]: [storedAccount],
       [StorageKey.PERMISSION_LIST]: [createV480Permission()],
@@ -2005,7 +2016,7 @@ describe('DAppClient: basic unit tests', () => {
     const legacyInvalidAccountHandler = vi.fn()
     const activeAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
       [StorageKey.ACCOUNTS]: [storedAccount]
     })
@@ -2052,7 +2063,7 @@ describe('DAppClient: basic unit tests', () => {
       senderId: 'secondary-wallet-sender-id',
       address: 'tz1secondaryAddress'
     }
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
       [StorageKey.ACCOUNTS]: [storedAccount, secondaryAccount]
     })
@@ -2087,7 +2098,7 @@ describe('DAppClient: basic unit tests', () => {
   it('treats a literal undefined active-account sentinel as silent state repair', async () => {
     const invalidAccountHandler = vi.fn()
     const activeAccountHandler = vi.fn()
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'undefined',
       [StorageKey.BEACON_SDK_SECRET_SEED]: 'seed',
       [StorageKey.LAST_SELECTED_WALLET]: { key: 'kukai', name: 'Kukai' }
@@ -2169,7 +2180,7 @@ describe('DAppClient: basic unit tests', () => {
 
   it('continues a permission request after repairing a missing active account', async () => {
     const invalidAccountHandler = vi.fn()
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'undefined',
       [StorageKey.BEACON_SDK_SECRET_SEED]: 'seed',
       [StorageKey.LAST_SELECTED_WALLET]: { key: 'kukai', name: 'Kukai' }
@@ -2258,7 +2269,7 @@ describe('DAppClient: basic unit tests', () => {
 
   it('emits account deactivated and clears state when stored accounts are malformed', async () => {
     const invalidAccountHandler = vi.fn()
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'stored-account-id',
       [StorageKey.ACCOUNTS]: {
         accountIdentifier: 'stored-account-id'
@@ -2292,7 +2303,7 @@ describe('DAppClient: basic unit tests', () => {
   it('clears invalid storage without account deactivated event when validation fails with no active account', async () => {
     const invalidAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACCOUNTS]: [storedAccount]
     })
     ;(storage as any).validateResults = [false, false]
@@ -2319,7 +2330,7 @@ describe('DAppClient: basic unit tests', () => {
 
   it('emits account deactivated once when active-account restore and validation both fail', async () => {
     const invalidAccountHandler = vi.fn()
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
       [StorageKey.ACCOUNTS]: [createStoredAccount()]
     })
@@ -2352,7 +2363,7 @@ describe('DAppClient: basic unit tests', () => {
   it('emits account deactivated with storage validation reason when restored storage stays invalid', async () => {
     const invalidAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
       [StorageKey.ACCOUNTS]: [storedAccount]
     })
@@ -2627,7 +2638,7 @@ describe('DAppClient: basic unit tests', () => {
       await client['storageValidated']
       await seedPeerStorage()
       client['_activePeer'] = ExposedPromise.resolve<PeerInfoType | undefined>(activePeer)
-      client['_activeAccount'] = ExposedPromise.resolve<AccountInfo | undefined>(
+      client['_activeAccount'] = ExposedPromise.resolve<StoredAccountInfo | undefined>(
         createStoredAccount()
       )
       await client['storage'].set(StorageKey.ACCOUNTS, [createStoredAccount()])
@@ -2954,7 +2965,7 @@ describe('DAppClient: basic unit tests', () => {
       publicKey,
       senderId
     }
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
       [StorageKey.ACCOUNTS]: [storedAccount],
       [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]
@@ -3195,7 +3206,7 @@ describe('DAppClient: basic unit tests', () => {
       publicKey,
       senderId
     }
-    const storage = new LocalStorage({
+    const storage = createSeededStorage({
       [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
       [StorageKey.ACCOUNTS]: [storedAccount],
       [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]

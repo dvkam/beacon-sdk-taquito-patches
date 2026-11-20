@@ -7,6 +7,12 @@ import {
   Transport
 } from '@ecadlabs/beacon-core'
 import {
+  PermissionRequestInput,
+  SignPayloadRequestInput,
+  OperationRequestInput,
+  BroadcastRequestInput,
+  ProofOfEventChallengeRequestInput,
+  SimulatedProofOfEventChallengeRequestInput,
   AccountInfo,
   BeaconErrorType,
   BeaconMessage,
@@ -258,44 +264,50 @@ describe('Request timeout policy', () => {
   function dispatchV2(kind: RequestKind) {
     switch (kind) {
       case 'permission':
-        return dapp['makeRequest']({
+        const permissionRequestInput = {
           type: BeaconMessageType.PermissionRequest,
           appMetadata,
           network,
           scopes: [PermissionScope.OPERATION_REQUEST]
-        })
+        } satisfies PermissionRequestInput
+        return dapp['makeRequest'](permissionRequestInput)
       case 'sign':
-        return dapp['makeRequest']({
+        const signPayloadRequestInput = {
           type: BeaconMessageType.SignPayloadRequest,
           signingType: SigningType.RAW,
           payload: 'aa',
           sourceAddress: account.address
-        })
+        } satisfies SignPayloadRequestInput
+        return dapp['makeRequest'](signPayloadRequestInput)
       case 'operation':
-        return dapp['makeRequest']({
+        const operationRequestInput = {
           type: BeaconMessageType.OperationRequest,
           network,
           operationDetails: [],
           sourceAddress: account.address
-        })
+        } satisfies OperationRequestInput
+        return dapp['makeRequest'](operationRequestInput)
       case 'broadcast':
-        return dapp['makeRequest']({
+        const broadcastRequestInput = {
           type: BeaconMessageType.BroadcastRequest,
           network,
           signedTransaction: 'aa'
-        })
+        } satisfies BroadcastRequestInput
+        return dapp['makeRequest'](broadcastRequestInput)
       case 'proof of event':
-        return dapp['makeRequest']({
+        const proofOfEventChallengeRequestInput = {
           type: BeaconMessageType.ProofOfEventChallengeRequest,
           payload: 'challenge',
           contractAddress
-        })
+        } satisfies ProofOfEventChallengeRequestInput
+        return dapp['makeRequest'](proofOfEventChallengeRequestInput)
       case 'simulated proof of event':
-        return dapp['makeRequest']({
+        const simulatedProofOfEventChallengeRequestInput = {
           type: BeaconMessageType.SimulatedProofOfEventChallengeRequest,
           payload: 'challenge',
           contractAddress
-        })
+        } satisfies SimulatedProofOfEventChallengeRequestInput
+        return dapp['makeRequest'](simulatedProofOfEventChallengeRequestInput)
     }
   }
 

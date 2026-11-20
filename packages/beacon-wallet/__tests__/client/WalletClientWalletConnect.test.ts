@@ -2,7 +2,6 @@ import { LocalStorage } from '@ecadlabs/beacon-core'
 import {
   BeaconErrorType,
   BeaconMessageType,
-  NetworkType,
   OperationRequestOutput,
   PermissionRequestOutput,
   SignPayloadRequestOutput,

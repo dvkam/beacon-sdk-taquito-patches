@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2024", "DOM"],
+    "types": ["node", "chrome", "vitest/globals"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": false,
+    "allowJs": false,
+    "checkJs": false,
+    "rootDir": "../.."
+  },
+  "include": ["__tests__/**/*", "vitest-setup.ts", "src/**/*.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

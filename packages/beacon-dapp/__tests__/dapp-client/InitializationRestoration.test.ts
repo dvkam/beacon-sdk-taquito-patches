@@ -1,4 +1,4 @@
-import { LocalStorage, Transport } from '@ecadlabs/beacon-core'
+import { ClientTransport, LocalStorage } from '@ecadlabs/beacon-core'
 import {
   AccountInfo,
   BeaconErrorType,
@@ -191,7 +191,7 @@ describe('DApp initialization through account restoration', () => {
           await this.addListener(transport)
         }
       }
-      selectedTransport(): Promise<Transport> {
+      selectedTransport(): Promise<ClientTransport> {
         return this.transport
       }
     }

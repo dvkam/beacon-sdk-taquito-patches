@@ -196,18 +196,24 @@ describe('BeaconError hierarchy and runtime behavior', () => {
           it('returns true for both plain RequestErrorResponse wire objects and BeaconError instances', () => {
             const plainWalletError: RequestErrorResponse = {
               type: BeaconMessageType.Error,
+              version: '2',
+              senderId: 'wallet',
               id: 'req-1',
               errorType: BeaconErrorType.NOT_GRANTED_ERROR,
               errorOrigin: 'wallet'
             }
             const plainLocalError: RequestErrorResponse = {
               type: BeaconMessageType.Error,
+              version: '2',
+              senderId: 'wallet',
               id: 'req-2',
               errorType: BeaconErrorType.PEER_UNREACHABLE,
               errorOrigin: 'local'
             }
             const plainWithoutOrigin: RequestErrorResponse = {
               type: BeaconMessageType.Error,
+              version: '2',
+              senderId: 'wallet',
               id: 'req-3',
               errorType: BeaconErrorType.UNKNOWN_ERROR
             }

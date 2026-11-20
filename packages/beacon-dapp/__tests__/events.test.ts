@@ -16,7 +16,8 @@ import {
   Origin,
   SignPayloadResponse,
   SigningType,
-  TransportType
+  TransportType,
+  WalletConnectPairingResult
 } from '@ecadlabs/beacon-types'
 import { RequestErrorResponse } from '../src/dapp-client/request-error'
 import { TzktBlockExplorer } from '../src/utils/tzkt-blockexplorer'
@@ -88,13 +89,21 @@ describe('Phase 2A event wiring', () => {
     else Reflect.deleteProperty(navigator, 'clipboard')
   })
   it.each([
-    BeaconEvent.PERMISSION_REQUEST_SENT,
-    BeaconEvent.OPERATION_REQUEST_SENT,
-    BeaconEvent.SIGN_REQUEST_SENT,
-    BeaconEvent.BROADCAST_REQUEST_SENT
-  ] as const)('%s shows loading state and wires reset', async (event) => {
+    [BeaconEvent.PERMISSION_REQUEST_SENT, BeaconMessageType.PermissionRequest],
+    [BeaconEvent.OPERATION_REQUEST_SENT, BeaconMessageType.OperationRequest],
+    [BeaconEvent.SIGN_REQUEST_SENT, BeaconMessageType.SignPayloadRequest],
+    [BeaconEvent.BROADCAST_REQUEST_SENT, BeaconMessageType.BroadcastRequest]
+  ] as const)('%s shows loading state and wires reset', async (event, requestType) => {
     const resetCallback = vi.fn()
-    await defaultEventCallbacks[event]({ walletInfo, extraInfo: { resetCallback } })
+    await defaultEventCallbacks[event]({
+      requestId: envelope.id,
+      requestType,
+      transport: TransportType.P2P,
+      dispatchStage: 'transport',
+      sentAt: 1,
+      walletInfo,
+      extraInfo: { resetCallback }
+    })
     expect(openToast).toHaveBeenCalledWith(
       expect.objectContaining({ walletInfo, state: 'loading' })
     )
@@ -113,6 +122,8 @@ describe('Phase 2A event wiring', () => {
     BeaconEvent.BROADCAST_REQUEST_ERROR
   ] as const)('%s presents the wallet rejection', async (event) => {
     await defaultEventCallbacks[event]({
+      requestId: envelope.id,
+      receivedAt: 1,
       walletInfo,
       errorMessages: {},
       errorResponse: {
@@ -134,7 +145,7 @@ describe('Phase 2A event wiring', () => {
     const data = {
       p2pPeerInfo: Promise.resolve('p2p'),
       postmessagePeerInfo: Promise.resolve('extension'),
-      walletConnectPeerInfo: Promise.resolve('wc'),
+      walletConnectPeerInfo: Promise.resolve<WalletConnectPairingResult>({ ok: true, uri: 'wc' }),
       networkType: NetworkType.MAINNET,
       analytics: { track: vi.fn() },
       abortedHandler: vi.fn(),
@@ -168,6 +179,8 @@ describe('Phase 2A event wiring', () => {
   })
   it('permission success includes address, network and scopes', async () => {
     await defaultEventCallbacks[BeaconEvent.PERMISSION_REQUEST_SUCCESS]({
+      requestId: envelope.id,
+      receivedAt: 1,
       account,
       walletInfo,
       connectionContext: { origin: Origin.P2P, id: 'peer' },
@@ -240,6 +253,8 @@ describe('Phase 2A event wiring', () => {
       const transactionHash = 'operation-hash'
       if (event === BeaconEvent.OPERATION_REQUEST_SUCCESS) {
         await defaultEventCallbacks[event]({
+          requestId: envelope.id,
+          receivedAt: 1,
           account,
           walletInfo,
           blockExplorer,
@@ -248,6 +263,8 @@ describe('Phase 2A event wiring', () => {
         })
       } else {
         await defaultEventCallbacks[event]({
+          requestId: envelope.id,
+          receivedAt: 1,
           network,
           walletInfo,
           blockExplorer,
@@ -267,6 +284,8 @@ describe('Phase 2A event wiring', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     await defaultEventCallbacks[BeaconEvent.SIGN_REQUEST_SUCCESS]({
+      requestId: envelope.id,
+      receivedAt: 1,
       walletInfo,
       connectionContext: { origin: Origin.P2P, id: 'peer' },
       output: {
@@ -281,6 +300,9 @@ describe('Phase 2A event wiring', () => {
   })
   it('acknowledge updates toast state, internal errors and rate limits display alerts', async () => {
     await defaultEventCallbacks[BeaconEvent.ACKNOWLEDGE_RECEIVED]({
+      requestId: envelope.id,
+      receivedAt: 1,
+      correlated: true,
       walletInfo,
       extraInfo: {},
       message: { ...envelope, type: BeaconMessageType.Acknowledge }
@@ -324,6 +346,8 @@ describe('Phase 2A event wiring', () => {
       { kind: 'temporary', id: 'contract.reject', with: { int: '42' } }
     ]
     await defaultEventCallbacks[BeaconEvent.OPERATION_REQUEST_ERROR]({
+      requestId: envelope.id,
+      receivedAt: 1,
       walletInfo,
       errorResponse: {
         ...envelope,
@@ -369,12 +393,19 @@ describe('request timeout toast', () => {
     {
       request: 'permission',
       show: (errorResponse) =>
-        defaultEventCallbacks[BeaconEvent.PERMISSION_REQUEST_ERROR]({ walletInfo, errorResponse })
+        defaultEventCallbacks[BeaconEvent.PERMISSION_REQUEST_ERROR]({
+          requestId: envelope.id,
+          receivedAt: 1,
+          walletInfo,
+          errorResponse
+        })
     },
     {
       request: 'operation',
       show: (errorResponse) =>
         defaultEventCallbacks[BeaconEvent.OPERATION_REQUEST_ERROR]({
+          requestId: envelope.id,
+          receivedAt: 1,
           walletInfo,
           errorResponse,
           errorMessages: {}
@@ -383,17 +414,29 @@ describe('request timeout toast', () => {
     {
       request: 'sign payload',
       show: (errorResponse) =>
-        defaultEventCallbacks[BeaconEvent.SIGN_REQUEST_ERROR]({ walletInfo, errorResponse })
+        defaultEventCallbacks[BeaconEvent.SIGN_REQUEST_ERROR]({
+          requestId: envelope.id,
+          receivedAt: 1,
+          walletInfo,
+          errorResponse
+        })
     },
     {
       request: 'broadcast',
       show: (errorResponse) =>
-        defaultEventCallbacks[BeaconEvent.BROADCAST_REQUEST_ERROR]({ walletInfo, errorResponse })
+        defaultEventCallbacks[BeaconEvent.BROADCAST_REQUEST_ERROR]({
+          requestId: envelope.id,
+          receivedAt: 1,
+          walletInfo,
+          errorResponse
+        })
     },
     {
       request: 'proof of event',
       show: (errorResponse) =>
         defaultEventCallbacks[BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]({
+          requestId: envelope.id,
+          receivedAt: 1,
           walletInfo,
           errorResponse
         })
@@ -402,6 +445,8 @@ describe('request timeout toast', () => {
       request: 'simulated proof of event',
       show: (errorResponse) =>
         defaultEventCallbacks[BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]({
+          requestId: envelope.id,
+          receivedAt: 1,
           walletInfo,
           errorResponse
         })
@@ -443,6 +488,8 @@ describe('request timeout toast', () => {
     [BeaconErrorType.NOT_GRANTED_ERROR, '{{wallet}}  request failed']
   ])('describes a local %s without blaming the wallet', async (errorType, body) => {
     await defaultEventCallbacks[BeaconEvent.OPERATION_REQUEST_ERROR]({
+      requestId: envelope.id,
+      receivedAt: 1,
       walletInfo,
       errorResponse: errorResponse(errorType, 'local'),
       errorMessages: {}
@@ -459,6 +506,8 @@ describe('request timeout toast', () => {
     BeaconErrorType.PEER_UNREACHABLE
   ])('keeps "has returned an error" for a wallet-sent %s', async (errorType) => {
     await defaultEventCallbacks[BeaconEvent.OPERATION_REQUEST_ERROR]({
+      requestId: envelope.id,
+      receivedAt: 1,
       walletInfo,
       errorResponse: errorResponse(errorType, 'wallet'),
       errorMessages: {}
@@ -606,6 +655,8 @@ describe('transaction error details', () => {
 
   const showTransactionError = (errorData: unknown) =>
     defaultEventCallbacks[BeaconEvent.OPERATION_REQUEST_ERROR]({
+      requestId: 'request',
+      receivedAt: 1,
       errorResponse: {
         id: 'request',
         senderId: 'wallet',
@@ -912,7 +963,7 @@ describe('toast opt-out', () => {
     await handler.emit(BeaconEvent.PAIR_INIT, {
       p2pPeerInfo: Promise.resolve('p2p'),
       postmessagePeerInfo: Promise.resolve('extension'),
-      walletConnectPeerInfo: Promise.resolve('wc'),
+      walletConnectPeerInfo: Promise.resolve<WalletConnectPairingResult>({ ok: true, uri: 'wc' }),
       networkType: NetworkType.MAINNET,
       analytics: { track: vi.fn() },
       abortedHandler: vi.fn()

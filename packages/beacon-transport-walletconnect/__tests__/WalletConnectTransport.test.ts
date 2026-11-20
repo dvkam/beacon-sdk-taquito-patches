@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest'
 import {
   ExtendedWalletConnectPairingResponse,
   NetworkType,
@@ -26,8 +27,7 @@ describe('WalletConnectTransport', () => {
   const keyPair = {} as KeyPair
   const storage = {} as Storage
 
-  let getInstanceSpy:
-    vi.SpiedFunction<typeof WalletConnectCommunicationClient.getInstance> | undefined
+  let getInstanceSpy: MockInstance<typeof WalletConnectCommunicationClient.getInstance> | undefined
 
   const createSession = (): SessionTypes.Struct =>
     ({

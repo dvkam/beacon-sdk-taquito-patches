@@ -263,13 +263,13 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
               name: 'Kukai Wallet',
               icon: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
             },
-            openWalletAction: () => {},
+            openWalletAction: async () => {},
             actions: [
               {
                 text: 'Wallet not receiving request?',
                 isBold: true,
                 actionText: 'Reset Connection',
-                actionCallback: () => {}
+                actionCallback: async () => {}
               }
             ]
           })

@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "types": ["node", "chrome"],
+    "allowJs": false,
+    "checkJs": false
+  },
+  "include": ["test-fixtures/client-options/**/*.ts"]
+}

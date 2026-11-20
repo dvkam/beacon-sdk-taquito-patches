@@ -457,6 +457,7 @@ describe('DAppClient.getActiveWalletInfo', () => {
     const createdAccount = await client['onNewAccount'](
       {
         type: BeaconMessageType.PermissionResponse,
+        walletType: 'implicit',
         version: '2',
         id: 'perm-response-id',
         senderId: account.senderId,
@@ -512,6 +513,7 @@ describe('DAppClient.getActiveWalletInfo', () => {
       const createdAccount = await client['onNewAccount'](
         {
           type: BeaconMessageType.PermissionResponse,
+          walletType: 'implicit',
           version: '2',
           id: 'perm-response-invalid-wallet',
           senderId: account.senderId,

@@ -71,7 +71,8 @@ function session(topic: string): SessionTypes.Struct {
         events: []
       }
     },
-    requiredNamespaces: {}
+    requiredNamespaces: {},
+    optionalNamespaces: {}
   }
 }
 
@@ -265,7 +266,8 @@ describe('WalletConnect pairing approval ownership', () => {
           name: 'Matrix wallet',
           publicKey: 'matrix-key',
           version: '3',
-          relayServer: 'matrix.example.com'
+          relayServer: 'matrix.example.com',
+          senderId: 'matrix-wallet'
         })
         await expect(selection).resolves.toBe(TransportType.P2P)
       } else {

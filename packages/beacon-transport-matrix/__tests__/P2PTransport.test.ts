@@ -1,7 +1,12 @@
 import { LocalStorage } from '@ecadlabs/beacon-core'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { P2PCommunicationClient } from '../src/communication-client/P2PCommunicationClient'
-import { Origin, P2PPairingRequest, StorageKey, TransportStatus } from '@ecadlabs/beacon-types'
+import {
+  ExtendedP2PPairingResponse,
+  Origin,
+  StorageKey,
+  TransportStatus
+} from '@ecadlabs/beacon-types'
 import { P2PTransport } from '../src/P2PTransport'
 
 describe('P2PTransport.connect', () => {
@@ -154,7 +159,9 @@ describe('P2PTransport.connect', () => {
       })
     const peers = vi
       .spyOn(transport, 'getPeers')
-      .mockResolvedValue([new P2PPairingRequest('peer-id', 'Wallet', 'peer', '2', 'relay.example')])
+      .mockResolvedValue([
+        new ExtendedP2PPairingResponse('peer-id', 'Wallet', 'peer', '2', 'relay.example', 'sender')
+      ])
     const failure = new Error('replayed message listener failed')
     const listener = vi.fn().mockRejectedValue(failure)
     try {
