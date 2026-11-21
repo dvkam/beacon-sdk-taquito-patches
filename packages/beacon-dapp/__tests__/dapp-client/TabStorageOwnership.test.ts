@@ -1,5 +1,6 @@
 import { LocalStorage, Serializer } from '@ecadlabs/beacon-core'
 import {
+  StoredAccountInfo,
   AccountInfo,
   BeaconErrorType,
   BeaconMessageType,
@@ -136,7 +137,7 @@ beforeEach(async () => {
   vi.spyOn(transport, 'send').mockResolvedValue(undefined)
   client['walletConnectTransport'] = transport
   client['_transport'] = ExposedPromise.resolve<Awaited<DAppClient['transport']>>(transport)
-  client['_activeAccount'] = ExposedPromise.resolve<AccountInfo | undefined>(account)
+  client['_activeAccount'] = ExposedPromise.resolve<StoredAccountInfo | undefined>(account)
   await storage.set(StorageKey.ACCOUNTS, [account])
   await storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
   vi.spyOn(client, 'getWalletInfo').mockResolvedValue({ name: 'Tab wallet' })

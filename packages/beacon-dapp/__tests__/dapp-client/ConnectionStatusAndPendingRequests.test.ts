@@ -11,9 +11,9 @@ import {
   NotGrantedBeaconError
 } from '@ecadlabs/beacon-core'
 import {
+  StoredAccountInfo,
   AccountInfo,
   BeaconErrorType,
-  BeaconMessage,
   BeaconMessageType,
   Blockchain,
   ConnectionContext,
@@ -85,7 +85,7 @@ class ControlledTransport extends Transport<
 
   async doClientCleanup(): Promise<void> {}
 
-  async receive(message: BeaconMessage, ctx: ConnectionContext = p2pContext): Promise<void> {
+  async receive(message: unknown, ctx: ConnectionContext = p2pContext): Promise<void> {
     await this.notifyListeners(await new Serializer().serialize(message), ctx)
   }
 }
@@ -106,6 +106,7 @@ const wcPeer: ExtendedWalletConnectPairingResponse = {
   name: 'Test WC Wallet',
   publicKey: '22'.repeat(32),
   senderId: 'wallet-sender-wc',
+  extensionId: 'walletconnect',
   version: '2'
 }
 
@@ -272,7 +273,7 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       let isLeader = false
       const wcTransport = new DappWalletConnectTransport(
         'WC transition test',
-        { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64), keyType: 'ed25519' },
+        { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
         storage,
         { network: NetworkType.MAINNET, opts: { projectId: 'test-project' } },
         async () => isLeader
@@ -356,7 +357,7 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
         storage,
         disableDefaultEvents: true,
         matrixNodes: {
-          [Regions.EU1]: ['matrix-1.test.ecad.io']
+          [Regions.EUROPE_WEST]: ['matrix-1.test.ecad.io']
         }
       })
       await dapp.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
@@ -518,7 +519,7 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
         storage,
         disableDefaultEvents: true,
         matrixNodes: {
-          [Regions.EU1]: ['matrix-1.test.ecad.io']
+          [Regions.EUROPE_WEST]: ['matrix-1.test.ecad.io']
         }
       })
       await dapp.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
@@ -581,7 +582,7 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
         storage,
         disableDefaultEvents: true,
         matrixNodes: {
-          [Regions.EU1]: ['matrix-1.test.ecad.io', 'matrix-2.test.ecad.io']
+          [Regions.EUROPE_WEST]: ['matrix-1.test.ecad.io', 'matrix-2.test.ecad.io']
         }
       })
       await dapp.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
@@ -669,7 +670,7 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
         })
 
         const callOrder: string[] = []
-        let accountDuringStatusChange: AccountInfo | undefined
+        let accountDuringStatusChange: StoredAccountInfo | undefined
         const statusEvents: TransportStatusChangedInfo[] = []
 
         await dapp.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, (account) => {
@@ -800,7 +801,7 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
         events.push(event)
       })
 
-      await dapp.init(customTransport as unknown as ClientTransport)
+      await dapp.init(customTransport)
       await customTransport.connect()
       expect(events).toEqual([
         {
@@ -835,7 +836,7 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       const wcTransport = dapp['walletConnectTransport']!
 
       let p2pPeerCallback:
-        ((peer: ExtendedP2PPairingResponse) => Promise<boolean> | void) | undefined
+        ((peer: ExtendedP2PPairingResponse) => Promise<boolean> | boolean) | undefined
       vi.spyOn(postMessageTransport, 'connect').mockImplementation(async () => {
         await postMessageTransport['updateConnectionStatus']({ status: TransportStatus.CONNECTED })
       })
@@ -1083,7 +1084,12 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       let capturedRecordV3: BeaconMessageRecord | undefined
 
       client.subscribeToMessages((record) => {
-        if (record.direction === 'outgoing') {
+        if (
+          record.direction === 'outgoing' &&
+          record.message &&
+          typeof record.message === 'object' &&
+          'version' in record.message
+        ) {
           if (record.message.version === '2') {
             capturedRecordV2 = record
             capturedPendingV2 = client.getPendingRequests()

@@ -4,6 +4,7 @@ import {
   NetworkType,
   Origin,
   PermissionScope,
+  SigningType,
   StorageKey
 } from '@ecadlabs/beacon-types'
 import { AccountManager } from '../../src/managers/AccountManager'
@@ -117,6 +118,7 @@ describe('stored account variants', () => {
         version: '2',
         senderId: 'dapp',
         type: BeaconMessageType.SignPayloadRequest,
+        signingType: SigningType.RAW,
         payload: '05',
         sourceAddress: 'tz1-test'
       })
@@ -128,6 +130,7 @@ describe('stored account variants', () => {
         version: '2',
         senderId: 'dapp',
         type: BeaconMessageType.SignPayloadRequest,
+        signingType: SigningType.RAW,
         payload: '05',
         sourceAddress: 'tz1-test'
       })

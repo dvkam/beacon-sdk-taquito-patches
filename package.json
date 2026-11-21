@@ -1,7 +1,7 @@
 {
   "name": "beacon-sdk-taquito-patches-workspace",
   "private": true,
-  "version": "4.9.0-ecad-beta.5",
+  "version": "4.9.0-ecad-rc.0",
   "description": "Workspace for the ECAD-maintained Beacon SDK packages.",
   "workspaces": [
     "packages/*"
@@ -55,7 +55,12 @@
     "lint:baseline": "node scripts/lint-new-findings.mjs --update-baseline",
     "lint:tooling": "eslint --config eslint.tooling.config.mjs --max-warnings 0 .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "typecheck": "node scripts/typecheck.mjs",
+    "typecheck:production": "node scripts/typecheck.mjs production",
+    "typecheck:tests": "node scripts/typecheck.mjs tests",
+    "typecheck:tooling": "node scripts/typecheck.mjs tooling",
+    "check:typecheck-coverage": "node scripts/typecheck.mjs coverage"
   },
   "author": "ECAD Labs",
   "dependencies": {
@@ -145,6 +150,7 @@
     "vitest": "^5.1.1",
     "webpack": "^5.112.2",
     "webpack-cli": "^7.3.1",
-    "@testing-library/jest-dom": "7.0.1"
+    "@testing-library/jest-dom": "7.0.1",
+    "vite": "^8.3.8"
   }
 }

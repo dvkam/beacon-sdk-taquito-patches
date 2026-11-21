@@ -71,7 +71,7 @@ const { dummyDesktopList, dummyExtensionList, dummyIOSList, dummyWebList } = vi.
       supportedInteractionStandards: [],
       links: {
         mainnet: 'http://web.mainnet',
-        ghostnet: 'http://web.testnet'
+        shadownet: 'http://web.testnet'
       }
     }
   ]
@@ -205,7 +205,7 @@ describe('useWallets hook', () => {
     // For this test, pass networkType as 'testnet' to match our dummy webList.
     ;(getAvailableExtensions as Mock).mockResolvedValueOnce([])
 
-    const { result } = renderHook(() => useWallets(NetworkType.GHOSTNET))
+    const { result } = renderHook(() => useWallets(NetworkType.SHADOWNET))
 
     await waitFor(async () => {
       const walletMap = result.current.wallets
@@ -238,7 +238,7 @@ describe('useWallets hook', () => {
     // Wait for the effect to run.
     await waitFor(async () => {
       const { arrangeTopWallets } = await import('../../src/utils/wallets')
-      return arrangeTopWallets.mock.calls.length > 0
+      return vi.mocked(arrangeTopWallets).mock.calls.length > 0
     })
 
     const { arrangeTopWallets } = await import('../../src/utils/wallets')

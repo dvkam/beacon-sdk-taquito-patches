@@ -8,6 +8,8 @@ import { MatrixClientEventType } from '../../src/matrix-client/models/MatrixClie
 import { MatrixEventService } from '../../src/matrix-client/services/MatrixEventService'
 import { MatrixUserService } from '../../src/matrix-client/services/MatrixUserService'
 
+type EncryptedMessageListener = Parameters<P2PCommunicationClient['listenForEncryptedMessage']>[1]
+
 describe('P2P subscription ownership', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -62,7 +64,10 @@ describe('P2P subscription ownership', () => {
       try {
         if (state === 'registered') {
           const peer = await getKeypairFromSeed('p2p-subscription-peer')
-          await client.listenForEncryptedMessage(toHex(peer.publicKey), vi.fn())
+          await client.listenForEncryptedMessage(
+            toHex(peer.publicKey),
+            vi.fn<EncryptedMessageListener>()
+          )
           await client.listenForChannelOpening(vi.fn())
         }
         const ownedSubscriptions = [...subscribe.mock.calls]

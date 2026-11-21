@@ -67,6 +67,9 @@ jobs:
       - name: Lint tests and tooling
         run: ./scripts/npm11.sh run lint:tooling
 
+      - name: Typecheck production, tests and tooling
+        run: ./scripts/npm11.sh run typecheck
+
       - name: Run script tests
         run: node --test scripts/__tests__/*.test.js
 

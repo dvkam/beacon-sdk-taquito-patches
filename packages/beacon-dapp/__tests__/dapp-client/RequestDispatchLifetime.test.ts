@@ -6,6 +6,7 @@ import {
   Transport
 } from '@ecadlabs/beacon-core'
 import {
+  SignPayloadRequestInput,
   BeaconErrorType,
   BeaconMessage,
   BeaconMessageType,
@@ -227,13 +228,15 @@ describe('Request dispatch lifetime', () => {
       await duringSend?.(id)
       await release.promise
     })
+    const signPayloadRequestInput = {
+      type: BeaconMessageType.SignPayloadRequest,
+      signingType: SigningType.RAW,
+      payload: 'aa',
+      sourceAddress: 'tz1-dispatch-source'
+    } satisfies SignPayloadRequestInput
     const pending =
       version === '2'
-        ? dapp['makeRequest']({
-            type: BeaconMessageType.SignPayloadRequest,
-            signingType: SigningType.RAW,
-            payload: 'aa'
-          })
+        ? dapp['makeRequest'](signPayloadRequestInput)
         : dapp['makeRequestV3']({
             type: BeaconMessageType.BlockchainRequest,
             blockchainIdentifier: 'tezos',
@@ -272,7 +275,10 @@ describe('Request dispatch lifetime', () => {
       await start(TransportType.POST_MESSAGE, 0)
       const serialize = Serializer.prototype.serialize
       let requestId = ''
-      vi.spyOn(Serializer.prototype, 'serialize').mockImplementationOnce(async function (message) {
+      vi.spyOn(Serializer.prototype, 'serialize').mockImplementationOnce(async function (
+        this: Serializer,
+        message
+      ) {
         if (
           !message ||
           typeof message !== 'object' ||
@@ -399,10 +405,13 @@ describe('Request dispatch lifetime', () => {
     await start(type, 25)
     const send = vi.spyOn(transport, 'send').mockImplementation(async () => release.promise)
     const settled = vi.fn()
-    const pending = dapp['makeRequest'](
-      { type: BeaconMessageType.SignPayloadRequest, signingType: SigningType.RAW, payload: 'aa' },
-      true
-    ).then(settled)
+    const signPayloadRequestInput = {
+      type: BeaconMessageType.SignPayloadRequest,
+      signingType: SigningType.RAW,
+      payload: 'aa',
+      sourceAddress: 'tz1-dispatch-source'
+    } satisfies SignPayloadRequestInput
+    const pending = dapp['makeRequest'](signPayloadRequestInput, true).then(settled)
     await vi.advanceTimersByTimeAsync(1000)
     expect(send).toHaveBeenCalledTimes(1)
     expect(settled).not.toHaveBeenCalled()

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, expectTypeOf } from 'vitest'
+import { Mock, describe, it, expect, vi, beforeEach, afterEach, expectTypeOf } from 'vitest'
 import { AppMetadataManager, LocalStorage, PermissionManager } from '@ecadlabs/beacon-core'
 import {
   BeaconErrorType,
@@ -142,7 +142,9 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
       let storage: LocalStorage
       let appMetadataManager: AppMetadataManager
       let permissionManager: PermissionManager
-      let interceptorCallback: ReturnType<typeof vi.fn>
+      let interceptorCallback: Mock<
+        Parameters<typeof OutgoingResponseInterceptor.intercept>[0]['interceptorCallback']
+      >
 
       beforeEach(async () => {
         localStorage.clear()
@@ -188,6 +190,14 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
 
         expect(interceptorCallback).toHaveBeenCalledTimes(1)
         const emittedResponse = interceptorCallback.mock.calls[0]?.[0]
+        if (
+          !emittedResponse ||
+          !('type' in emittedResponse) ||
+          emittedResponse.type !== BeaconMessageType.PermissionResponse ||
+          'blockchainIdentifier' in emittedResponse
+        ) {
+          throw new Error('Expected a permission response from the interceptor')
+        }
         expect(emittedResponse).toMatchObject({
           id: 'req-perm-1',
           type: BeaconMessageType.PermissionResponse,
@@ -234,6 +244,14 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
 
         expect(interceptorCallback).toHaveBeenCalledTimes(1)
         const emittedResponse = interceptorCallback.mock.calls[0]?.[0]
+        if (
+          !emittedResponse ||
+          !('type' in emittedResponse) ||
+          emittedResponse.type !== BeaconMessageType.PermissionResponse ||
+          'blockchainIdentifier' in emittedResponse
+        ) {
+          throw new Error('Expected a permission response from the interceptor')
+        }
         expect(emittedResponse.walletType).toBe('implicit')
         expect(emittedResponse.address).toBe(validAddress)
       })
@@ -260,6 +278,14 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
 
         expect(interceptorCallback).toHaveBeenCalledTimes(1)
         const emittedResponse = interceptorCallback.mock.calls[0]?.[0]
+        if (
+          !emittedResponse ||
+          !('type' in emittedResponse) ||
+          emittedResponse.type !== BeaconMessageType.PermissionResponse ||
+          'blockchainIdentifier' in emittedResponse
+        ) {
+          throw new Error('Expected a permission response from the interceptor')
+        }
         expect(emittedResponse.walletType).toBe('implicit')
         expect(emittedResponse.address).toBeUndefined()
       })
@@ -286,6 +312,14 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
 
         expect(interceptorCallback).toHaveBeenCalledTimes(1)
         const emittedResponse = interceptorCallback.mock.calls[0]?.[0]
+        if (
+          !emittedResponse ||
+          !('type' in emittedResponse) ||
+          emittedResponse.type !== BeaconMessageType.PermissionResponse ||
+          'blockchainIdentifier' in emittedResponse
+        ) {
+          throw new Error('Expected a permission response from the interceptor')
+        }
         expect(emittedResponse.walletType).toBe('abstracted_account')
         expect(emittedResponse.address).toBe(validContractAddress)
         expect(emittedResponse.publicKey).toBeUndefined()
@@ -413,7 +447,7 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
       })
 
       it('builds implicit account response preserving overrides for scopes, network, address, threshold, notification, verificationType', () => {
-        const customNetwork = { type: NetworkType.GHOSTNET }
+        const customNetwork = { type: NetworkType.SHADOWNET }
         const customScopes = [PermissionScope.SIGN]
         const threshold = { amount: '100', timeframe: 'daily' }
         const notification = {

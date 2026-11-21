@@ -201,9 +201,33 @@ it('finishes initialization before opening the same database as a copy target', 
 })
 
 it('rejects a constraint failure and rolls back the complete copied transaction', async () => {
+  // Seed the raw custom schema: arbitrary Storage.set keys accept serialized strings.
+  const seedRecords = (
+    name: string,
+    records: ReadonlyArray<readonly [string, { unique: string }]>
+  ) =>
+    new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open(name)
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => {
+        const db = request.result
+        const transaction = db.transaction('values', 'readwrite')
+        transaction.oncomplete = () => {
+          db.close()
+          resolve()
+        }
+        transaction.onabort = () => {
+          db.close()
+          reject(transaction.error)
+        }
+        for (const [key, value] of records) transaction.objectStore('values').put(value, key)
+      }
+    })
   const source = await initialized('constraint-source')
-  await source.set('first', { unique: 'duplicate' })
-  await source.set('second', { unique: 'duplicate' })
+  await seedRecords('constraint-source', [
+    ['first', { unique: 'duplicate' }],
+    ['second', { unique: 'duplicate' }]
+  ])
   await new Promise<void>((resolve, reject) => {
     const request = indexedDB.open('constraint-target', 1)
     request.onupgradeneeded = () => {
@@ -216,7 +240,7 @@ it('rejects a constraint failure and rolls back the complete copied transaction'
     }
   })
   const target = create('constraint-target', ['values'])
-  await target.set('retained', { unique: 'existing' })
+  await seedRecords('constraint-target', [['retained', { unique: 'existing' }]])
   await expect(source.fillStore('constraint-target', 'values')).rejects.toMatchObject({
     name: 'ConstraintError'
   })

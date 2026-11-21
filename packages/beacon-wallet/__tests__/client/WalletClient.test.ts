@@ -2,7 +2,13 @@ import type { Mocked, MockInstance } from 'vitest'
 // __tests__/client/WalletClient.test.ts
 
 import { Client, LocalStorage, Serializer } from '@ecadlabs/beacon-core'
-import { BeaconMessageType, Origin, StorageKey, TransportStatus } from '@ecadlabs/beacon-types'
+import {
+  BeaconMessageType,
+  Origin,
+  StorageKey,
+  TransportStatus,
+  TransportType
+} from '@ecadlabs/beacon-types'
 import { WalletClient } from '../../src/client/WalletClient'
 import { WalletP2PTransport } from '../../src/transports/WalletP2PTransport'
 
@@ -250,6 +256,24 @@ describe('WalletClient', () => {
   })
 
   describe('connect()', () => {
+    const receiveDisconnect = async (publicKey: string) => {
+      const addListener = vi.fn<WalletP2PTransport['addListener']>().mockResolvedValue(undefined)
+      await client['addListener']({
+        type: TransportType.P2P,
+        addListener,
+        removeListener: vi.fn().mockResolvedValue(undefined)
+      })
+      const listener = addListener.mock.calls[0]?.[0]
+      if (!listener) throw new Error('Missing wallet transport listener')
+      const message = await new Serializer().serialize({
+        id: 'disconnect',
+        type: BeaconMessageType.Disconnect,
+        version: '2',
+        senderId: 'sender-a'
+      })
+      await listener(message, { id: publicKey, origin: Origin.P2P })
+    }
+
     const createConnectedTransport = () => {
       const peerA = {
         id: 'peer-a',
@@ -486,15 +510,7 @@ describe('WalletClient', () => {
       unsubscribe()
 
       await client.connect(vi.fn())
-      await client['handleResponse'](
-        {
-          id: 'disconnect',
-          type: BeaconMessageType.Disconnect,
-          version: '2',
-          senderId: 'sender-a'
-        },
-        { id: peerA.publicKey, origin: Origin.P2P }
-      )
+      await receiveDisconnect(peerA.publicKey)
       expect(listener).not.toHaveBeenCalled()
       expect(other).toHaveBeenCalledWith('sender-a')
     })
@@ -515,15 +531,7 @@ describe('WalletClient', () => {
         first()
         duplicate()
         await client.connect(vi.fn())
-        await client['handleResponse'](
-          {
-            id: 'disconnect',
-            type: BeaconMessageType.Disconnect,
-            version: '2',
-            senderId: 'sender-a'
-          },
-          { id: peerA.publicKey, origin: Origin.P2P }
-        )
+        await receiveDisconnect(peerA.publicKey)
         expect(listener).toHaveBeenCalledTimes(1)
         current()
       }

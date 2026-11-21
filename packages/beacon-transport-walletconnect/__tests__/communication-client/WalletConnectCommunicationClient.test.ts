@@ -49,9 +49,12 @@ vi.mock('@walletconnect/sign-client', () => ({
   default: {
     init: vi.fn(() =>
       Promise.resolve({
-        session: { keys: [], get: vi.fn(), getAll: vi.fn(() => []) },
+        session: { keys: [], get: vi.fn(), getAll: vi.fn<() => SessionTypes.Struct[]>(() => []) },
         core: {
-          pairing: { getPairings: vi.fn(() => []) },
+          pairing: {
+            disconnect: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+            getPairings: vi.fn<SignClient['core']['pairing']['getPairings']>(() => [])
+          },
           events: { removeAllListeners: vi.fn() },
           relayer: {
             on: vi.fn(),
@@ -96,11 +99,12 @@ function getStringBetween(str: string | undefined, startChar: string, endChar: s
 
 const createResolvedSignClient = () => ({
   on: vi.fn(),
-  session: { keys: [], get: vi.fn(), getAll: vi.fn(() => []) },
-  pairing: { getAll: vi.fn(() => []) },
+  session: { keys: [], get: vi.fn(), getAll: vi.fn<() => SessionTypes.Struct[]>(() => []) },
+  pairing: { getAll: vi.fn<SignClient['pairing']['getAll']>(() => []) },
   core: {
     pairing: {
-      getPairings: vi.fn(() => []),
+      disconnect: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      getPairings: vi.fn<SignClient['core']['pairing']['getPairings']>(() => []),
       ping: vi.fn().mockResolvedValue(undefined),
       events: { on: vi.fn(), removeAllListeners: vi.fn() }
     },
@@ -429,13 +433,23 @@ describe('WalletConnectCommunicationClient basics', () => {
   it('notifies listeners immediately when an inbound session_delete has a hung pairing disconnect', async () => {
     vi.useFakeTimers()
     const resolvedClient = createResolvedSignClient()
-    const session = {
+    const session: SessionTypes.Struct = {
       topic: 'session-topic',
       pairingTopic: 'pairing-topic',
+      relay: { protocol: 'irn' },
+      expiry: 9999999999,
+      acknowledged: true,
+      controller: 'controller',
+      self: { publicKey: 'dapp', metadata: { name: 'Dapp', description: '', url: '', icons: [] } },
+      peer: {
+        publicKey: 'wallet',
+        metadata: { name: '', description: '', url: '', icons: [], redirect: {} }
+      },
       namespaces: {},
-      peer: { metadata: { name: '', icons: [], redirect: {} } },
+      requiredNamespaces: {},
+      optionalNamespaces: {},
       sessionProperties: {}
-    } as SessionTypes.Struct
+    }
     resolvedClient.core.pairing.disconnect = vi.fn(() => new Promise(() => {}))
     Reflect.set(client, 'signClient', resolvedClient)
     ;(client as any).session = session
@@ -519,7 +533,7 @@ describe('WalletConnectCommunicationClient basics', () => {
 
     ;(client as any).subscribeToSessionEvents(resolvedClient)
     const sessionUpdateHandler = resolvedClient.on.mock.calls.find(
-      ([eventName]: [string]) => eventName === 'session_update'
+      ([eventName]) => eventName === 'session_update'
     )?.[1]
     expect(sessionUpdateHandler).toBeDefined()
 
@@ -540,10 +554,12 @@ describe('WalletConnectCommunicationClient basics', () => {
     let resolveApproval: ((session: SessionTypes.Struct) => void) | undefined
     resolvedClient.connect.mockResolvedValue({
       uri: 'wc:new-pairing-topic@2?relay-protocol=irn&symKey=abc',
-      approval: () =>
-        new Promise<SessionTypes.Struct>((resolve) => {
-          resolveApproval = resolve
-        })
+      approval: vi.fn(
+        () =>
+          new Promise<SessionTypes.Struct>((resolve) => {
+            resolveApproval = resolve
+          })
+      )
     })
     ;(SignClient.init as Mock).mockResolvedValue(resolvedClient)
 
@@ -596,8 +612,9 @@ describe('WalletConnectCommunicationClient basics', () => {
     } as unknown as SessionTypes.Struct
     ;(client as any).session = session
 
-    let resolveFirstFetch!: (res: { address: string; pubkey: string }[]) => void
-    let resolveSecondFetch!: (res: { address: string; pubkey: string }[]) => void
+    type Accounts = Awaited<ReturnType<WalletConnectCommunicationClient['fetchAccounts']>>
+    let resolveFirstFetch!: (res: Accounts) => void
+    let resolveSecondFetch!: (res: Accounts) => void
     const fetchAccountsSpy = vi
       .spyOn(client as any, 'fetchAccounts')
       .mockImplementationOnce(
@@ -628,11 +645,11 @@ describe('WalletConnectCommunicationClient basics', () => {
       )
 
       // Second update resolves first
-      resolveSecondFetch([{ address: 'tz1SecondAccount', pubkey: 'pk-second' }])
+      resolveSecondFetch([{ address: 'tz1SecondAccount', pubkey: 'pk-second', algo: 'ed25519' }])
       await secondUpdate
 
       // Stale first update resolves afterwards
-      resolveFirstFetch([{ address: 'tz1FirstAccount', pubkey: 'pk-first' }])
+      resolveFirstFetch([{ address: 'tz1FirstAccount', pubkey: 'pk-first', algo: 'ed25519' }])
       await firstUpdate
 
       expect((client as any).activeAccountOrPbk).toBe('tz1SecondAccount')
@@ -878,9 +895,8 @@ describe('String message dispatching', () => {
     (corruptValue) => {
       localStorage.setItem(StorageKey.LAST_SELECTED_WALLET, corruptValue)
       const client = new WalletConnectCommunicationClient(
-        'Test App',
-        { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
-        'wc-project-id'
+        { network: NetworkType.MAINNET, opts: { projectId: 'wc-project-id' } },
+        () => true
       )
       const session = {
         peer: { metadata: {} }

@@ -601,7 +601,13 @@ describe('WalletConnect request ownership (#102)', () => {
     let completed = false
     await client.listenForEncryptedMessage('held-disconnect', async (encoded) => {
       const message = await serializer.deserialize(encoded)
-      if (message.type !== BeaconMessageType.Disconnect) return
+      if (
+        !message ||
+        typeof message !== 'object' ||
+        !('type' in message) ||
+        message.type !== BeaconMessageType.Disconnect
+      )
+        return
       delivered.push(message)
       await held
       completed = true

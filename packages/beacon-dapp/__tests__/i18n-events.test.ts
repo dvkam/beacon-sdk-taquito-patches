@@ -11,6 +11,7 @@ import {
   NetworkType,
   Origin,
   resetBeaconI18n,
+  BroadcastResponse,
   TransportType
 } from '@ecadlabs/beacon-types'
 import { BeaconEvent, defaultEventCallbacks } from '../src/events'
@@ -93,23 +94,22 @@ describe('BeaconEvent i18n and DAppClientOptions locale configuration', () => {
       })
     )
 
+    const lateResponse: BroadcastResponse = {
+      id: 'req-late-bcast',
+      version: '2',
+      senderId: 'peer-1',
+      type: BeaconMessageType.BroadcastResponse,
+      transactionHash: 'ooLateBcast123'
+    }
     await defaultEventCallbacks[BeaconEvent.LATE_RESPONSE_RECEIVED]({
       kind: 'success',
       requestId: 'req-late-bcast',
       requestType: BeaconMessageType.BroadcastRequest,
-      timedOutAt: 3,
-      receivedAt: 4,
-      transport: TransportType.P2P,
       walletInfo: { name: 'Kukai' },
-      connectionContext: { origin: Origin.P2P, id: 'peer-1' },
+      connectionInfo: { origin: Origin.P2P, id: 'peer-1' },
       transactionHash: 'ooLateBcast123',
-      response: {
-        id: 'req-late-bcast',
-        version: '2',
-        senderId: 'peer-1',
-        type: BeaconMessageType.BroadcastResponse,
-        transactionHash: 'ooLateBcast123'
-      }
+      message: lateResponse,
+      output: lateResponse
     })
     expect(openToast).toHaveBeenLastCalledWith(
       expect.objectContaining({
