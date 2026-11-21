@@ -1,6 +1,8 @@
 import {
   TezosOperationType,
   type PartialTezosOperation,
+  type MichelsonPrimitives,
+  type OperationRequestOutput,
   type WalletPartialTezosOperation,
   type OperationRequestInput
 } from '@ecadlabs/beacon-types'
@@ -13,12 +15,8 @@ import {
   type SignPayloadInspection
 } from '@ecadlabs/beacon-utils/wallet'
 export const preview: SignPayloadInspection = inspectSignPayload(packMessageText('hello'))
-export const operations: WalletPartialTezosOperation[] = sanitizePartialTezosOperations([])
-export const legacy: PartialTezosOperation[] = operations
-export const request: Pick<OperationRequestInput, 'operationDetails'> = {
-  operationDetails: operations
-}
-
+declare const existingRequest: OperationRequestInput
+export const operations = sanitizePartialTezosOperations(existingRequest.operationDetails)
 export const modernOrigination: WalletPartialTezosOperation = {
   kind: TezosOperationType.ORIGINATION,
   balance: '0',
@@ -62,7 +60,24 @@ export const modernTicketCall: WalletPartialTezosOperation = {
     }
   }
 }
-export const modernLegacy: PartialTezosOperation[] = [modernOrigination, modernTicketCall]
+export const modernWallet = sanitizePartialTezosOperations([modernOrigination, modernTicketCall])
+// @ts-expect-error Codec-validated primitive names can extend the legacy request vocabulary.
+export const modernLegacy: PartialTezosOperation[] = modernWallet
+
+export function legacyLabel(
+  request: OperationRequestOutput,
+  labels: Record<MichelsonPrimitives, string>
+) {
+  const operation = request.operationDetails[0]
+  if (operation?.kind === TezosOperationType.TRANSACTION) {
+    const value = operation.parameters?.value
+    if (value && 'prim' in value) {
+      return labels[value.prim]
+    }
+  }
+
+  return undefined
+}
 
 const delegationWithMetadata = {
   kind: TezosOperationType.DELEGATION,
@@ -78,7 +93,7 @@ type ValidatedOperation = typeof isPartialTezosOperation extends (
 // @ts-expect-error A structural operation has not passed the strict guard.
 export const unvalidatedOperation: ValidatedOperation = structuralOperation
 
-export const narrowOperation = (value: WalletPartialTezosOperation | string) => {
+export const narrowOperation = (value: PartialTezosOperation | string) => {
   if (isPartialTezosOperation(value)) {
     const operation: WalletPartialTezosOperation = value
     const operationRequest: Pick<OperationRequestInput, 'operationDetails'> = {

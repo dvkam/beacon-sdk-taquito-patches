@@ -2,21 +2,17 @@ import { managerOperations } from './manager-operations'
 import {
   PartialTezosOperation,
   WalletPartialTezosOperation,
-  TezosOperationType,
-  OperationRequestInput
+  TezosOperationType
 } from '@ecadlabs/beacon-types'
 import { sanitizePartialTezosOperations } from '@ecadlabs/beacon-utils/wallet'
 
-export const operations: WalletPartialTezosOperation[] = sanitizePartialTezosOperations([])
-export const legacy: PartialTezosOperation[] = operations
-export const request: Pick<OperationRequestInput, 'operationDetails'> = {
-  operationDetails: operations
-}
+export const operations = sanitizePartialTezosOperations(managerOperations)
 export const timeout: WalletPartialTezosOperation = {
   kind: TezosOperationType.SMART_ROLLUP_TIMEOUT,
   rollup: 'sr1rollup',
   stakers: { alice: 'tz1alice', bob: 'tz1bob' }
 }
+// @ts-expect-error The legacy request union does not include the wallet timeout operation.
 export const legacyTimeout: PartialTezosOperation = timeout
 export const spoofed: WalletPartialTezosOperation = {
   kind: TezosOperationType.DELEGATION,
@@ -29,4 +25,5 @@ export const consensus: WalletPartialTezosOperation = {
   level: 1
 }
 
-export const fixtureLegacy: PartialTezosOperation[] = managerOperations
+// @ts-expect-error The wallet primitive vocabulary can exceed legacy request types.
+export const fixtureLegacy: PartialTezosOperation[] = operations
