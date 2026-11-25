@@ -177,8 +177,6 @@ describe('BeaconError hierarchy and runtime behavior', () => {
               checkBeaconError({
                 type: BeaconMessageType.Error,
                 id: 'req-1',
-                version: '2',
-                senderId: 'wallet',
                 errorType: BeaconErrorType.UNKNOWN_ERROR
               })
             ).toBe(false)
@@ -186,8 +184,6 @@ describe('BeaconError hierarchy and runtime behavior', () => {
               checkBeaconError({
                 type: BeaconMessageType.Error,
                 id: 'req-2',
-                version: '2',
-                senderId: 'wallet',
                 errorType: BeaconErrorType.NOT_GRANTED_ERROR,
                 errorOrigin: 'wallet'
               })
@@ -206,8 +202,6 @@ describe('BeaconError hierarchy and runtime behavior', () => {
               version: '2',
               senderId: 'wallet',
               id: 'req-1',
-              version: '2',
-              senderId: 'wallet',
               errorType: BeaconErrorType.NOT_GRANTED_ERROR,
               errorOrigin: 'wallet'
             }
@@ -216,8 +210,6 @@ describe('BeaconError hierarchy and runtime behavior', () => {
               version: '2',
               senderId: 'wallet',
               id: 'req-2',
-              version: '2',
-              senderId: 'wallet',
               errorType: BeaconErrorType.PEER_UNREACHABLE,
               errorOrigin: 'local'
             }
@@ -226,8 +218,6 @@ describe('BeaconError hierarchy and runtime behavior', () => {
               version: '2',
               senderId: 'wallet',
               id: 'req-3',
-              version: '2',
-              senderId: 'wallet',
               errorType: BeaconErrorType.UNKNOWN_ERROR
             }
 
