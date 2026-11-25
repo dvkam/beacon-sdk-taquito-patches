@@ -8,7 +8,7 @@ import {
   ConnectionContext,
   Origin
 } from '@ecadlabs/beacon-types'
-import { diagnosticMessage, ResponseMessage } from './request-error'
+import type { ResponseMessage } from './request-error'
 
 /** Only the routing contract is owned here; operation data is validated by the wallet. */
 export interface ForwardedV2Request {
@@ -294,6 +294,24 @@ function copyJsonDiagnostic(value: unknown, ancestors: Set<object>): unknown {
   }
 }
 
+function diagnosticSummaryMessage(value: unknown): string | undefined {
+  try {
+    if (typeof value === 'string') {
+      return value.slice(0, 256)
+    }
+    if (typeof value !== 'object' || value === null) {
+      return undefined
+    }
+    const field = Object.getOwnPropertyDescriptor(value, 'message')
+
+    return field && 'value' in field && typeof field.value === 'string'
+      ? field.value.slice(0, 256)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Detach diagnostics before handing a terminal reply to any broadcast-channel transport. */
 export const broadcastErrorData = (value: unknown): unknown => {
   try {
@@ -301,7 +319,7 @@ export const broadcastErrorData = (value: unknown): unknown => {
   } catch {
     return {
       message:
-        diagnosticMessage(value, 'diagnostic')?.slice(0, 256) ??
+        diagnosticSummaryMessage(value) ??
         'The request diagnostic could not be copied between tabs.',
       diagnostic: 'Uncloneable request diagnostic'
     }
