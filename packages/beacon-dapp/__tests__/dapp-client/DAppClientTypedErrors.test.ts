@@ -253,6 +253,31 @@ describe('DAppClient typed error rejections', () => {
       }
     )
 
+    it.each([
+      { label: 'missing' },
+      { label: 'empty', code: '' },
+      { label: 'numeric', code: 42 },
+      { label: 'null', code: null }
+    ])('retains a validator rejection with a $label error code', async (entry) => {
+      const failure = {
+        id: 'plugin-failure',
+        senderId: '',
+        version: '2',
+        type: BeaconMessageType.Error,
+        ...('code' in entry ? { errorType: entry.code } : {}),
+        message: 'driver unavailable',
+        detail: { component: 'plugin' }
+      }
+      addBlockchain(async () => {
+        throw failure
+      })
+      const error: unknown = await dapp.request(requestInput).catch((error: unknown) => error)
+      expect(error).toBeInstanceOf(UnknownBeaconError)
+      if (!isBeaconError(error)) throw new Error('Expected typed plugin rejection')
+      expect(error.errorData).toBe(failure)
+      expect(transport.send).not.toHaveBeenCalled()
+    })
+
     it('retains a validator error whose message getter throws', async () => {
       const failure = new Error()
       Object.defineProperty(failure, 'message', {

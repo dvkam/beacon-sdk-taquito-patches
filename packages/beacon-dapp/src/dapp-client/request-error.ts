@@ -205,12 +205,16 @@ export const normalizeErrorResponse = (value: unknown): RequestErrorResponse | u
       return undefined
     }
 
+    const errorType = 'errorType' in value ? value.errorType : undefined
+    const errorData = 'errorData' in value ? value.errorData : undefined
+    const diagnostic = !isKnownErrorType(errorType) && errorData === undefined ? value : errorData
+
     return normalizeErrorPayload(
       {
         type: BeaconMessageType.Error,
-        errorType: 'errorType' in value ? value.errorType : undefined,
+        errorType,
         errorOrigin: 'errorOrigin' in value ? value.errorOrigin : undefined,
-        ...('errorData' in value ? { errorData: value.errorData } : {})
+        ...(diagnostic !== undefined ? { errorData: diagnostic } : {})
       },
       { id, senderId, version },
       value

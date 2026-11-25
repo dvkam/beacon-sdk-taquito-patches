@@ -426,6 +426,35 @@ describe('Delegated request lifetime', () => {
     }
   )
 
+  it.each([
+    { label: 'missing' },
+    { label: 'empty', code: '' },
+    { label: 'numeric', code: 42 },
+    { label: 'null', code: null }
+  ])('preserves preparation diagnostics with a $label error code', async (entry) => {
+    const failure = {
+      id: 'initialization',
+      senderId: '',
+      version: '2',
+      type: BeaconMessageType.Error,
+      ...('code' in entry ? { errorType: entry.code } : {}),
+      message: 'driver unavailable',
+      detail: { component: 'plugin' }
+    }
+    const packets = captureLocalStoragePosts()
+    vi.mocked(leader.init).mockRejectedValueOnce(failure)
+    const pending = await begin('2')
+    await deliverViaLocalStorage(packets[0])
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    const outcome = await pending.outcome
+    if (!('error' in outcome) || !isBeaconError(outcome.error))
+      throw new Error('Expected delegated plugin rejection')
+    expect(outcome.error.errorType).toBe(BeaconErrorType.UNKNOWN_ERROR)
+    expect(outcome.error.errorData).toEqual(failure)
+    expect(follower['requestTracker'].size).toBe(0)
+    expect(leader['requestTracker'].size).toBe(0)
+  })
+
   function captureLocalStoragePosts() {
     // Keep the same reference that the async localStorage encoder receives.
     const packets: unknown[] = []
