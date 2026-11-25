@@ -1,5 +1,11 @@
 import { BroadcastChannel } from 'broadcast-channel'
-import { LocalStorage, Serializer, UnknownBeaconError, isBeaconError } from '@ecadlabs/beacon-core'
+import {
+  AbortedBeaconError,
+  LocalStorage,
+  Serializer,
+  UnknownBeaconError,
+  isBeaconError
+} from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
   StoredAccountInfo,
@@ -443,6 +449,48 @@ describe('Delegated request lifetime', () => {
       await Promise.all([sender.close(), receiver.close()])
     }
   }
+
+  it.each([
+    ['2', 'typed'],
+    ['3', 'typed'],
+    ['2', 'missing-code'],
+    ['3', 'missing-code'],
+    ['2', 'future-code'],
+    ['3', 'future-code']
+  ] as const)(
+    'settles a V%s follower after a %s preparation error with an empty version',
+    async (version, kind) => {
+      const failure =
+        kind === 'typed'
+          ? new AbortedBeaconError({ version: '', errorOrigin: 'local' })
+          : {
+              id: 'initialization',
+              senderId: '',
+              version: '',
+              type: BeaconMessageType.Error,
+              ...(kind === 'future-code' ? { errorType: 'FUTURE_ERROR' } : {}),
+              errorData: { detail: 'preparation failed' }
+            }
+      const packets = captureLocalStoragePosts()
+      vi.mocked(leader.init).mockRejectedValueOnce(failure)
+      const pending = await begin(version)
+      expect(packets).toHaveLength(1)
+      await deliverViaLocalStorage(packets[0])
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          id: pending.id,
+          version: '2',
+          errorType:
+            kind === 'typed' ? BeaconErrorType.ABORTED_ERROR : BeaconErrorType.UNKNOWN_ERROR
+        }
+      })
+      expect(failure.version).toBe('')
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+      expect(transport.send).not.toHaveBeenCalled()
+    }
+  )
 
   it.each([
     ['bigint', () => ({ amount: BigInt(12) })],

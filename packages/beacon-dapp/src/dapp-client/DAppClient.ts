@@ -1246,9 +1246,11 @@ export class DAppClient extends Client {
         ? { errorData: broadcastErrorData(response.errorData) }
         : {})
     }
-    const header = { id, senderId: response.senderId, version: response.version }
+    // Local BeaconError metadata may be empty, but a transport reply must be routable.
+    const version = response.version || '2'
+    const header = { id, senderId: response.senderId, version }
 
-    return response.version === '3' ? { ...header, message: payload } : { ...header, ...payload }
+    return version === '3' ? { ...header, message: payload } : { ...header, ...payload }
   }
 
   private async onStorageChanged(
