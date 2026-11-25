@@ -165,6 +165,169 @@ describe('DAppClient typed error rejections', () => {
     vi.useRealTimers()
   })
 
+  describe('complete public request error normalization', () => {
+    const permissionInput: PermissionRequestV3 = {
+      type: BeaconMessageType.PermissionRequest,
+      blockchainIdentifier: 'typed-errors-chain',
+      blockchainData: { appMetadata: { senderId: 'dapp', name: 'Test' }, scopes: [] }
+    }
+    const requestInput: BlockchainRequestV3 = {
+      type: BeaconMessageType.BlockchainRequest,
+      blockchainIdentifier: 'typed-errors-chain',
+      accountId: account.accountIdentifier,
+      blockchainData: { type: 'test', scope: 'test' }
+    }
+
+    function addBlockchain(validateRequest: () => Promise<void> = async () => {}) {
+      dapp.addBlockchain({
+        identifier: 'typed-errors-chain',
+        validateRequest,
+        async handleResponse() {},
+        async getAccountInfosFromPermissionResponse() {
+          return []
+        },
+        async getWalletLists() {
+          return { extensionList: [], desktopList: [], webList: [], iOSList: [] }
+        }
+      })
+    }
+
+    it.each([
+      'permission V2',
+      'permission V3',
+      'request V3',
+      'operation',
+      'sign',
+      'broadcast',
+      'proof',
+      'simulated proof'
+    ])(
+      'normalizes unexpected pre-dispatch failures from %s while retaining diagnostic identity',
+      async (method) => {
+        const failure = new Error('pre-dispatch dependency failed')
+        const operationErrors = vi.fn()
+        await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, operationErrors)
+        let pending: Promise<unknown>
+        switch (method) {
+          case 'permission V2':
+            vi.spyOn(dapp, 'getOwnAppMetadata').mockRejectedValueOnce(failure)
+            pending = dapp.requestPermissions()
+            break
+          case 'permission V3':
+            addBlockchain()
+            vi.spyOn(dapp, 'getOwnAppMetadata').mockRejectedValueOnce(failure)
+            pending = dapp.permissionRequest(permissionInput)
+            break
+          case 'request V3':
+            addBlockchain(async () => {
+              throw failure
+            })
+            pending = dapp.request(requestInput)
+            break
+          case 'broadcast':
+            pending = dapp.requestBroadcast({
+              get signedTransaction(): string {
+                throw failure
+              }
+            })
+            break
+          default:
+            vi.spyOn(dapp, 'getActiveAccount').mockRejectedValueOnce(failure)
+            pending =
+              method === 'operation'
+                ? dapp.requestOperation({ operationDetails: [] })
+                : method === 'sign'
+                  ? dapp.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
+                  : method === 'proof'
+                    ? dapp.requestProofOfEventChallenge({ payload: 'challenge' })
+                    : dapp.requestSimulatedProofOfEventChallenge({ payload: 'challenge' })
+        }
+        const error: unknown = await pending.catch((error: unknown) => error)
+        expect(error).toBeInstanceOf(UnknownBeaconError)
+        if (!isBeaconError(error)) throw new Error('Expected typed request rejection')
+        expect(error.errorData).toBe(failure)
+        expect(error.description).toBe(failure.message)
+        expect(error.errorOrigin).toBe('local')
+        expect(operationErrors).not.toHaveBeenCalled()
+        expect(transport.send).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each([undefined, null, 'raw rejection', { diagnostic: 'original object' }])(
+      'retains non-Error rejection %j in errorData',
+      async (failure) => {
+        vi.spyOn(dapp, 'getActiveAccount').mockRejectedValueOnce(failure)
+        const error: unknown = await dapp
+          .requestOperation({ operationDetails: [] })
+          .catch((error: unknown) => error)
+        expect(error).toBeInstanceOf(UnknownBeaconError)
+        if (!isBeaconError(error)) throw new Error('Expected typed request rejection')
+        expect(error.errorData).toBe(failure)
+      }
+    )
+
+    it('preserves an existing typed error instance from pre-dispatch code', async () => {
+      const failure = new AbortedBeaconError({ id: 'original-id', errorOrigin: 'local' })
+      vi.spyOn(dapp, 'getActiveAccount').mockRejectedValueOnce(failure)
+      await expect(dapp.requestOperation({ operationDetails: [] })).rejects.toBe(failure)
+    })
+
+    it.each([{ scopes: undefined }, { scopes: ['valid', 42] }])(
+      'types malformed V3 permission scopes $scopes through the public request',
+      async ({ scopes }) => {
+        addBlockchain()
+        const pending = dapp.permissionRequest(permissionInput).catch((error: unknown) => error)
+        await vi.advanceTimersByTimeAsync(0)
+        const requestId = await getLastSentRequestId()
+        await dapp['handleResponse'](
+          {
+            id: requestId,
+            senderId: peer.senderId,
+            version: '3',
+            message: {
+              type: BeaconMessageType.PermissionResponse,
+              blockchainIdentifier: 'typed-errors-chain',
+              blockchainData: { scopes }
+            }
+          },
+          context
+        )
+        const error: unknown = await pending
+        expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
+        if (!isBeaconError(error)) throw new Error('Expected typed malformed response rejection')
+        expect(error.description).toBe('Invalid scopes in V3 permission response')
+        expect(error.errorData).toBeInstanceOf(Error)
+      }
+    )
+
+    it('normalizes a post-response dependency failure without replaying request-error side effects', async () => {
+      const failure = new Error('wallet info failed after response')
+      const operationErrors = vi.fn()
+      await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, operationErrors)
+      const pending = dapp
+        .requestOperation({ operationDetails: [] })
+        .catch((error: unknown) => error)
+      await vi.advanceTimersByTimeAsync(0)
+      const requestId = await getLastSentRequestId()
+      vi.spyOn(dapp, 'getWalletInfo').mockRejectedValue(failure)
+      await dapp['handleResponse'](
+        {
+          id: requestId,
+          version: '2',
+          senderId: peer.senderId,
+          type: BeaconMessageType.OperationResponse,
+          transactionHash: 'operation-hash'
+        },
+        context
+      )
+      const error: unknown = await pending
+      expect(error).toBeInstanceOf(UnknownBeaconError)
+      if (!isBeaconError(error)) throw new Error('Expected typed post-response rejection')
+      expect(error.errorData).toBe(failure)
+      expect(operationErrors).not.toHaveBeenCalled()
+    })
+  })
+
   describe('wallet error response rejections', () => {
     it('rejects with NotGrantedBeaconError when wallet replies with NOT_GRANTED_ERROR and keeps event errorResponse plain', async () => {
       const onOperationError = vi.fn()
