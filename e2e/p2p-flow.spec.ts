@@ -62,7 +62,10 @@ test('should rate limit', async () => {
     alert.getByText('Rate limit reached. Please slow down', { exact: true })
   ).toBeVisible()
 
-  await alert.getByRole('button', { name: 'Close', exact: true }).click()
+  await alert
+    .locator('button')
+    .filter({ hasText: /^Close$/ })
+    .click()
 
   await dapp.waitForSelector('div.alert-wrapper-show', { state: 'detached', timeout: 30_000 })
 })
