@@ -1,8 +1,48 @@
 # Request errors
 
+## Update existing callers
+
+If you used a prerelease that accepted envelope metadata as the only argument to
+`TransactionInvalidBeaconError`, change that call to
+`new TransactionInvalidBeaconError(undefined, options)`. This also applies to
+apps that import the class through `@taquito/beacon-wallet` when they adopt this
+Beacon release. The first argument supplies transaction data, including objects
+with fields such as `id`. Pass the envelope metadata second.
+
+```ts
+const error = new TransactionInvalidBeaconError(rpcData, {
+  id: requestId,
+  senderId: walletSenderId,
+  version: '2',
+  errorOrigin: 'wallet'
+})
+```
+
+Other Beacon error constructors still accept options as their first argument.
+`getError(BeaconErrorType.TRANSACTION_INVALID_ERROR)` leaves both `data` and
+`errorData` undefined.
+
+Ordinary request-error events expose `WireRequestErrorResponse`, whose `errorType`
+is a string because a wallet can introduce codes this SDK does not know. Use
+`isRequestErrorResponse(event.errorResponse)` before indexing a
+`Record<BeaconErrorType, Handler>`. To handle an unfamiliar code as a typed
+error, call `toBeaconError(event.errorResponse)`.
+
+`isErrorResponse` and `isRequestErrorResponse` now require a known code and
+string `id`, `version` and `senderId` headers. For the original code in an
+ordinary request-error event, read the wire response directly.
+
+## Request rejection and event behavior
+
 DAppClient permission, blockchain, operation, signing, broadcast and proof request methods reject with a `BeaconError` subclass. Use `isBeaconError(error)` to narrow an unknown rejection. Within the same tab, existing typed errors retain their identity and unexpected local failures become `UnknownBeaconError` with the original value in `errorData`; invalid V3 permission scopes and mismatched blockchain identifiers become `ParametersInvalidBeaconError`.
 
-This normalization also covers preparation and response processing. It does not add request-error events to failures that did not emit them before. Request-error events continue to carry plain response objects. `isErrorResponse` validates a known error type and string `id`, `version` and `senderId` headers; `isRequestErrorResponse` also validates the optional `errorOrigin` (`wallet` or `local`). Empty string headers remain valid for local failures before admission. An admitted wallet error that omits `senderId` still rejects the request; its normalized sender is an empty string.
+This normalization also covers preparation and response processing. The existing
+event emission rules apply to normalized errors, and request-error events carry
+plain response objects. `isRequestErrorResponse` also
+validates the optional `errorOrigin`, which can be `wallet` or `local`. Empty
+string headers remain valid for local failures before admission. An admitted
+wallet error that omits `senderId` still rejects the request and uses an empty
+string as its normalized sender.
 
 An unset origin can be omitted or explicitly undefined. Check its value even when
 the property is present.
@@ -16,12 +56,6 @@ Unfamiliar nonempty wallet error codes and their existing `errorData` pass throu
 plain request-error events and leader/follower forwarding. Public request methods
 still reject with `UnknownBeaconError` for those codes. The response guards reject
 unfamiliar codes because they cannot narrow them to the SDK's known error enum.
-
-Ordinary request-error events expose `WireRequestErrorResponse`, whose `errorType`
-is a string because a wallet can introduce codes this SDK does not know. Consumers
-that previously indexed an exhaustive `Record<BeaconErrorType, Handler>` must first
-use `isRequestErrorResponse(event.errorResponse)` to narrow known codes, or call
-`toBeaconError(event.errorResponse)` to obtain a known typed error.
 
 For a late error, `LATE_RESPONSE_RECEIVED.error` remains a `RequestErrorResponse`
 with a known enum code. An unfamiliar code becomes `UNKNOWN_ERROR` in that derived
@@ -52,28 +86,6 @@ checks and keep their existing `NO_PERMISSIONS` or `LOCAL_RATE_LIMIT_REACHED`
 events. Unrelated plugin or dependency failures with the same message text remain
 `UnknownBeaconError` with their original rejection in `errorData` within the same
 tab, or a JSON copy or summary when delegated.
-
-`TransactionInvalidBeaconError` preserves its first argument as transaction data. Pass envelope metadata as the second argument so RPC payload fields such as `id` cannot be mistaken for a Beacon request ID:
-
-```ts
-const error = new TransactionInvalidBeaconError(rpcData, {
-  id: requestId,
-  senderId: walletSenderId,
-  version: '2',
-  errorOrigin: 'wallet'
-})
-```
-
-For metadata without transaction data, use `new TransactionInvalidBeaconError(undefined, options)`. Replace any options-only single-argument calls with this explicit form. Other Beacon error constructors still accept options as their first argument. `getError(BeaconErrorType.TRANSACTION_INVALID_ERROR)` leaves both `data` and `errorData` undefined.
-
-## Prerelease migration
-
-Prereleases that accepted options as the sole constructor argument need a migration.
-A single object passed to TransactionInvalidBeaconError is now always transaction
-data, including objects that contain option-like fields. To set metadata without
-data, pass undefined first and options second. Taquito re-exports this class from
-@taquito/beacon-wallet, so applications using that export need the same migration
-when they adopt this Beacon release.
 
 Malformed V3 permission responses carry the offending scopes or blockchain
 identifier in errorData. Their errorOrigin is local because the SDK rejects the
