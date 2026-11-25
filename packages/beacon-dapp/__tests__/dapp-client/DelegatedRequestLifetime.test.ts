@@ -585,6 +585,44 @@ describe('Delegated request lifetime', () => {
     }
   )
 
+  it.each([
+    ['root', 'method'],
+    ['root', 'accessor'],
+    ['nested', 'method'],
+    ['nested', 'accessor']
+  ] as const)('copies a %s diagnostic without invoking its toJSON %s', async (location, kind) => {
+    const failure = { message: 'original diagnostic', details: { phase: 'original' } }
+    const details = failure.details
+    const hook = vi.fn(() => {
+      failure.message = 'mutated diagnostic'
+      return { message: 'replacement' }
+    })
+    Object.defineProperty(location === 'root' ? failure : details, 'toJSON', {
+      enumerable: true,
+      ...(kind === 'method' ? { value: hook } : { get: hook })
+    })
+    const packets = captureLocalStoragePosts()
+    vi.mocked(leader.init).mockRejectedValueOnce(failure)
+    const pending = await begin('2')
+    expect(packets).toHaveLength(1)
+    await deliverViaLocalStorage(packets[0])
+    expect(hook).not.toHaveBeenCalled()
+    expect(failure.message).toBe('original diagnostic')
+    expect(failure.details).toBe(details)
+    expect(failure.details.phase).toBe('original')
+    expect(await pending.outcome).toMatchObject({
+      error: {
+        errorData: {
+          message: 'original diagnostic',
+          diagnostic: 'Uncloneable request diagnostic'
+        }
+      }
+    })
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    expect(follower['requestTracker'].size).toBe(0)
+    expect(leader['requestTracker'].size).toBe(0)
+  })
+
   it('detaches JSON-compatible diagnostic fields before the channel encodes them', async () => {
     const packets = captureLocalStoragePosts()
     const failure = {

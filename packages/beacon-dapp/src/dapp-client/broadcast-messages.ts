@@ -232,56 +232,72 @@ export const parseBroadcastMessage = (value: unknown): BroadcastPacket | undefin
   }
 }
 
-// JSON.stringify omits properties, coerces special values, and invokes toJSON.
-// Reject values that the localStorage channel would silently change.
-function hasJsonFields(value: object): boolean {
+function jsonDiagnosticKeys(value: object): (string | symbol)[] {
   const array = Array.isArray(value)
   const prototype: object | null = Object.getPrototypeOf(value)
   if (!array && prototype !== null && Object.getPrototypeOf(prototype) !== null) {
-    return false
+    throw new TypeError('Request diagnostic has no lossless JSON representation')
   }
   const keys = Reflect.ownKeys(value)
-  if (array && keys.length !== value.length + 1) {
-    return false
+  const length: unknown = Object.getOwnPropertyDescriptor(value, 'length')?.value
+  if (array && (typeof length !== 'number' || keys.length !== length + 1)) {
+    throw new TypeError('Request diagnostic has no lossless JSON representation')
   }
 
-  return keys.every((key, index) => {
-    if (array && key === 'length') {
-      return true
-    }
-    const field = Object.getOwnPropertyDescriptor(value, key)
-
-    return (
-      typeof key === 'string' &&
-      (!array || key === String(index)) &&
-      field?.enumerable === true &&
-      'value' in field
-    )
-  })
+  return keys
 }
 
-function jsonDiagnosticField(this: object, key: string, value: unknown): unknown {
-  const field = Object.getOwnPropertyDescriptor(this, key)
+// Copy data descriptors without calling toJSON or property getters.
+function copyJsonDiagnostic(value: unknown, ancestors: Set<object>): unknown {
   if (
-    field &&
-    'value' in field &&
-    Object.is(field.value, value) &&
-    (value === null ||
-      typeof value === 'string' ||
-      typeof value === 'boolean' ||
-      (typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0)) ||
-      (typeof value === 'object' && hasJsonFields(value)))
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0))
   ) {
     return value
   }
+  if (typeof value !== 'object' || ancestors.has(value)) {
+    throw new TypeError('Request diagnostic has no lossless JSON representation')
+  }
 
-  throw new TypeError('Request diagnostic has no lossless JSON representation')
+  const array = Array.isArray(value)
+  const keys = jsonDiagnosticKeys(value)
+
+  const copied: unknown[] | Record<string, unknown> = array ? [] : {}
+  ancestors.add(value)
+  try {
+    for (const [index, key] of keys.entries()) {
+      if (array && key === 'length') {
+        continue
+      }
+      const field = Object.getOwnPropertyDescriptor(value, key)
+      if (
+        typeof key !== 'string' ||
+        (array && key !== String(index)) ||
+        field?.enumerable !== true ||
+        !('value' in field)
+      ) {
+        throw new TypeError('Request diagnostic has no lossless JSON representation')
+      }
+      Object.defineProperty(copied, key, {
+        value: copyJsonDiagnostic(field.value, ancestors),
+        enumerable: true,
+        writable: true,
+        configurable: true
+      })
+    }
+
+    return copied
+  } finally {
+    ancestors.delete(value)
+  }
 }
 
 /** Detach diagnostics before handing a terminal reply to any broadcast-channel transport. */
 export const broadcastErrorData = (value: unknown): unknown => {
   try {
-    return JSON.parse(JSON.stringify(value, jsonDiagnosticField))
+    return copyJsonDiagnostic(value, new Set())
   } catch {
     return {
       message:
