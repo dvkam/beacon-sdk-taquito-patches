@@ -30,16 +30,23 @@ export {
   isBeaconError
 }
 
-export const toBeaconError = (error: RequestErrorResponse): BeaconError =>
-  getError(error.errorType, error.errorData, {
-    id: error.id,
-    version: error.version,
-    senderId: error.senderId,
-    errorOrigin: error.errorOrigin
-  })
+const isKnownErrorType = (value: unknown): value is BeaconErrorType =>
+  Object.values(BeaconErrorType).some((candidate) => candidate === value)
+
+export const toBeaconError = (error: WireRequestErrorResponse): BeaconError =>
+  getError(
+    isKnownErrorType(error.errorType) ? error.errorType : BeaconErrorType.UNKNOWN_ERROR,
+    error.errorData,
+    {
+      id: error.id,
+      version: error.version,
+      senderId: error.senderId,
+      errorOrigin: error.errorOrigin
+    }
+  )
 
 /** Keeps request-error events plain while preserving existing wire error objects. */
-export const errorEventResponse = (error: ErrorResponse): ErrorResponse =>
+export const errorEventResponse = (error: WireRequestErrorResponse): WireRequestErrorResponse =>
   isBeaconError(error)
     ? {
         id: error.id,
@@ -70,6 +77,15 @@ export interface WireErrorMessage extends WireErrorPayload {
   id: string
   version: string
   senderId: string
+}
+
+/**
+ * An attributed plain request-error event. Wallets can send codes unknown to this SDK.
+ * Use isRequestErrorResponse before indexing by BeaconErrorType, or toBeaconError to normalize.
+ * @category DApp
+ */
+export type WireRequestErrorResponse = Omit<RequestErrorResponse, 'errorType'> & {
+  errorType: string
 }
 
 /** The message inside a V3 envelope. Its shape depends on the blockchain. @category DApp */
@@ -126,7 +142,8 @@ export interface LateSuccessResponseInfo extends LateResponseBase {
 }
 
 /**
- * A late answer that is an error. `error` is what the caller would have been rejected with.
+ * A late answer that is an error. `error` uses a known code as a timely public rejection would.
+ * Unfamiliar codes become UNKNOWN_ERROR here and remain unchanged in `message`.
  *
  * @category DApp
  */
@@ -167,11 +184,8 @@ export const responseOutput = (message: ResponseMessage): ResponseOutput =>
 
 // A wallet may send an error type this SDK does not know. It passes through, as it always has,
 // and getError maps it to UnknownBeaconError. An empty one says nothing and becomes UNKNOWN_ERROR.
-const isErrorTypeString = (value: unknown): value is BeaconErrorType =>
+const isErrorTypeString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0
-
-const isKnownErrorType = (value: unknown): value is BeaconErrorType =>
-  Object.values(BeaconErrorType).some((candidate) => candidate === value)
 
 // Preparation failures can contain accessors. Classify only own data fields before
 // handing the diagnostic to a channel, and leave unreadable values to its safe fallback.
@@ -256,7 +270,7 @@ export const localError = (error: ErrorResponse): RequestErrorResponse => ({
 })
 
 /**
- * Builds the error a caller is rejected with from an error that arrived on the response path,
+ * Builds an attributed wire error from an error that arrived on the response path,
  * or returns undefined when the response is not an error.
  *
  * Wallet messages and errors forwarded by the leader tab arrive on the same path, so the
@@ -267,7 +281,7 @@ export const localError = (error: ErrorResponse): RequestErrorResponse => ({
 export const toRequestError = (
   message: ResponseMessage,
   trustClaimedOrigin: boolean
-): RequestErrorResponse | undefined => {
+): WireRequestErrorResponse | undefined => {
   const answer: unknown = responseOutput(message)
   if (!isErrorMessage(answer)) {
     return undefined
@@ -343,7 +357,16 @@ export const classifyLateResponse = (
 ): LateResponseClassification => {
   const error = toRequestError(message, trustClaimedOrigin)
   if (error) {
-    return { kind: 'error', message: stampErrorOrigin(message, trustClaimedOrigin), error }
+    return {
+      kind: 'error',
+      message: stampErrorOrigin(message, trustClaimedOrigin),
+      error: {
+        ...error,
+        errorType: isKnownErrorType(error.errorType)
+          ? error.errorType
+          : BeaconErrorType.UNKNOWN_ERROR
+      }
+    }
   }
 
   return {

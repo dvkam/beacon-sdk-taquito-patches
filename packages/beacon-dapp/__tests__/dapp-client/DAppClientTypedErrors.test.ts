@@ -37,6 +37,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { BeaconEvent } from '../../src/events'
+import { toBeaconError } from '../../src/dapp-client/request-error'
 
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
@@ -627,6 +628,10 @@ describe('DAppClient typed error rejections', () => {
         expect(isRequestErrorResponse(event)).toBe(false)
         expect(event).toEqual({ ...header, ...payload, errorOrigin: 'wallet' })
         expect(event.errorData).toBe(payload.errorData)
+        const normalized = toBeaconError(event)
+        expect(normalized).toBeInstanceOf(UnknownBeaconError)
+        expect(normalized).toMatchObject({ ...header, errorOrigin: 'wallet' })
+        expect(normalized.errorData).toBe(payload.errorData)
       }
     )
 

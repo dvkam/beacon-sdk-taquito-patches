@@ -17,6 +17,17 @@ plain request-error events and leader/follower forwarding. Public request method
 still reject with `UnknownBeaconError` for those codes. The response guards reject
 unfamiliar codes because they cannot narrow them to the SDK's known error enum.
 
+Ordinary request-error events expose `WireRequestErrorResponse`, whose `errorType`
+is a string because a wallet can introduce codes this SDK does not know. Consumers
+that previously indexed an exhaustive `Record<BeaconErrorType, Handler>` must first
+use `isRequestErrorResponse(event.errorResponse)` to narrow known codes, or call
+`toBeaconError(event.errorResponse)` to obtain a known typed error.
+
+For a late error, `LATE_RESPONSE_RECEIVED.error` remains a `RequestErrorResponse`
+with a known enum code. An unfamiliar code becomes `UNKNOWN_ERROR` in that derived
+field. The event's `message` keeps the original code and both fields retain the
+original diagnostic data. Origin attribution applies to both fields.
+
 A delegated preparation failure crosses a tab boundary. Beacon sends a detached
 copy of JSON data so that the localStorage fallback can encode the same reply as
 the native channel. Plain objects with string data fields, arrays, strings,

@@ -5,6 +5,12 @@ import {
   isRequestErrorResponse,
   RequestErrorResponse
 } from '@ecadlabs/beacon-types'
+import {
+  BeaconEvent,
+  type BeaconEventType,
+  type LateErrorResponseInfo,
+  toBeaconError
+} from '@ecadlabs/beacon-dapp'
 
 export const explicitUndefinedOrigin = {
   type: BeaconMessageType.Error,
@@ -34,3 +40,17 @@ export function exceptionOrigin(value: unknown): string | undefined {
 
   return undefined
 }
+
+declare const handlers: Record<BeaconErrorType, () => void>
+declare const event: BeaconEventType[BeaconEvent.OPERATION_REQUEST_ERROR]
+declare const late: LateErrorResponseInfo
+
+// Wallet events retain future codes, so enum-indexed handlers need narrowing first.
+// @ts-expect-error A raw wallet code is not necessarily a known BeaconErrorType.
+handlers[event.errorResponse.errorType]()
+if (isRequestErrorResponse(event.errorResponse)) {
+  handlers[event.errorResponse.errorType]()
+}
+handlers[toBeaconError(event.errorResponse).errorType]()
+// The derived late error is normalized; its raw message remains available separately.
+handlers[late.error.errorType]()
