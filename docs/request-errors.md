@@ -54,7 +54,7 @@ For metadata without transaction data, use `new TransactionInvalidBeaconError(un
 
 ## Prerelease migration
 
-The options-only constructor form shipped in 4.9.0-ecad-beta.4 and beta.5.
+The options-only constructor form shipped in 4.9.0-ecad-beta.4 through beta.6.
 A single object passed to TransactionInvalidBeaconError is now always transaction
 data, including objects that contain option-like fields. To set metadata without
 data, pass undefined first and options second. Taquito re-exports this class from
