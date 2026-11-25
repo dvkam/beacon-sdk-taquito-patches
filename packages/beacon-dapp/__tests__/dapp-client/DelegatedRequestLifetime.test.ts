@@ -1,3 +1,4 @@
+import { BroadcastChannel } from 'broadcast-channel'
 import { LocalStorage, Serializer, UnknownBeaconError, isBeaconError } from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
@@ -13,6 +14,7 @@ import {
   Origin,
   PermissionScope,
   SigningType,
+  StorageKey,
   TransportStatus,
   TransportType
 } from '@ecadlabs/beacon-types'
@@ -418,22 +420,168 @@ describe('Delegated request lifetime', () => {
     }
   )
 
-  it('preserves cloneable preparation diagnostics without reducing their data', async () => {
+  function captureLocalStoragePosts() {
+    // Keep the same reference that the async localStorage encoder receives.
+    const packets: unknown[] = []
+    vi.spyOn(leader['multiTabChannel'], 'postMessage').mockImplementation((packet) => {
+      packets.push(packet)
+    })
+    return packets
+  }
+
+  async function deliverViaLocalStorage(packet: unknown) {
+    // The dependency throws from a detached callback for an unencodable packet.
+    expect(() => JSON.stringify(packet)).not.toThrow()
+    const sender = new BroadcastChannel<unknown>('diagnostic', { type: 'localstorage' })
+    const receiver = new BroadcastChannel<unknown>('diagnostic', { type: 'localstorage' })
+    receiver.onmessage = (message) => deliverTo(1, message)
+    try {
+      const posted = sender.postMessage(packet)
+      await vi.advanceTimersByTimeAsync(1)
+      await posted
+    } finally {
+      await Promise.all([sender.close(), receiver.close()])
+    }
+  }
+
+  it.each([
+    ['bigint', () => ({ amount: BigInt(12) })],
+    [
+      'cycle',
+      () => {
+        const value = {}
+        return Object.assign(value, { self: value })
+      }
+    ],
+    ['map', () => ({ details: new Map([['attempt', 2]]) })],
+    ['set', () => ({ related: new Set(['permission-cache']) })],
+    ['callback', () => ({ retry() {} })],
+    ['long message', () => ({ message: 'x'.repeat(300), retry() {} })],
+    ['custom JSON conversion', () => ({ nested: new Date(0) })],
+    [
+      'throwing discriminator',
+      () => ({
+        get type() {
+          throw new Error('unreadable type')
+        }
+      })
+    ],
+    [
+      'changing message',
+      () => {
+        let reads = 0
+        return {
+          retry() {},
+          get message() {
+            return ++reads === 1 ? 'first read' : () => {}
+          }
+        }
+      }
+    ]
+  ] as const)(
+    'delivers a marked %s diagnostic through the localStorage channel',
+    async (label, makeFailure) => {
+      const packets = captureLocalStoragePosts()
+      vi.mocked(leader.init).mockRejectedValueOnce(makeFailure())
+      const pending = await begin('3')
+      expect(packets).toHaveLength(1)
+      await deliverViaLocalStorage(packets[0])
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected typed follower rejection')
+      expect(outcome.error).toMatchObject({
+        id: pending.id,
+        errorOrigin: 'local',
+        errorData: {
+          diagnostic: 'Uncloneable request diagnostic',
+          message:
+            label === 'changing message'
+              ? 'first read'
+              : label === 'long message'
+                ? 'x'.repeat(256)
+                : 'The request diagnostic could not be copied between tabs.'
+        }
+      })
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+    }
+  )
+
+  it('detaches JSON-compatible diagnostic fields before the channel encodes them', async () => {
+    const packets = captureLocalStoragePosts()
     const failure = {
       message: 'storage read failed',
-      details: new Map([['attempt', 2]]),
-      related: new Set(['permission-cache'])
+      details: [{ attempt: 2, retry: false }, null]
     }
     vi.mocked(leader.init).mockRejectedValueOnce(failure)
     const pending = await begin('2')
-    await deliverResponses()
+    expect(packets).toHaveLength(1)
+    failure.details.splice(0)
+    await deliverViaLocalStorage(packets[0])
     expect(pending.settled).toHaveBeenCalledTimes(1)
     const outcome = await pending.outcome
     if (!('error' in outcome) || !isBeaconError(outcome.error))
       throw new Error('Expected follower diagnostic')
-    expect(outcome.error.errorData).toEqual(failure)
-    expect(outcome.error.errorData).not.toBe(failure)
-    expect(bus.cloneErrors).toEqual([])
+    expect(outcome.error.errorData).toEqual({
+      message: 'storage read failed',
+      details: [{ attempt: 2, retry: false }, null]
+    })
+  })
+
+  it.each(['wallet', 'preparation'] as const)(
+    'settles a V3 %s error without reading peer metadata',
+    async (source) => {
+      const error = {
+        version: '3',
+        id: 'leader-preparation',
+        senderId: 'wallet',
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.NOT_GRANTED_ERROR
+      }
+      if (source === 'preparation') vi.mocked(leader.init).mockRejectedValueOnce(error)
+      const pending = await begin('3')
+      const storageError = new Error('peer database unavailable')
+      const peerRead = vi.spyOn(follower['storage'], 'get').mockRejectedValueOnce(storageError)
+      if (source === 'wallet') {
+        await receiveWallet({ version: '3', id: pending.id, senderId: 'wallet', message: error })
+      } else {
+        await deliverResponses()
+      }
+      expect(peerRead).not.toHaveBeenCalledWith(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          id: pending.id,
+          version: '3',
+          errorOrigin: source === 'wallet' ? 'wallet' : 'local',
+          errorType: error.errorType
+        }
+      })
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+      peerRead.mockRestore()
+    }
+  )
+
+  it('rejects a V3 follower success when peer metadata lookup fails', async () => {
+    const pending = await begin('3')
+    const storageError = new Error('peer database unavailable')
+    vi.spyOn(follower['storage'], 'get').mockRejectedValueOnce(storageError)
+    const success = vi.spyOn(blockchain, 'handleResponse')
+    await receiveWallet(walletSuccess('3', pending.id))
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    const outcome = await pending.outcome
+    if (!('error' in outcome) || !isBeaconError(outcome.error))
+      throw new Error('Expected typed metadata lookup failure')
+    expect(outcome.error).toMatchObject({
+      id: pending.id,
+      errorOrigin: 'local',
+      errorType: BeaconErrorType.UNKNOWN_ERROR
+    })
+    expect(outcome.error.errorData).toBe(storageError)
+    expect(success).not.toHaveBeenCalled()
+    expect(follower['requestTracker'].size).toBe(0)
   })
 
   it('does not let a tab response settle a request sent directly by this tab', async () => {
@@ -704,7 +852,14 @@ describe('Delegated request lifetime', () => {
         data: {
           message: {
             ...localWireError(pending.id, errorType),
-            ...(kind === 'plain' ? { errorData: error } : {})
+            ...(kind === 'plain'
+              ? {
+                  errorData: {
+                    message: 'Initialization failed',
+                    diagnostic: 'Uncloneable request diagnostic'
+                  }
+                }
+              : {})
           },
           connectionInfo: { origin: Origin.WALLETCONNECT, id: '' }
         }

@@ -253,6 +253,24 @@ describe('DAppClient typed error rejections', () => {
       }
     )
 
+    it('retains a validator error whose message getter throws', async () => {
+      const failure = new Error()
+      Object.defineProperty(failure, 'message', {
+        get() {
+          throw new RangeError('unreadable message')
+        }
+      })
+      addBlockchain(async () => {
+        throw failure
+      })
+      const error: unknown = await dapp.request(requestInput).catch((error: unknown) => error)
+      expect(error).toBeInstanceOf(UnknownBeaconError)
+      if (!isBeaconError(error)) throw new Error('Expected typed validator rejection')
+      expect(error.errorData).toBe(failure)
+      expect(error.errorOrigin).toBe('local')
+      expect(transport.send).not.toHaveBeenCalled()
+    })
+
     it('retains an uncloneable diagnostic by identity for a direct request', async () => {
       const failure = { message: 'storage read failed', retry() {} }
       vi.spyOn(dapp, 'getActiveAccount').mockRejectedValueOnce(failure)
@@ -261,6 +279,7 @@ describe('DAppClient typed error rejections', () => {
         .catch((error: unknown) => error)
       if (!isBeaconError(error)) throw new Error('Expected direct request error')
       expect(error).toBeInstanceOf(UnknownBeaconError)
+      expect(error.description).toBe(new UnknownBeaconError().description)
       expect(error.errorData).toBe(failure)
       expect(transport.send).not.toHaveBeenCalled()
     })
