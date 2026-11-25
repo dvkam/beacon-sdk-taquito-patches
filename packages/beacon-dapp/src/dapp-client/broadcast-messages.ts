@@ -231,3 +231,26 @@ export const parseBroadcastMessage = (value: unknown): BroadcastPacket | undefin
     return undefined
   }
 }
+
+/** Local diagnostics retain identity until they cross into another tab. */
+export const broadcastErrorData = (value: unknown): unknown => {
+  try {
+    return structuredClone(value)
+  } catch {
+    const summary = { message: 'The request diagnostic could not be copied between tabs.' }
+    try {
+      if (
+        typeof value === 'object' &&
+        value !== null &&
+        'message' in value &&
+        typeof value.message === 'string'
+      ) {
+        summary.message = value.message
+      }
+    } catch {
+      // Reading an application-supplied diagnostic can itself throw.
+    }
+
+    return { ...summary, diagnostic: 'Uncloneable request diagnostic' }
+  }
+}

@@ -187,6 +187,7 @@ import {
   MessageObserver
 } from './message-observer'
 import {
+  broadcastErrorData,
   ForwardedBroadcastRequest,
   ForwardedV2Request,
   parseBroadcastMessage,
@@ -1218,28 +1219,28 @@ export class DAppClient extends Client {
     }
   }
 
-  private buildDelegatedRequestError(id: string, error: unknown): RequestErrorResponse {
-    const response = normalizeErrorResponse(error)
-    if (response) {
-      return {
+  private buildDelegatedRequestError(id: string, error: unknown): ResponseMessage {
+    const response =
+      normalizeErrorResponse(error) ??
+      localError({
         id,
         type: BeaconMessageType.Error,
-        errorType: response.errorType,
-        senderId: response.senderId,
-        version: response.version,
-        errorOrigin: response.errorOrigin,
-        ...(response.errorData !== undefined ? { errorData: response.errorData } : {})
-      }
-    }
-
-    return localError({
-      id,
+        errorType: BeaconErrorType.UNKNOWN_ERROR,
+        senderId: '',
+        version: '2',
+        errorData: error
+      })
+    const payload = {
       type: BeaconMessageType.Error,
-      errorType: BeaconErrorType.UNKNOWN_ERROR,
-      senderId: '',
-      version: '2',
-      errorData: error
-    })
+      errorType: response.errorType,
+      errorOrigin: response.errorOrigin,
+      ...(response.errorData !== undefined
+        ? { errorData: broadcastErrorData(response.errorData) }
+        : {})
+    }
+    const header = { id, senderId: response.senderId, version: response.version }
+
+    return response.version === '3' ? { ...header, message: payload } : { ...header, ...payload }
   }
 
   private async onStorageChanged(
@@ -5672,7 +5673,7 @@ export class DAppClient extends Client {
       if (preparation.appMetadata) {
         try {
           await this.appMetadataManager.addAppMetadata(preparation.appMetadata)
-        } catch {
+        } catch (errorData) {
           this.requestTracker.preparationFailed(
             key,
             localError({
@@ -5680,7 +5681,8 @@ export class DAppClient extends Client {
               type: BeaconMessageType.Error,
               errorType: BeaconErrorType.UNKNOWN_ERROR,
               senderId: '',
-              version: '2'
+              version: '2',
+              errorData
             })
           )
           this.messageObserver.notifyIncoming(transportType, message, 'handled')

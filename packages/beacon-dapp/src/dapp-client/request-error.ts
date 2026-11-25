@@ -168,6 +168,29 @@ export const responseOutput = (message: ResponseMessage): ResponseOutput =>
 const isKnownErrorType = (value: unknown): value is BeaconErrorType =>
   Object.values(BeaconErrorType).some((candidate) => candidate === value)
 
+const normalizeErrorPayload = (
+  value: WireErrorPayload,
+  header: Pick<RequestErrorResponse, 'id' | 'senderId' | 'version'>,
+  diagnostic: unknown
+): RequestErrorResponse => {
+  const errorType = 'errorType' in value ? value.errorType : undefined
+  const origin =
+    'errorOrigin' in value && isErrorOrigin(value.errorOrigin) ? value.errorOrigin : 'local'
+
+  return {
+    ...value,
+    ...header,
+    type: BeaconMessageType.Error,
+    errorOrigin: origin,
+    errorType: isKnownErrorType(errorType) ? errorType : BeaconErrorType.UNKNOWN_ERROR,
+    ...(!isKnownErrorType(errorType) && typeof errorType === 'string' && errorType.length > 0
+      ? { errorData: diagnostic }
+      : 'errorData' in value
+        ? { errorData: value.errorData }
+        : {})
+  }
+}
+
 /** Normalize verified error envelopes while retaining unfamiliar wallet diagnostics. */
 export const normalizeErrorResponse = (
   value: unknown,
@@ -184,24 +207,12 @@ export const normalizeErrorResponse = (
   ) {
     return undefined
   }
-  const errorType = 'errorType' in value ? value.errorType : undefined
-  const origin =
-    'errorOrigin' in value && isErrorOrigin(value.errorOrigin) ? value.errorOrigin : 'local'
 
-  return {
-    ...value,
-    id: value.id,
-    senderId: value.senderId,
-    version: value.version,
-    type: BeaconMessageType.Error,
-    errorOrigin: origin,
-    errorType: isKnownErrorType(errorType) ? errorType : BeaconErrorType.UNKNOWN_ERROR,
-    ...(!isKnownErrorType(errorType) && typeof errorType === 'string' && errorType.length > 0
-      ? { errorData: diagnostic }
-      : 'errorData' in value
-        ? { errorData: value.errorData }
-        : {})
-  }
+  return normalizeErrorPayload(
+    value,
+    { id: value.id, senderId: value.senderId, version: value.version },
+    diagnostic
+  )
 }
 
 export const localError = (error: ErrorResponse): RequestErrorResponse => ({
@@ -232,14 +243,9 @@ export const toRequestError = (
     ? { ...message, message: { ...answer, errorOrigin } }
     : { ...message, errorOrigin }
 
-  return normalizeErrorResponse(
-    {
-      ...answer,
-      id: message.id,
-      version: message.version,
-      senderId: message.senderId,
-      errorOrigin
-    },
+  return normalizeErrorPayload(
+    { ...answer, errorOrigin },
+    { id: message.id, version: message.version, senderId: message.senderId ?? '' },
     diagnostic
   )
 }
@@ -259,10 +265,10 @@ export const stampErrorOrigin = <M extends ResponseMessage>(
   // Spread from a value: ErrorResponse does not declare errorOrigin, the wire message has it.
   const stamp = { errorOrigin: error.errorOrigin }
   if (isV3Envelope(message)) {
-    return { ...message, message: { ...message.message, ...stamp } }
+    return { ...message, senderId: error.senderId, message: { ...message.message, ...stamp } }
   }
 
-  return { ...message, ...stamp }
+  return { ...message, senderId: error.senderId, ...stamp }
 }
 
 const hashOf = (value: unknown): string | undefined =>
