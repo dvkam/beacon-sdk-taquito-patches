@@ -152,6 +152,7 @@ export type LateResponseClassification =
 const isErrorMessage = (value: unknown): value is { type: BeaconMessageType.Error } =>
   typeof value === 'object' &&
   value !== null &&
+  !Array.isArray(value) &&
   'type' in value &&
   value.type === BeaconMessageType.Error
 
@@ -164,10 +165,44 @@ const isV3Envelope = (
 export const responseOutput = (message: ResponseMessage): ResponseOutput =>
   isV3Envelope(message) ? message.message : message
 
-// A wallet may send an error type this SDK does not know. It passes through, as it always has,
-// and getError maps it to UnknownBeaconError. An empty one says nothing and becomes UNKNOWN_ERROR.
-const isErrorTypeString = (value: unknown): value is BeaconErrorType =>
-  typeof value === 'string' && value.length > 0
+const isKnownErrorType = (value: unknown): value is BeaconErrorType =>
+  Object.values(BeaconErrorType).some((candidate) => candidate === value)
+
+/** Normalize verified error envelopes while retaining unfamiliar wallet diagnostics. */
+export const normalizeErrorResponse = (
+  value: unknown,
+  diagnostic: unknown = value
+): RequestErrorResponse | undefined => {
+  if (
+    !isErrorMessage(value) ||
+    !('id' in value) ||
+    typeof value.id !== 'string' ||
+    !('senderId' in value) ||
+    typeof value.senderId !== 'string' ||
+    !('version' in value) ||
+    typeof value.version !== 'string'
+  ) {
+    return undefined
+  }
+  const errorType = 'errorType' in value ? value.errorType : undefined
+  const origin =
+    'errorOrigin' in value && isErrorOrigin(value.errorOrigin) ? value.errorOrigin : 'local'
+
+  return {
+    ...value,
+    id: value.id,
+    senderId: value.senderId,
+    version: value.version,
+    type: BeaconMessageType.Error,
+    errorOrigin: origin,
+    errorType: isKnownErrorType(errorType) ? errorType : BeaconErrorType.UNKNOWN_ERROR,
+    ...(!isKnownErrorType(errorType) && typeof errorType === 'string' && errorType.length > 0
+      ? { errorData: diagnostic }
+      : 'errorData' in value
+        ? { errorData: value.errorData }
+        : {})
+  }
+}
 
 export const localError = (error: ErrorResponse): RequestErrorResponse => ({
   ...error,
@@ -191,18 +226,22 @@ export const toRequestError = (
   if (!isErrorMessage(answer)) {
     return undefined
   }
-  const errorType = 'errorType' in answer ? answer.errorType : undefined
   const claimed = 'errorOrigin' in answer ? answer.errorOrigin : undefined
+  const errorOrigin = trustClaimedOrigin && isErrorOrigin(claimed) ? claimed : 'wallet'
+  const diagnostic = isV3Envelope(message)
+    ? { ...message, message: { ...answer, errorOrigin } }
+    : { ...message, errorOrigin }
 
-  return {
-    ...answer,
-    id: message.id,
-    version: message.version,
-    senderId: message.senderId,
-    type: BeaconMessageType.Error,
-    errorType: isErrorTypeString(errorType) ? errorType : BeaconErrorType.UNKNOWN_ERROR,
-    errorOrigin: trustClaimedOrigin && isErrorOrigin(claimed) ? claimed : 'wallet'
-  }
+  return normalizeErrorResponse(
+    {
+      ...answer,
+      id: message.id,
+      version: message.version,
+      senderId: message.senderId,
+      errorOrigin
+    },
+    diagnostic
+  )
 }
 
 /**

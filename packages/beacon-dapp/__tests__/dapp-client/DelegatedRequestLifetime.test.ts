@@ -1,4 +1,4 @@
-import { LocalStorage, Serializer } from '@ecadlabs/beacon-core'
+import { LocalStorage, Serializer, UnknownBeaconError, isBeaconError } from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
   StoredAccountInfo,
@@ -8,6 +8,7 @@ import {
   Blockchain,
   ConnectionContext,
   ErrorResponse,
+  isRequestErrorResponse,
   NetworkType,
   Origin,
   PermissionScope,
@@ -280,6 +281,74 @@ describe('Delegated request lifetime', () => {
     await deliverResponses()
   }
 
+  it.each(['2', '3'] as const)(
+    'preserves unknown wallet diagnostics and headers after real V%s leader forwarding',
+    async (version) => {
+      const pending = await begin(version)
+      const payload = {
+        type: BeaconMessageType.Error,
+        errorType: 'FUTURE_WALLET_ERROR',
+        errorData: { detail: 'wallet diagnostic' }
+      }
+      const response =
+        version === '3'
+          ? { id: pending.id, senderId: 'wallet', version, message: payload }
+          : { id: pending.id, senderId: 'wallet', version, ...payload }
+      await receiveWallet(response)
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected forwarded Beacon error')
+      expect(outcome.error).toBeInstanceOf(UnknownBeaconError)
+      expect(outcome.error).toMatchObject({
+        id: pending.id,
+        senderId: 'wallet',
+        version,
+        errorOrigin: 'wallet',
+        errorType: BeaconErrorType.UNKNOWN_ERROR
+      })
+      expect(outcome.error.errorData).toMatchObject(response)
+      if (version === '2') {
+        expect(followerFailed).toHaveBeenCalledTimes(1)
+        const event = followerFailed.mock.calls[0][0].errorResponse
+        expect(isRequestErrorResponse(event)).toBe(true)
+        expect(event).toMatchObject({
+          id: pending.id,
+          senderId: 'wallet',
+          version,
+          errorOrigin: 'wallet',
+          errorType: BeaconErrorType.UNKNOWN_ERROR
+        })
+      }
+    }
+  )
+
+  it('preserves unknown envelope diagnostics on delegated preparation rejection', async () => {
+    const response = {
+      id: 'preparation-id',
+      senderId: 'wallet',
+      version: '2',
+      type: BeaconMessageType.Error,
+      errorOrigin: 'wallet',
+      errorType: 'FUTURE_WALLET_ERROR',
+      errorData: { detail: 'preparation diagnostic' }
+    }
+    vi.spyOn(leader, 'checkPermissions').mockRejectedValueOnce(response)
+    const pending = await begin('2')
+    await deliverResponses()
+    const outcome = await pending.outcome
+    if (!('error' in outcome) || !isBeaconError(outcome.error))
+      throw new Error('Expected delegated Beacon error')
+    expect(outcome.error).toMatchObject({
+      id: pending.id,
+      senderId: 'wallet',
+      version: '2',
+      errorOrigin: 'wallet',
+      errorType: BeaconErrorType.UNKNOWN_ERROR
+    })
+    expect(outcome.error.errorData).toMatchObject(response)
+    expect(isRequestErrorResponse(followerFailed.mock.calls[0][0].errorResponse)).toBe(true)
+  })
+
   it('does not let a tab response settle a request sent directly by this tab', async () => {
     const pending = observe(
       leader.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
@@ -546,7 +615,10 @@ describe('Delegated request lifetime', () => {
         type: 'RESPONSE',
         id: pending.id,
         data: {
-          message: localWireError(pending.id, errorType),
+          message: {
+            ...localWireError(pending.id, errorType),
+            ...(kind === 'plain' ? { errorData: error } : {})
+          },
           connectionInfo: { origin: Origin.WALLETCONNECT, id: '' }
         }
       }

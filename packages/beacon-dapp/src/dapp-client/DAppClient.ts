@@ -168,7 +168,6 @@ import {
   classifyLateResponse,
   errorEventResponse,
   isBeaconError,
-  isErrorOrigin,
   isErrorResponse,
   LateResponseInfo,
   localError,
@@ -177,6 +176,7 @@ import {
   responseOutput,
   stampErrorOrigin,
   toRequestError,
+  normalizeErrorResponse,
   toBeaconError
 } from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
@@ -409,6 +409,7 @@ export class DAppClient extends Client {
 
   // Object ownership keeps receipt times through async preparation without retaining settled IDs.
   private readonly responseReceivedAt = new WeakMap<object, number>()
+  private readonly admissionErrors = new WeakSet<BeaconError>()
 
   private readonly messageObserver = new MessageObserver()
 
@@ -1218,18 +1219,16 @@ export class DAppClient extends Client {
   }
 
   private buildDelegatedRequestError(id: string, error: unknown): RequestErrorResponse {
-    if (isErrorResponse(error)) {
-      const origin =
-        'errorOrigin' in error && isErrorOrigin(error.errorOrigin) ? error.errorOrigin : 'local'
-
+    const response = normalizeErrorResponse(error)
+    if (response) {
       return {
         id,
         type: BeaconMessageType.Error,
-        errorType: error.errorType,
-        senderId: error.senderId,
-        version: error.version,
-        errorOrigin: origin,
-        ...(error.errorData !== undefined ? { errorData: error.errorData } : {})
+        errorType: response.errorType,
+        senderId: response.senderId,
+        version: response.version,
+        errorOrigin: response.errorOrigin,
+        ...(response.errorData !== undefined ? { errorData: response.errorData } : {})
       }
     }
 
@@ -1238,7 +1237,8 @@ export class DAppClient extends Client {
       type: BeaconMessageType.Error,
       errorType: BeaconErrorType.UNKNOWN_ERROR,
       senderId: '',
-      version: '2'
+      version: '2',
+      errorData: error
     })
   }
 
@@ -4180,9 +4180,18 @@ export class DAppClient extends Client {
     const typedRequest = request as BeaconRequestInputMessage
     const requestError = rawError as ErrorResponse
     logger.time(false, logId)
+    if (isBeaconError(rawError) && this.admissionErrors.has(rawError)) {
+      return
+    }
     await this.handleRequestError(typedRequest, requestError, resetPermissionState).catch(
       () => undefined
     )
+  }
+
+  private localAdmissionError(error: BeaconError): BeaconError {
+    this.admissionErrors.add(error)
+
+    return error
   }
 
   // Normalize only at the public seam. Existing dispatch error handlers retain
@@ -4205,34 +4214,9 @@ export class DAppClient extends Client {
     if (isBeaconError(error)) {
       return error
     }
-    if (isErrorResponse(error)) {
-      const origin =
-        'errorOrigin' in error && isErrorOrigin(error.errorOrigin) ? error.errorOrigin : undefined
-
-      return toBeaconError({
-        ...error,
-        ...(origin ? { errorOrigin: origin } : {})
-      })
-    }
-    if (error instanceof Error) {
-      if (error.message === 'rate limit reached') {
-        return new UnknownBeaconError({
-          description: error.message,
-          errorOrigin: 'local',
-          id: '',
-          senderId: '',
-          version: '2'
-        })
-      }
-      if (error.message === 'No permissions to send this request to wallet!') {
-        return new NotGrantedBeaconError({
-          description: error.message,
-          errorOrigin: 'local',
-          id: '',
-          senderId: '',
-          version: '2'
-        })
-      }
+    const response = normalizeErrorResponse(error)
+    if (response) {
+      return toBeaconError(response)
     }
 
     return error
@@ -4723,7 +4707,9 @@ export class DAppClient extends Client {
         this.events
           .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
-        throw new Error('rate limit reached')
+        throw this.localAdmissionError(
+          new UnknownBeaconError({ description: 'rate limit reached', errorOrigin: 'local' })
+        )
       }
 
       await this.init()
@@ -4739,7 +4725,12 @@ export class DAppClient extends Client {
         this.events
           .emit(BeaconEvent.NO_PERMISSIONS)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
-        throw new Error('No permissions to send this request to wallet!')
+        throw this.localAdmissionError(
+          new NotGrantedBeaconError({
+            description: 'No permissions to send this request to wallet!',
+            errorOrigin: 'local'
+          })
+        )
       }
       if (!this.beaconId) {
         throw await this.sendInternalError('beaconIdNotDefined')
@@ -4814,7 +4805,9 @@ export class DAppClient extends Client {
         this.events
           .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
-        throw new Error('rate limit reached')
+        throw this.localAdmissionError(
+          new UnknownBeaconError({ description: 'rate limit reached', errorOrigin: 'local' })
+        )
       }
       await this.init()
       if (delegated && !stillAdmitted()) {
@@ -4892,7 +4885,9 @@ export class DAppClient extends Client {
       this.events
         .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
         .catch((emitError) => logger.warn('requestDispatch', emitError))
-      throw new Error('rate limit reached')
+      throw this.localAdmissionError(
+        new UnknownBeaconError({ description: 'rate limit reached', errorOrigin: 'local' })
+      )
     }
     const id = await generateGUID()
     assertCurrent(id)

@@ -31,6 +31,7 @@ import {
   PermissionRequestV3,
   PermissionScope,
   RequestPermissionInput,
+  isRequestErrorResponse,
   SigningType,
   StorageKey,
   TransportType
@@ -253,6 +254,27 @@ describe('DAppClient typed error rejections', () => {
       }
     )
 
+    it.each(['rate limit reached', 'No permissions to send this request to wallet!'])(
+      'preserves unrelated V3 validator errors matching admission text: %s',
+      async (message) => {
+        const failure = new Error(message)
+        const rateLimited = vi.fn()
+        const denied = vi.fn()
+        await dapp.subscribeToEvent(BeaconEvent.LOCAL_RATE_LIMIT_REACHED, rateLimited)
+        await dapp.subscribeToEvent(BeaconEvent.NO_PERMISSIONS, denied)
+        addBlockchain(async () => {
+          throw failure
+        })
+        const error: unknown = await dapp.request(requestInput).catch((error: unknown) => error)
+        expect(error).toBeInstanceOf(UnknownBeaconError)
+        if (!isBeaconError(error)) throw new Error('Expected typed validator rejection')
+        expect(error.errorData).toBe(failure)
+        expect(error.errorOrigin).toBe('local')
+        expect(denied).not.toHaveBeenCalled()
+        expect(rateLimited).not.toHaveBeenCalled()
+      }
+    )
+
     it.each([undefined, null, 'raw rejection', { diagnostic: 'original object' }])(
       'retains non-Error rejection %j in errorData',
       async (failure) => {
@@ -420,7 +442,9 @@ describe('DAppClient typed error rejections', () => {
       })
     })
 
-    it('settles an unknown wallet error type with the original response retained', async () => {
+    it('settles an unknown wallet error type with verified headers and a guarded event', async () => {
+      const failed = vi.fn()
+      await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, failed)
       const pending = dapp
         .requestOperation({ operationDetails: [] })
         .catch((error: unknown) => error)
@@ -438,7 +462,26 @@ describe('DAppClient typed error rejections', () => {
       const error: unknown = await pending
       expect(error).toBeInstanceOf(UnknownBeaconError)
       if (!isBeaconError(error)) throw new Error('Expected typed unknown wallet rejection')
+      expect(error).toMatchObject({
+        id,
+        senderId: peer.senderId,
+        version: '2',
+        errorOrigin: 'wallet',
+        errorType: BeaconErrorType.UNKNOWN_ERROR
+      })
       expect(error.errorData).toEqual(expect.objectContaining(response))
+      expect(failed).toHaveBeenCalledTimes(1)
+      const event = failed.mock.calls[0][0].errorResponse
+      expect(event).not.toBeInstanceOf(Error)
+      expect(isRequestErrorResponse(event)).toBe(true)
+      expect(event).toMatchObject({
+        id,
+        senderId: peer.senderId,
+        version: '2',
+        errorOrigin: 'wallet',
+        errorType: BeaconErrorType.UNKNOWN_ERROR
+      })
+      expect(event.errorData).toEqual(expect.objectContaining(response))
     })
 
     it('offers removal of only the requested account when the wallet cannot find its private key', async () => {
