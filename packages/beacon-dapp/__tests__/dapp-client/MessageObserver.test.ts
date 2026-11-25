@@ -7,6 +7,7 @@ import {
 } from '@ecadlabs/beacon-core'
 import {
   AccountInfo,
+  isBeaconError,
   BeaconErrorType,
   BeaconMessageType,
   ConnectionContext,
@@ -461,6 +462,7 @@ describe('DAppClient plaintext message observers (#149)', () => {
     dapp.subscribeToMessages(() => {
       throw new Error('sync observer failed')
     })
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This fixture verifies that the observer owner catches an async callback rejection.
     dapp.subscribeToMessages(async () => {
       throw new Error('async observer failed')
     })
@@ -651,7 +653,17 @@ describe('DAppClient plaintext message observers (#149)', () => {
         dapp.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
       )
       await vi.advanceTimersByTimeAsync(0)
-      expect(await outcome).toEqual({ error })
+      expect(await outcome).toEqual({
+        error: expect.objectContaining({
+          errorType: BeaconErrorType.UNKNOWN_ERROR,
+          errorOrigin: 'local',
+          errorData: error
+        })
+      })
+      const result = await outcome
+      if (!('error' in result) || !isBeaconError(result.error))
+        throw new Error('Expected typed dispatch failure')
+      expect(result.error.errorData).toBe(error)
       expect(records).toHaveLength(1)
       expect(records[0]).toMatchObject({
         direction: 'outgoing',
