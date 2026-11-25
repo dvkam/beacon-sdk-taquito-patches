@@ -1226,8 +1226,8 @@ export class DAppClient extends Client {
         id,
         type: BeaconMessageType.Error,
         errorType: error.errorType,
-        senderId: error.senderId ?? '',
-        version: error.version ?? '2',
+        senderId: error.senderId,
+        version: error.version,
         errorOrigin: origin,
         ...(error.errorData !== undefined ? { errorData: error.errorData } : {})
       }
@@ -3208,16 +3208,21 @@ export class DAppClient extends Client {
       owner.assertCurrent()
 
       const permission = structuredClone(response.message)
+      const invalidResponse = (description: string, errorData: unknown) =>
+        new ParametersInvalidBeaconError({ description, errorOrigin: 'local', errorData })
       if (permission.blockchainIdentifier !== blockchainIdentifier) {
-        throw new Error('Unexpected blockchain in V3 permission response')
+        throw invalidResponse(
+          'Unexpected blockchain in V3 permission response',
+          permission.blockchainIdentifier
+        )
       }
       const rawScopes: unknown = permission.blockchainData?.scopes
       if (!Array.isArray(rawScopes)) {
-        throw new Error('Invalid scopes in V3 permission response')
+        throw invalidResponse('Invalid scopes in V3 permission response', rawScopes)
       }
       const scopes: unknown[] = Array.from(rawScopes)
       if (!scopes.every((scope): scope is string => typeof scope === 'string')) {
-        throw new Error('Invalid scopes in V3 permission response')
+        throw invalidResponse('Invalid scopes in V3 permission response', rawScopes)
       }
       permission.blockchainData.scopes = scopes
       const permissionEnvelope = { ...response, message: permission }
@@ -4238,21 +4243,12 @@ export class DAppClient extends Client {
     if (isBeaconError(normalized)) {
       return normalized
     }
-    const options = {
-      ...(error instanceof Error ? { description: error.message } : {}),
-      errorOrigin: 'local' as const,
-      errorData: error
-    }
-    if (error instanceof Error) {
-      if (
-        error.message === 'Invalid scopes in V3 permission response' ||
-        error.message === 'Unexpected blockchain in V3 permission response'
-      ) {
-        return new ParametersInvalidBeaconError(options)
-      }
-    }
 
-    return new UnknownBeaconError(options)
+    return new UnknownBeaconError({
+      ...(error instanceof Error ? { description: error.message } : {}),
+      errorOrigin: 'local',
+      errorData: error
+    })
   }
 
   /**
