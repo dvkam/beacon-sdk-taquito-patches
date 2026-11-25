@@ -165,63 +165,72 @@ const isV3Envelope = (
 export const responseOutput = (message: ResponseMessage): ResponseOutput =>
   isV3Envelope(message) ? message.message : message
 
+// A wallet may send an error type this SDK does not know. It passes through, as it always has,
+// and getError maps it to UnknownBeaconError. An empty one says nothing and becomes UNKNOWN_ERROR.
+const isErrorTypeString = (value: unknown): value is BeaconErrorType =>
+  typeof value === 'string' && value.length > 0
+
 const isKnownErrorType = (value: unknown): value is BeaconErrorType =>
   Object.values(BeaconErrorType).some((candidate) => candidate === value)
 
-const normalizeErrorPayload = (
-  value: WireErrorPayload,
-  header: Pick<RequestErrorResponse, 'id' | 'senderId' | 'version'>,
-  diagnostic: unknown
-): RequestErrorResponse => {
-  const errorType = 'errorType' in value ? value.errorType : undefined
-  const origin =
-    'errorOrigin' in value && isErrorOrigin(value.errorOrigin) ? value.errorOrigin : 'local'
-
-  return {
-    ...value,
-    ...header,
-    type: BeaconMessageType.Error,
-    errorOrigin: origin,
-    errorType: isKnownErrorType(errorType) ? errorType : BeaconErrorType.UNKNOWN_ERROR,
-    ...(!isKnownErrorType(errorType) && typeof errorType === 'string' && errorType.length > 0
-      ? { errorData: diagnostic }
-      : 'errorData' in value
-        ? { errorData: value.errorData }
-        : {})
-  }
-}
-
-// Application hooks can reject with accessors or proxies. Read only the fields
-// needed for classification, and keep an unreadable rejection as the diagnostic.
-export const normalizeErrorResponse = (value: unknown): RequestErrorResponse | undefined => {
+// Preparation failures can contain accessors. Classify only own data fields before
+// handing the diagnostic to a channel, and leave unreadable values to its safe fallback.
+export const readErrorResponse = (
+  value: unknown
+): (WireErrorMessage & { errorOrigin: ErrorOrigin; errorType: string }) | undefined => {
   try {
-    if (!isErrorMessage(value)) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       return undefined
     }
-    const id = 'id' in value ? value.id : undefined
-    const senderId = 'senderId' in value ? value.senderId : undefined
-    const version = 'version' in value ? value.version : undefined
+    const readData = (key: string): unknown => {
+      const field = Object.getOwnPropertyDescriptor(value, key)
+      if (field && !('value' in field)) {
+        throw new TypeError('Error response fields must be data properties')
+      }
+
+      return field?.value
+    }
+    if (readData('type') !== BeaconMessageType.Error) {
+      return undefined
+    }
+    const id = readData('id')
+    const senderId = readData('senderId')
+    const version = readData('version')
     if (typeof id !== 'string' || typeof senderId !== 'string' || typeof version !== 'string') {
       return undefined
     }
 
-    const errorType = 'errorType' in value ? value.errorType : undefined
-    const errorData = 'errorData' in value ? value.errorData : undefined
-    const diagnostic = !isKnownErrorType(errorType) && errorData === undefined ? value : errorData
+    const errorType = readData('errorType')
+    const errorData = readData('errorData')
+    const origin = readData('errorOrigin')
+    const diagnostic = !isErrorTypeString(errorType) && errorData === undefined ? value : errorData
 
-    return normalizeErrorPayload(
-      {
-        type: BeaconMessageType.Error,
-        errorType,
-        errorOrigin: 'errorOrigin' in value ? value.errorOrigin : undefined,
-        ...(diagnostic !== undefined ? { errorData: diagnostic } : {})
-      },
-      { id, senderId, version },
-      value
-    )
+    return {
+      type: BeaconMessageType.Error,
+      id,
+      senderId,
+      version,
+      errorType: isErrorTypeString(errorType) ? errorType : BeaconErrorType.UNKNOWN_ERROR,
+      errorOrigin: isErrorOrigin(origin) ? origin : 'local',
+      ...(diagnostic !== undefined ? { errorData: diagnostic } : {})
+    }
   } catch {
     return undefined
   }
+}
+
+// Only public typed rejections need a code from the SDK's known enum.
+export const normalizeErrorResponse = (value: unknown): RequestErrorResponse | undefined => {
+  const response = readErrorResponse(value)
+
+  return response
+    ? {
+        ...response,
+        errorType: isKnownErrorType(response.errorType)
+          ? response.errorType
+          : BeaconErrorType.UNKNOWN_ERROR
+      }
+    : undefined
 }
 
 export const diagnosticMessage = (
@@ -263,17 +272,18 @@ export const toRequestError = (
   if (!isErrorMessage(answer)) {
     return undefined
   }
+  const errorType = 'errorType' in answer ? answer.errorType : undefined
   const claimed = 'errorOrigin' in answer ? answer.errorOrigin : undefined
-  const errorOrigin = trustClaimedOrigin && isErrorOrigin(claimed) ? claimed : 'wallet'
-  const diagnostic = isV3Envelope(message)
-    ? { ...message, message: { ...answer, errorOrigin } }
-    : { ...message, errorOrigin }
 
-  return normalizeErrorPayload(
-    { ...answer, errorOrigin },
-    { id: message.id, version: message.version, senderId: message.senderId ?? '' },
-    diagnostic
-  )
+  return {
+    ...answer,
+    id: message.id,
+    version: message.version,
+    senderId: message.senderId ?? '',
+    type: BeaconMessageType.Error,
+    errorType: isErrorTypeString(errorType) ? errorType : BeaconErrorType.UNKNOWN_ERROR,
+    errorOrigin: trustClaimedOrigin && isErrorOrigin(claimed) ? claimed : 'wallet'
+  }
 }
 
 /**

@@ -12,12 +12,10 @@ still have empty metadata before admission. When forwarding that error to a
 follower, Beacon supplies version `2` if its version is empty so the terminal
 reply passes incoming routing. The original local error remains unchanged.
 
-Unfamiliar wallet error codes normalize to `UNKNOWN_ERROR` while preserving the
-verified request ID, sender, version and trusted origin. The original attributed
-response remains in `errorData`, including the unfamiliar code and wallet
-diagnostics. The same rule applies to direct responses and leader/follower
-forwarding. Known error codes keep their existing event shape, and the raw
-response observation still retains the original wallet code.
+Unfamiliar nonempty wallet error codes and their existing `errorData` pass through
+plain request-error events and leader/follower forwarding. Public request methods
+still reject with `UnknownBeaconError` for those codes. The response guards reject
+unfamiliar codes because they cannot narrow them to the SDK's known error enum.
 
 A delegated preparation failure crosses a tab boundary. Beacon sends a detached
 copy of JSON data so that the localStorage fallback can encode the same reply as
@@ -59,7 +57,7 @@ For metadata without transaction data, use `new TransactionInvalidBeaconError(un
 
 ## Prerelease migration
 
-The options-only constructor form shipped in 4.9.0-ecad-beta.4 through 4.9.0-ecad-rc.0.
+Prereleases that accepted options as the sole constructor argument need a migration.
 A single object passed to TransactionInvalidBeaconError is now always transaction
 data, including objects that contain option-like fields. To set metadata without
 data, pass undefined first and options second. Taquito re-exports this class from

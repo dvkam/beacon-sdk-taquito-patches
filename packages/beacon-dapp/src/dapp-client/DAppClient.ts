@@ -178,6 +178,7 @@ import {
   stampErrorOrigin,
   toRequestError,
   normalizeErrorResponse,
+  readErrorResponse,
   toBeaconError
 } from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
@@ -1229,7 +1230,7 @@ export class DAppClient extends Client {
 
   private buildDelegatedRequestError(id: string, error: unknown): ResponseMessage {
     const response =
-      normalizeErrorResponse(error) ??
+      readErrorResponse(error) ??
       localError({
         id,
         type: BeaconMessageType.Error,
