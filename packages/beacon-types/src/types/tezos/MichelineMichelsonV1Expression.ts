@@ -1,15 +1,15 @@
+import type { MichelsonPrimitives } from './MichelsonPrimitives'
 /**
  * @internalapi
  * @category Tezos
  */
-export type MichelineMichelsonV1Expression =
+export type MichelineMichelsonV1Expression<Primitive extends string = MichelsonPrimitives> =
   | { int: string }
   | { string: string } // eslint-disable-line id-blacklist
   | { bytes: string }
-  | MichelineMichelsonV1Expression[]
+  | MichelineMichelsonV1Expression<Primitive>[]
   | {
-      // Protocol names evolve independently of Beacon; runtime helpers check the installed codec.
-      prim: string
-      args?: MichelineMichelsonV1Expression[]
+      prim: Primitive
+      args?: MichelineMichelsonV1Expression<Primitive>[]
       annots?: string[]
     }

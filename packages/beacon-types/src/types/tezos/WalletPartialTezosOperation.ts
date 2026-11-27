@@ -35,16 +35,17 @@ type WalletManager<T extends { gas_limit: string; storage_limit: string }> = Omi
  * @category Tezos
  */
 export type WalletPartialTezosOperation =
-  | WalletManager<TezosTransactionOperation>
-  | (WalletManager<TezosOriginationOperation> & Required<Pick<TezosOriginationOperation, 'script'>>)
+  | WalletManager<TezosTransactionOperation<string>>
+  | (WalletManager<TezosOriginationOperation<string>> &
+      Required<Pick<TezosOriginationOperation<string>, 'script'>>)
   | WalletManager<TezosDelegationOperation>
   | WalletManager<TezosRevealOperation>
   | WalletManager<TezosSetDepositsLimitOperation>
-  | WalletManager<TezosRegisterGlobalConstantOperation>
-  | WalletManager<TezosTransferTicketOperation>
+  | WalletManager<TezosRegisterGlobalConstantOperation<string>>
+  | WalletManager<TezosTransferTicketOperation<string>>
   | WalletManager<TezosIncreasePaidStorageOperation>
   | WalletManager<TezosUpdateConsensusKeyOperation>
-  | WalletManager<TezosSmartRollupOriginateOperation>
+  | WalletManager<TezosSmartRollupOriginateOperation<string>>
   | WalletManager<TezosSmartRollupAddMessagesOperation>
   | WalletManager<TezosSmartRollupExecuteOutboxMessageOperation>
   | WalletManager<TezosSmartRollupPublishOperation>

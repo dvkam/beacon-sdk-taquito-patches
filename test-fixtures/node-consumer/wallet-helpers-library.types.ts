@@ -10,7 +10,9 @@ export const acceptedOperation = (value: unknown) => {
 export const existingInputOperation = (request: OperationRequestInput) =>
   request.operationDetails[0]
 
-export const acceptedOperationRequest = (value: WalletPartialTezosOperation | string) => {
+export const acceptedOperationRequest = (
+  value: OperationRequestInput['operationDetails'][number] | string
+) => {
   if (isPartialTezosOperation(value)) {
     const operation: WalletPartialTezosOperation = value
     const operationRequest: Pick<OperationRequestInput, 'operationDetails'> = {

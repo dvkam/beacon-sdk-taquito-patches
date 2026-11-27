@@ -29,7 +29,7 @@ Importing the wallet subpath without its peer reports a missing-codec module err
 `isPartialTezosOperation(value)` checks its supported shapes, rejects unknown
 properties, and rejects dApp-supplied `source`, `fee` and `counter`. A successful
 guard narrows to `ValidatedWalletPartialTezosOperation`, a type-only export from
-`@ecadlabs/beacon-utils/wallet` assignable to the public wire type. Libraries can
+`@ecadlabs/beacon-utils/wallet` with codec-validated Micheline names. Libraries can
 publish inferred guarded return values and filtered arrays in their declarations.
 Validation describes the input at the time of the check and adds no runtime
 property. An ordinary object spread drops the private validation member in
@@ -68,8 +68,9 @@ Supported kinds are `transaction`, `origination`, `delegation`, `reveal`,
 `smart_rollup_add_messages`, `smart_rollup_execute_outbox_message`,
 `smart_rollup_publish`, `smart_rollup_cement`, `smart_rollup_recover_bond`,
 `smart_rollup_refute`, `smart_rollup_timeout`, and `dal_publish_commitment`.
-The legacy broad operation union remains available; its timeout alias now points
-to the existing timeout interface, so sanitized output fits existing request types.
+The legacy request union keeps its existing operation kinds and Micheline primitive names.
+The wallet type also supports `smart_rollup_timeout`. Sanitization returns `WalletPartialTezosOperation[]`. Its Micheline fields can contain newer
+primitive names than legacy request types allow. Use the wallet type for the resulting operations.
 
 These are structural checks against Beacon's operation types. They do not check
 address checksums, keys or proof cryptography, Michelson execution, current
@@ -88,10 +89,9 @@ before using the helpers.
 The existing PVM and refutation enums are public exports for constructing the
 advanced manager variants.
 
-The shared Micheline wire type accepts string names so new protocol names can
-be represented without updating Beacon's type inventory. The existing
-MichelsonPrimitives export remains available for compatibility; it does not
-define the validator's accepted names. Constructing a typed operation does not
+Wallet operation types accept string names so new protocol names can be
+represented without updating Beacon's type inventory. Existing request types
+continue to use `MichelsonPrimitives`. The guard validates names against the installed codec. Constructing a typed operation does not
 replace runtime validation.
 
 ## Signing bytes
