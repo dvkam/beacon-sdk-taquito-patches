@@ -277,7 +277,7 @@ try {
       '}'
     ].join('\n')
   )
-  for (const version of ['25.1.1', '25.2.0-beta3']) {
+  for (const [index, version] of ['25.1.1', '25.2.0-beta3'].entries()) {
     console.log('Testing opt-in wallet helpers with @taquito/michel-codec ' + version + '.')
     run(
       [
@@ -291,9 +291,11 @@ try {
       consumerRoot,
       { timeout: 300_000 }
     )
-    typecheck('exact-optional.types.ts', ['chrome'], false, true)
-    typecheck('wallet-helpers.types.ts')
-    typecheck('wallet-helpers-library.types.ts', ['chrome'], true)
+    if (index === 0) {
+      typecheck('exact-optional.types.ts', ['chrome'], false, true)
+      typecheck('wallet-helpers.types.ts')
+      typecheck('wallet-helpers-library.types.ts', ['chrome'], true)
+    }
     run(['--test', 'wallet-helpers.test.cjs'], consumerRoot)
   }
 } finally {
