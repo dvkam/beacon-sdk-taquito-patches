@@ -1,5 +1,3 @@
-import { MichelsonPrimitives } from '../..'
-
 /**
  * @internalapi
  * @category Tezos
@@ -10,7 +8,8 @@ export type MichelineMichelsonV1Expression =
   | { bytes: string }
   | MichelineMichelsonV1Expression[]
   | {
-      prim: MichelsonPrimitives
+      // Protocol names evolve independently of Beacon; runtime helpers check the installed codec.
+      prim: string
       args?: MichelineMichelsonV1Expression[]
       annots?: string[]
     }

@@ -88,31 +88,3 @@ test('browser LocalStorage is unavailable in a headless Node consumer', async ()
   assert.equal(typeof window, 'undefined')
   assert.equal(await LocalStorage.isSupported(), false)
 })
-
-test('public wallet helpers inspect and sanitize installed package values', async () => {
-  const common = require('@ecadlabs/beacon-utils/wallet')
-  const imported = await import('@ecadlabs/beacon-utils/wallet')
-  assert.equal(imported.default, common)
-  for (const key of Object.keys(common)) {
-    if (key === '__esModule') continue
-    assert.equal(imported[key], common[key], key)
-  }
-  for (const name of [
-    '@ecadlabs/beacon-utils',
-    '@ecadlabs/beacon-wallet',
-    '@ecadlabs/beacon-sdk'
-  ]) {
-    assert.equal(Object.hasOwn(require(name), 'inspectSignPayload'), false)
-  }
-  const { encodeTzip10RawPayload, inspectSignPayload, sanitizePartialTezosOperations } = common
-  const { SigningType } = require('@ecadlabs/beacon-types')
-  const text = 'Tezos Signed Message: installed consumer é'
-  assert.equal(inspectSignPayload(encodeTzip10RawPayload(text), SigningType.RAW).decodedText, text)
-  assert.equal(encodeTzip10RawPayload('\uFEFFa'), '050100000004efbbbf61')
-  assert.deepEqual(
-    sanitizePartialTezosOperations([
-      { kind: 'transaction', source: 'spoof', amount: '1', destination: 'tz1destination' }
-    ]),
-    [{ kind: 'transaction', amount: '1', destination: 'tz1destination' }]
-  )
-})

@@ -14,7 +14,7 @@ test.beforeAll(() => {
   mkdirSync(archives)
   const npm = process.env.npm_execpath
   if (!npm) throw new Error('Run browser tests through npm')
-  const dependencies: Record<string, string> = {}
+  const dependencies: Record<string, string> = { '@taquito/michel-codec': '25.1.1' }
   for (const name of ['beacon-types', 'beacon-utils']) {
     const packed = JSON.parse(
       execFileSync(
@@ -73,8 +73,21 @@ test('installed public wallet subpath runs in a browser without the default SDK 
   const result = await page.evaluate(() => {
     const text = 'Tezos Signed Message: browser é 🌍'
     return {
-      inspected: walletHelpers.inspectSignPayload(walletHelpers.encodeTzip10RawPayload(text)),
-      bom: walletHelpers.encodeTzip10RawPayload('\uFEFFa'),
+      inspected: walletHelpers.inspectSignPayload(walletHelpers.packMessageText(text)),
+      bom: walletHelpers.packMessageText('\uFEFFa'),
+      primitiveChecks: [
+        'UNPAIR',
+        'PUSH',
+        'VIEW',
+        'EMIT',
+        'Lambda_rec',
+        'constant',
+        'Ticket',
+        'NOT_A_PRIMITIVE',
+        '__proto__'
+      ].map((prim) =>
+        walletHelpers.isPartialTezosOperation({ kind: 'register_global_constant', value: { prim } })
+      ),
       operations: walletHelpers.sanitizePartialTezosOperations([
         { kind: 'delegation', source: 'spoof', gas_limit: '100', storage_limit: '1.5' }
       ])
@@ -82,9 +95,10 @@ test('installed public wallet subpath runs in a browser without the default SDK 
   })
   expect(result.inspected).toMatchObject({
     valid: true,
-    kind: 'tzip10_message',
+    kind: 'signed_message_text',
     decodedText: 'Tezos Signed Message: browser é 🌍'
   })
   expect(result.bom).toBe('050100000004efbbbf61')
+  expect(result.primitiveChecks).toEqual([true, true, true, true, true, true, true, false, false])
   expect(result.operations).toEqual([{ kind: 'delegation', gas_limit: '100' }])
 })

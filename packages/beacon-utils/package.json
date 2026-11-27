@@ -48,10 +48,17 @@
     "@stablelib/nacl": "^2.0.1",
     "@stablelib/random": "^2.0.1",
     "@stablelib/utf8": "^2.1.0",
-    "@taquito/michel-codec": "25.1.1",
     "bs58check": "4.0.0"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "peerDependencies": {
+    "@taquito/michel-codec": "^25.1.1 || ^25.2.0-beta3"
+  },
+  "peerDependenciesMeta": {
+    "@taquito/michel-codec": {
+      "optional": true
+    }
   }
 }

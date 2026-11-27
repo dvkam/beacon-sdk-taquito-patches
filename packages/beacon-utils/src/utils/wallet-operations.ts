@@ -1,5 +1,5 @@
 import type { WalletPartialTezosOperation } from '@ecadlabs/beacon-types'
-import { isWalletMichelinePrimitive } from './wallet-micheline-primitives'
+import { packDataBytes, type MichelsonData } from '@taquito/michel-codec'
 
 type Parser = (value: unknown, strict: boolean, depth: number) => unknown
 type Field = Parser | { parse: Parser; optional: true }
@@ -19,6 +19,27 @@ const natural: Parser = (value) =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : invalid()
 const hex: Parser = (value) =>
   typeof value === 'string' && /^(?:[a-fA-F0-9]{2})*$/.test(value) ? value : invalid()
+const knownPrimitives = new Set<string>()
+const primitive: Parser = (value) => {
+  if (typeof value !== 'string' || value in Object.prototype) {
+    return invalid()
+  }
+  if (!knownPrimitives.has(value)) {
+    try {
+      // Probe the codec's tag inventory. Unit arguments satisfy its special PUSH encoding path.
+      // Object.prototype names are excluded above because older codec lookups inherit them.
+      packDataBytes({
+        prim: value,
+        args: [{ prim: 'unit' }, { prim: 'Unit' }]
+      } as unknown as MichelsonData)
+    } catch {
+      return invalid()
+    }
+    knownPrimitives.add(value)
+  }
+
+  return value
+}
 const oneOf =
   (...values: string[]): Parser =>
   (value) =>
@@ -87,7 +108,7 @@ const micheline: Parser = (value, strict, depth) => {
       return shape({ bytes: hex })(value, strict, depth)
     default:
       return shape({
-        prim: (v) => (typeof v === 'string' && isWalletMichelinePrimitive(v) ? v : invalid()),
+        prim: primitive,
         args: optional(array(micheline)),
         annots: optional(array(text))
       })(value, strict, depth)
