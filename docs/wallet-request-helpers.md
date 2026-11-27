@@ -35,11 +35,15 @@ The validation symbol stays private and validation adds no property to the input
 A failed guard does not exclude the wire type, because structurally assignable
 operations can still have rejected extra properties. Optional fields must be absent
 or contain their declared value; a present `undefined` is rejected, including in
-nested objects. This also makes the guard safe for consumers using
+nested objects. Operation records must use own data properties. Arrays must have
+the ordinary array prototype, dense indexed data properties and no extra keys.
+This also makes the guard safe for consumers using
 `exactOptionalPropertyTypes`.
 
 `sanitizePartialTezosOperations(operations)` creates a fresh array and nested
-objects. It removes unknown properties, `source`, `fee` and `counter`, and optional
+objects. It copies array elements by index and ignores extra array properties
+and overridden iterators. Missing indices and accessor fields reject the batch.
+It removes unknown properties, `source`, `fee` and `counter`, and optional
 fields whose value is `undefined`.
 `gas_limit` and `storage_limit` survive only as canonical nonnegative integer
 strings, such as `"0"` or `"100"`; numbers, signs, whitespace, fractions and

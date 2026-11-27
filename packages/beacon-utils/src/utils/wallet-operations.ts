@@ -17,6 +17,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null &&
   !Array.isArray(value) &&
   (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+const ownDataValue = (value: object, key: PropertyKey): unknown => {
+  const property = Object.getOwnPropertyDescriptor(value, key)
+  if (!property || !('value' in property)) {
+    return invalid()
+  }
+
+  return property.value
+}
 const text: Parser = (value) => (typeof value === 'string' && value.length > 0 ? value : invalid())
 const integer: Parser = (value) =>
   typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value) ? value : invalid()
@@ -56,7 +64,19 @@ const array =
       return invalid()
     }
 
-    return Array.from(value, (item) => parse(item, strict, depth + 1))
+    if (
+      strict &&
+      (Object.getPrototypeOf(value) !== Array.prototype ||
+        Reflect.ownKeys(value).length !== value.length + 1)
+    ) {
+      return invalid()
+    }
+    const result: unknown[] = []
+    for (let index = 0; index < value.length; index++) {
+      result.push(parse(ownDataValue(value, index), strict, depth + 1))
+    }
+
+    return result
   }
 const shape =
   (fields: Record<string, Field>): Parser =>
@@ -74,15 +94,15 @@ const shape =
     }
     const result: Record<string, unknown> = {}
     for (const [name, field] of Object.entries(fields)) {
-      const parse = typeof field === 'function' ? field : field.parse
-      if (
-        value[name] === undefined &&
-        typeof field !== 'function' &&
-        (!strict || !Object.prototype.hasOwnProperty.call(value, name))
-      ) {
+      if (typeof field !== 'function' && !Object.prototype.hasOwnProperty.call(value, name)) {
         continue
       }
-      result[name] = parse(value[name], strict, depth + 1)
+      const fieldValue = ownDataValue(value, name)
+      if (typeof field !== 'function' && !strict && fieldValue === undefined) {
+        continue
+      }
+      const parse = typeof field === 'function' ? field : field.parse
+      result[name] = parse(fieldValue, strict, depth + 1)
     }
 
     return result
@@ -129,7 +149,7 @@ const revealProof: Parser = (value, strict, depth) => {
   if (!isRecord(value)) {
     return invalid()
   }
-  switch (value.reveal_proof_kind) {
+  switch (ownDataValue(value, 'reveal_proof_kind')) {
     case 'raw_data_proof':
       return shape({ reveal_proof_kind: oneOf('raw_data_proof'), raw_data: hex })(
         value,
@@ -152,7 +172,7 @@ const inputProof: Parser = (value, strict, depth) => {
   if (!isRecord(value)) {
     return invalid()
   }
-  switch (value.input_proof_kind) {
+  switch (ownDataValue(value, 'input_proof_kind')) {
     case 'inbox_proof':
       return shape({
         input_proof_kind: oneOf('inbox_proof'),
@@ -176,14 +196,15 @@ const refutation: Parser = (value, strict, depth) => {
   if (!isRecord(value)) {
     return invalid()
   }
-  if (value.refutation_kind === 'start') {
+  const kind = ownDataValue(value, 'refutation_kind')
+  if (kind === 'start') {
     return shape({
       refutation_kind: oneOf('start'),
       player_commitment_hash: text,
       opponent_commitment_hash: text
     })(value, strict, depth)
   }
-  if (value.refutation_kind !== 'move') {
+  if (kind !== 'move') {
     return invalid()
   }
 
@@ -251,10 +272,14 @@ const isSupportedKind = (value: string): value is WalletPartialTezosOperation['k
   Object.prototype.hasOwnProperty.call(operationFields, value)
 
 const parseOperation = (value: unknown, strict: boolean): WalletPartialTezosOperation => {
-  if (!isRecord(value) || typeof value.kind !== 'string' || !isSupportedKind(value.kind)) {
+  if (!isRecord(value)) {
     return invalid()
   }
-  const fields = operationFields[value.kind]
+  const kind = ownDataValue(value, 'kind')
+  if (typeof kind !== 'string' || !isSupportedKind(kind)) {
+    return invalid()
+  }
+  const fields = operationFields[kind]
   const limit = (input: unknown): unknown => {
     try {
       return integer(input, strict, 0)
@@ -263,7 +288,7 @@ const parseOperation = (value: unknown, strict: boolean): WalletPartialTezosOper
     }
   }
   const result = shape({
-    kind: oneOf(value.kind),
+    kind: oneOf(kind),
     ...fields,
     gas_limit: optional(strict ? integer : limit),
     storage_limit: optional(strict ? integer : limit)
@@ -300,11 +325,14 @@ export const sanitizePartialTezosOperations = (
     throw new TypeError('Expected an operation array')
   }
 
-  return Array.from(operations, (operation, index) => {
+  const result: WalletPartialTezosOperation[] = []
+  for (let index = 0; index < operations.length; index++) {
     try {
-      return parseOperation(operation, false)
+      result.push(parseOperation(ownDataValue(operations, index), false))
     } catch {
       throw new TypeError(`Invalid wallet operation at index ${index}`)
     }
-  })
+  }
+
+  return result
 }
