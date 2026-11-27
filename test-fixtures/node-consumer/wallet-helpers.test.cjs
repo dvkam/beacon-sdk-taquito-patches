@@ -114,3 +114,15 @@ test('installed scalar framing matches the codec and supports the encoded byte l
   const bytePayload = '050a000ffffa' + 'ab'.repeat(1024 * 1024 - 6)
   assert.equal(inspectSignPayload(bytePayload, SigningType.MICHELINE).valid, true)
 })
+
+test('the preview excludes PUSH instructions encoded by the installed codec', () => {
+  const { inspectSignPayload } = require('@ecadlabs/beacon-utils/wallet')
+  const { packDataBytes } = require('@taquito/michel-codec')
+  const { SigningType } = require('@ecadlabs/beacon-types')
+  const push = { prim: 'PUSH', args: [{ prim: 'unit' }, { prim: 'Unit' }] }
+  for (const data of [push, [push]]) {
+    const payload = packDataBytes(data).bytes
+    assert.equal(inspectSignPayload(payload, SigningType.MICHELINE).valid, false)
+    assert.equal(inspectSignPayload(payload, SigningType.RAW).kind, 'raw_bytes')
+  }
+})

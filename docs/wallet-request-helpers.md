@@ -113,6 +113,10 @@ tested codec versions decode those children twice. String, byte and annotation
 payload lengths receive that same weight. An integer's encoded byte length also
 costs its square to limit the codec's growing integer arithmetic. The scan skips
 payloads without decoding them and does not own a second Michelson name table.
+The scan rejects the Michelson `PUSH` instruction at any depth because it activates
+typed conversions during decoding and canonical repacking. A packed value containing
+`PUSH` returns an unsupported result, or raw bytes for an explicit RAW request.
+Operation guards still accept `PUSH` in Micheline operation fields.
 The codec still decodes supported values. Canonical checking uses unique wire
 framing for top-level strings and bytes and the codec's encoder for other values.
 The narrow scalar framing avoids the tested codec writer's large-array spread
