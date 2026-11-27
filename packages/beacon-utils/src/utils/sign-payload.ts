@@ -16,17 +16,20 @@ export type SignPayloadInspection =
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024
 const SIGNED_MESSAGE_PREFIX = 'Tezos Signed Message: '
+const HEX_DIGIT_CODES = Array.from('0123456789abcdef', (digit) => digit.charCodeAt(0))
 
 const frameScalar = (tag: '01' | '0a', hex: string): string =>
   `05${tag}${(hex.length / 2).toString(16).padStart(8, '0')}${hex}`
 
-const bytesToHex = (bytes: Uint8Array): string => {
-  let hex = ''
-  for (const byte of bytes) {
-    hex += byte.toString(16).padStart(2, '0')
+const bytesToHex = (bytes: Uint8Array, decoder: TextDecoder): string => {
+  const hex = new Uint8Array(bytes.length * 2)
+  for (let input = 0, output = 0; input < bytes.length; input++, output += 2) {
+    const byte = bytes[input]
+    hex[output] = HEX_DIGIT_CODES[Math.floor(byte / 16)]
+    hex[output + 1] = HEX_DIGIT_CODES[byte % 16]
   }
 
-  return hex
+  return decoder.decode(hex)
 }
 
 /**
@@ -44,37 +47,37 @@ export const packMessageText = (text: string): string => {
   if (bytes.length + 6 > MAX_PAYLOAD_BYTES) {
     throw new RangeError('Signing payload exceeds 1 MiB')
   }
-  if (new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) !== text) {
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+  if (decoder.decode(bytes) !== text) {
     throw new TypeError('Invalid Unicode message text')
   }
 
-  return frameScalar('01', bytesToHex(bytes))
+  return frameScalar('01', bytesToHex(bytes, decoder))
 }
+
+const lowercaseHexNibble = (code: number): number => (code <= 57 ? code - 48 : code - 87)
+
+const isEvenLengthHex = (hex: string): boolean =>
+  hex.length !== 0 && hex.length % 2 === 0 && !/[^0-9a-f]/.test(hex)
 
 const inspectMicheline = (normalizedHex: string): SignPayloadInspection => {
   try {
     assertMichelineBudget(normalizedHex)
-    let canonicalHex: string
     let decodedText: string | undefined
     if (normalizedHex.startsWith('0501')) {
-      // The budget scan has checked the complete scalar frame. Decode exact UTF-8 once.
-      const scalarHex = normalizedHex.slice(12)
-      const bytes = new Uint8Array(scalarHex.length / 2)
-      for (let index = 0; index < bytes.length; index++) {
-        bytes[index] = parseInt(scalarHex.slice(index * 2, index * 2 + 2), 16)
+      // The hex check and budget scan have already validated the complete scalar frame.
+      const bytes = new Uint8Array(normalizedHex.length / 2 - 6)
+      for (let output = 0, input = 12; output < bytes.length; output++, input += 2) {
+        const high = lowercaseHexNibble(normalizedHex.charCodeAt(input))
+        const low = lowercaseHexNibble(normalizedHex.charCodeAt(input + 1))
+        bytes[output] = high * 16 + low
       }
       decodedText = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
-      canonicalHex = frameScalar('01', scalarHex)
-    } else if (normalizedHex.startsWith('050a')) {
-      canonicalHex = frameScalar('0a', normalizedHex.slice(12))
-    } else {
+    } else if (!normalizedHex.startsWith('050a')) {
       const decoded = unpackDataBytes({ bytes: normalizedHex })
-      canonicalHex = packDataBytes(decoded).bytes
-      decodedText = !Array.isArray(decoded) && 'string' in decoded ? decoded.string : undefined
-    }
-    // Scalar framing avoids codec allocations and the writer's large-array spread limit.
-    if (canonicalHex !== normalizedHex) {
-      return { valid: false, reason: 'Unsupported or noncanonical packed Micheline encoding' }
+      if (packDataBytes(decoded).bytes !== normalizedHex) {
+        return { valid: false, reason: 'Unsupported or noncanonical packed Micheline encoding' }
+      }
     }
 
     return {
@@ -106,7 +109,7 @@ export const inspectSignPayload = (
   const normalizedHex = (
     payload.startsWith('0x') || payload.startsWith('0X') ? payload.slice(2) : payload
   ).toLowerCase()
-  if (!/^(?:[0-9a-f]{2})+$/.test(normalizedHex)) {
+  if (!isEvenLengthHex(normalizedHex)) {
     return { valid: false, reason: 'Expected nonempty, even-length hex payload' }
   }
   if (normalizedHex.length / 2 > MAX_PAYLOAD_BYTES) {
