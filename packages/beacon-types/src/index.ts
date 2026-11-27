@@ -419,6 +419,7 @@ export { Notification } from './types/Notification'
 export { Optional }
 
 export type { WalletPartialTezosOperation } from './types/tezos/WalletPartialTezosOperation'
+export type { TezosUpdateConsensusKeyOperation as TezosUpdateCompanionKeyOperation } from './types/tezos/operations/UpdateCompanionKey'
 
 export { PvmKind } from './types/tezos/common'
 export {
