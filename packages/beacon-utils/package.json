@@ -41,7 +41,7 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-types": "4.9.0-ecad-beta.6",
+    "@ecadlabs/beacon-types": "4.9.0-ecad-rc.0",
     "@stablelib/blake2b": "^2.0.1",
     "@stablelib/bytes": "^2.0.1",
     "@stablelib/ed25519": "^2.1.1",
