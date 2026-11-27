@@ -31,19 +31,21 @@ properties, and rejects dApp-supplied `source`, `fee` and `counter`. A successfu
 guard narrows to `ValidatedWalletPartialTezosOperation`, a type-only export from
 `@ecadlabs/beacon-utils/wallet` assignable to the public wire type. Libraries can
 publish inferred guarded return values and filtered arrays in their declarations.
-Validation adds no property to the input. A spread copy needs its own guard check
-before it can be used as a validated operation.
+Validation describes the input at the time of the check and adds no runtime
+property. An ordinary object spread drops the private validation member in
+TypeScript. Revalidate after mutation or generic copying, including
+`Object.assign`, which can preserve the validated type in its inferred result.
 A failed guard does not exclude the wire type, because structurally assignable
 operations can still have rejected extra properties. Optional fields must be absent
-or contain their declared value; a present `undefined` is rejected, including in
-nested objects. Operation records must use own data properties. Arrays must have
-the ordinary array prototype, dense indexed data properties and no extra keys.
-This also makes the guard safe for consumers using
-`exactOptionalPropertyTypes`.
+or contain their declared value. The guard rejects a present `undefined` even in
+nested objects, so callers can use `exactOptionalPropertyTypes`.
+Operation records must use own data properties. Arrays must have the ordinary
+array prototype, dense indexed data properties and no extra keys.
 
 `sanitizePartialTezosOperations(operations)` creates a fresh array and nested
 objects. It copies array elements by index and ignores extra array properties
-and overridden iterators. Missing indices and accessor fields reject the batch.
+and overridden iterators. A missing index or an accessor on a field being copied
+rejects the batch.
 It removes unknown properties, `source`, `fee` and `counter`, and optional
 fields whose value is `undefined`.
 `gas_limit` and `storage_limit` survive only as canonical nonnegative integer
