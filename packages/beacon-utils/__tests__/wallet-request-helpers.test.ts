@@ -9,6 +9,23 @@ import {
 } from '../src/wallet'
 
 describe('wallet manager operation helpers', () => {
+  it('rejects present undefined optional fields while sanitizing them away', () => {
+    const delegation = { kind: 'delegation', delegate: undefined }
+    const constant = {
+      kind: 'register_global_constant',
+      value: { prim: 'Some', args: undefined, annots: undefined }
+    }
+    expect(isPartialTezosOperation(delegation)).toBe(false)
+    expect(isPartialTezosOperation(constant)).toBe(false)
+    expect(sanitizePartialTezosOperations([delegation, constant])).toEqual([
+      { kind: 'delegation' },
+      { kind: 'register_global_constant', value: { prim: 'Some' } }
+    ])
+    expect(Object.hasOwn(delegation, 'delegate')).toBe(true)
+    expect(isPartialTezosOperation({ kind: 'delegation' })).toBe(true)
+    expect(isPartialTezosOperation({ kind: 'delegation', delegate: 'tz1delegate' })).toBe(true)
+  })
+
   it('rejects sparse operation batches and sparse nested sequences', () => {
     expect(() => sanitizePartialTezosOperations(new Array(1))).toThrow(/index 0/)
     expect(isPartialTezosOperation({ kind: 'register_global_constant', value: new Array(1) })).toBe(
