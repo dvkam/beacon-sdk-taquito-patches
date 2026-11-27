@@ -2,7 +2,7 @@ import type { WalletPartialTezosOperation } from '@ecadlabs/beacon-types'
 import { packDataBytes, type MichelsonData } from '@taquito/michel-codec'
 
 declare const validatedWalletOperation: unique symbol
-type ValidatedWalletPartialTezosOperation = WalletPartialTezosOperation & {
+export type ValidatedWalletPartialTezosOperation = WalletPartialTezosOperation & {
   readonly [validatedWalletOperation]: true
 }
 

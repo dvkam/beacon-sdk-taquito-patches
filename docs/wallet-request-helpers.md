@@ -28,14 +28,19 @@ Importing the wallet subpath without its peer reports a missing-codec module err
 `WalletPartialTezosOperation` is exported by `@ecadlabs/beacon-types`.
 `isPartialTezosOperation(value)` checks its supported shapes, rejects unknown
 properties, and rejects dApp-supplied `source`, `fee` and `counter`. A successful
-guard narrows to a validated subtype assignable to the public wire type. A failed
-guard does not exclude that wire type, because structurally assignable operations
-can still have rejected extra properties. Validation adds no property to the input. Optional fields must be absent or contain
-their declared value. Present undefined fields are rejected, including in nested
-objects; sanitization continues to omit them.
+guard narrows to `ValidatedWalletPartialTezosOperation`, a type-only export from
+`@ecadlabs/beacon-utils/wallet` assignable to the public wire type. Libraries can
+publish inferred guarded return values and filtered arrays in their declarations.
+The validation symbol stays private and validation adds no property to the input.
+A failed guard does not exclude the wire type, because structurally assignable
+operations can still have rejected extra properties. Optional fields must be absent
+or contain their declared value; a present `undefined` is rejected, including in
+nested objects. This also makes the guard safe for consumers using
+`exactOptionalPropertyTypes`.
 
 `sanitizePartialTezosOperations(operations)` creates a fresh array and nested
-objects. It removes unknown properties and `source`, `fee` and `counter`.
+objects. It removes unknown properties, `source`, `fee` and `counter`, and optional
+fields whose value is `undefined`.
 `gas_limit` and `storage_limit` survive only as canonical nonnegative integer
 strings, such as `"0"` or `"100"`; numbers, signs, whitespace, fractions and
 leading zeroes are removed. Required invalid fields reject the whole call with
