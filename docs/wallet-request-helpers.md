@@ -105,6 +105,24 @@ with an optional `0x` prefix, and returns lowercase `normalizedHex` on success.
 It does not guess whether RAW text should be encoded as UTF-8. Inputs are capped
 at 1 MiB of encoded bytes.
 
+Packed Micheline also has a conservative decoder-work support limit. Before the
+codec runs, a structural scan checks all wire tags and lengths, limits nesting to
+64, and allows 4,194,304 work units. Each node costs 16 units plus its encoded
+bytes. Child costs double at each enclosing sequence or primitive because both
+tested codec versions decode those children twice. String, byte and annotation
+payload lengths receive that same weight. An integer's encoded byte length also
+costs its square to limit the codec's growing integer arithmetic. The scan skips
+payloads without decoding them and does not own a second Michelson name table.
+The codec still decodes supported values. Canonical checking uses unique wire
+framing for top-level strings and bytes and the codec's encoder for other values.
+The narrow scalar framing avoids the tested codec writer's large-array spread
+limit; it is not a general Micheline encoder.
+
+This limits repeated work for one preview while retaining large flat scalar
+payloads. It is not a calibrated time limit. A well-formed value can exceed the
+budget and return an invalid-or-unsupported result before reaching the codec.
+Explicit RAW requests retain their raw-byte fallback in that case.
+
 The `kind` describes recognized bytes; it does not change the requested signing
 type. Canonical packed data, including RAW requests, produces `micheline` or
 `signed_message_text` with `validation: 'canonical_micheline'`. Only a top-level string
@@ -125,7 +143,8 @@ BOMs from nested strings, so exact canonical validation conservatively rejects
 those values. For example, `0502000000090100000004efbbbf61` is a valid sequence
 containing `"\uFEFFa"` but returns an unsupported/noncanonical result. Top-level
 strings have a narrow UTF-8 correction and preserve their BOM. Other codec errors
-and noncanonical/trailing bytes are rejected.
+and noncanonical/trailing bytes are rejected. Large nested values can remain
+unsupported by the codec even when they fit the preview's work budget.
 
 The helpers have a separate public entrypoint so applications that use only
 the existing utility, SDK, dApp or wallet-client entrypoints do not load the codec.

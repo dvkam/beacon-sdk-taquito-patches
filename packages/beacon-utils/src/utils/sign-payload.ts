@@ -1,5 +1,6 @@
 import { SigningType } from '@ecadlabs/beacon-types'
 import { packDataBytes, unpackDataBytes } from '@taquito/michel-codec'
+import { assertMichelineBudget } from './micheline-budget'
 
 export type SignPayloadInspection =
   | { valid: false; reason: string }
@@ -16,6 +17,18 @@ export type SignPayloadInspection =
 const MAX_PAYLOAD_BYTES = 1024 * 1024
 const SIGNED_MESSAGE_PREFIX = 'Tezos Signed Message: '
 
+const frameScalar = (tag: '01' | '0a', hex: string): string =>
+  `05${tag}${(hex.length / 2).toString(16).padStart(8, '0')}${hex}`
+
+const bytesToHex = (bytes: Uint8Array): string => {
+  let hex = ''
+  for (const byte of bytes) {
+    hex += byte.toString(16).padStart(2, '0')
+  }
+
+  return hex
+}
+
 /**
  * Pack the exact supplied UTF-8 text as a Micheline string (0501 + byte length + bytes).
  * Callers add their own message prefix/domain/nonce. This does not construct an authentication protocol.
@@ -23,6 +36,9 @@ const SIGNED_MESSAGE_PREFIX = 'Tezos Signed Message: '
 export const packMessageText = (text: string): string => {
   if (typeof text !== 'string') {
     throw new TypeError('Expected message text')
+  }
+  if (text.length + 6 > MAX_PAYLOAD_BYTES) {
+    throw new RangeError('Signing payload exceeds 1 MiB')
   }
   const bytes = new TextEncoder().encode(text)
   if (bytes.length + 6 > MAX_PAYLOAD_BYTES) {
@@ -32,12 +48,14 @@ export const packMessageText = (text: string): string => {
     throw new TypeError('Invalid Unicode message text')
   }
 
-  return packDataBytes({ ['string']: text }).bytes
+  return frameScalar('01', bytesToHex(bytes))
 }
 
 const inspectMicheline = (normalizedHex: string): SignPayloadInspection => {
   try {
+    assertMichelineBudget(normalizedHex)
     let decoded = unpackDataBytes({ bytes: normalizedHex })
+    let canonicalHex: string
     if (normalizedHex.startsWith('0501')) {
       // The codec's default TextDecoder drops a leading BOM. Preserve exact top-level text.
       const bytes = Uint8Array.from(normalizedHex.slice(12).match(/../g) ?? [], (byte) =>
@@ -46,9 +64,14 @@ const inspectMicheline = (normalizedHex: string): SignPayloadInspection => {
       decoded = {
         ['string']: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
       }
+      canonicalHex = packMessageText(decoded.string)
+    } else if (normalizedHex.startsWith('050a') && !Array.isArray(decoded) && 'bytes' in decoded) {
+      canonicalHex = frameScalar('0a', decoded.bytes)
+    } else {
+      canonicalHex = packDataBytes(decoded).bytes
     }
-    // Exact repacking rejects trailing, truncated and noncanonical encodings.
-    if (packDataBytes(decoded).bytes !== normalizedHex) {
+    // Scalar framing avoids the codec writer's large-array spread limit.
+    if (canonicalHex !== normalizedHex) {
       return { valid: false, reason: 'Unsupported or noncanonical packed Micheline encoding' }
     }
     const decodedText = !Array.isArray(decoded) && 'string' in decoded ? decoded.string : undefined
@@ -61,7 +84,7 @@ const inspectMicheline = (normalizedHex: string): SignPayloadInspection => {
       ...(decodedText !== undefined ? { decodedText } : {})
     }
   } catch {
-    return { valid: false, reason: 'Invalid packed Micheline data' }
+    return { valid: false, reason: 'Invalid or unsupported packed Micheline data' }
   }
 }
 
