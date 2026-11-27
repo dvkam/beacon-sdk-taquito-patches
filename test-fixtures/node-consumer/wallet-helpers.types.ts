@@ -1,15 +1,16 @@
-import { TezosOperationType } from '@ecadlabs/beacon-types'
+import {
+  TezosOperationType,
+  type PartialTezosOperation,
+  type WalletPartialTezosOperation,
+  type OperationRequestInput
+} from '@ecadlabs/beacon-types'
 import {
   packMessageText,
+  isPartialTezosOperation,
   inspectSignPayload,
   sanitizePartialTezosOperations,
   type SignPayloadInspection
 } from '@ecadlabs/beacon-utils/wallet'
-import type {
-  PartialTezosOperation,
-  WalletPartialTezosOperation,
-  OperationRequestInput
-} from '@ecadlabs/beacon-types'
 export const preview: SignPayloadInspection = inspectSignPayload(packMessageText('hello'))
 export const operations: WalletPartialTezosOperation[] = sanitizePartialTezosOperations([])
 export const legacy: PartialTezosOperation[] = operations
@@ -61,3 +62,30 @@ export const modernTicketCall: WalletPartialTezosOperation = {
   }
 }
 export const modernLegacy: PartialTezosOperation[] = [modernOrigination, modernTicketCall]
+
+const delegationWithMetadata = {
+  kind: TezosOperationType.DELEGATION,
+  metadata: { label: 'untrusted' }
+} satisfies WalletPartialTezosOperation & { metadata: { label: string } }
+export const structuralOperation: WalletPartialTezosOperation = delegationWithMetadata
+
+type ValidatedOperation = typeof isPartialTezosOperation extends (
+  value: unknown
+) => value is infer Operation
+  ? Operation
+  : never
+// @ts-expect-error A structural operation has not passed the strict guard.
+export const unvalidatedOperation: ValidatedOperation = structuralOperation
+
+export const narrowOperation = (value: WalletPartialTezosOperation | string) => {
+  if (isPartialTezosOperation(value)) {
+    const operation: WalletPartialTezosOperation = value
+    const operationRequest: Pick<OperationRequestInput, 'operationDetails'> = {
+      operationDetails: [value]
+    }
+    return { operation, operationRequest }
+  }
+  // @ts-expect-error Rejected base operations remain possible in the false branch.
+  value.toUpperCase()
+  return value
+}

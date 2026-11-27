@@ -1,6 +1,11 @@
 import type { WalletPartialTezosOperation } from '@ecadlabs/beacon-types'
 import { packDataBytes, type MichelsonData } from '@taquito/michel-codec'
 
+declare const validatedWalletOperation: unique symbol
+type ValidatedWalletPartialTezosOperation = WalletPartialTezosOperation & {
+  readonly [validatedWalletOperation]: true
+}
+
 type Parser = (value: unknown, strict: boolean, depth: number) => unknown
 type Field = Parser | { parse: Parser; optional: true }
 const optional = (parse: Parser): Field => ({ parse, optional: true })
@@ -271,7 +276,9 @@ const parseOperation = (value: unknown, strict: boolean): WalletPartialTezosOper
 }
 
 /** Strict shape guard for the supported wallet manager subset, including absence of untrusted fields. */
-export const isPartialTezosOperation = (value: unknown): value is WalletPartialTezosOperation => {
+export const isPartialTezosOperation = (
+  value: unknown
+): value is ValidatedWalletPartialTezosOperation => {
   try {
     parseOperation(value, true)
 
