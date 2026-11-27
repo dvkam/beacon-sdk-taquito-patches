@@ -107,6 +107,39 @@ try {
   run([npmCli, 'install', '--ignore-scripts', '--no-audit', '--no-fund'], consumerRoot, {
     timeout: 300_000
   })
+  copyFileSync(
+    path.join(repoRoot, 'test-fixtures', 'node-consumer', 'wallet-helpers.types.ts'),
+    path.join(consumerRoot, 'wallet-helpers.types.ts')
+  )
+  for (const [module, moduleResolution] of [
+    ['NodeNext', 'NodeNext'],
+    ['ESNext', 'Bundler']
+  ]) {
+    writeJson(path.join(consumerRoot, 'tsconfig.wallet.json'), {
+      compilerOptions: {
+        noEmit: true,
+        strict: true,
+        skipLibCheck: false,
+        target: 'ES2024',
+        lib: ['ES2024', 'DOM'],
+        types: ['chrome'],
+        module,
+        moduleResolution
+      },
+      files: ['wallet-helpers.types.ts']
+    })
+    console.log(`Typechecking installed wallet subpath with ${moduleResolution} resolution.`)
+    run(
+      [
+        path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
+        '--project',
+        'tsconfig.wallet.json',
+        '--pretty',
+        'false'
+      ],
+      consumerRoot
+    )
+  }
   run(['--test', 'public-api.test.cjs'], consumerRoot)
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true })

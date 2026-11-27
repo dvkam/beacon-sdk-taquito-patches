@@ -18,6 +18,7 @@ import { TezosSmartRollupOriginateOperation } from './operations/SmartRollupOrig
 import { TezosSmartRollupPublishOperation } from './operations/SmartRollupPublish'
 import { TezosSmartRollupRecoverBondOperation } from './operations/SmartRollupRecoverBond'
 import { TezosSmartRollupRefuteOperation } from './operations/SmartRollupRefute'
+import { TezosSmartRollupTimeoutOperation } from './operations/SmartRollupTimeout'
 import { TezosTransferTicketOperation } from './operations/TransferTicket'
 import { TezosUpdateConsensusKeyOperation } from './operations/UpdateCompanionKey'
 import { TezosVdfRevelationOperation } from './operations/VdfRevelation'
@@ -167,7 +168,7 @@ export type PartialTezosSmartRollupRefuteOperation = Optional<
  * @category Tezos
  */
 export type PartialTezosSmartRollupTimeoutOperation = Optional<
-  TezosSmartRollupRefuteOperation,
+  TezosSmartRollupTimeoutOperation,
   omittedProperties
 >
 
