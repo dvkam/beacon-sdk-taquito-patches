@@ -44,6 +44,12 @@ the validated fields. Sanitization copies own data fields into fresh enumerable
 properties, including fields that were non-enumerable on the input. Arrays must have the ordinary
 array prototype, dense indexed data properties and no extra keys.
 
+Pass plain JSON data to the guard. Micheline nodes created by
+`@taquito/michel-codec`'s `Parser` can have symbol-keyed source locations, which
+the guard rejects. For a locally constructed operation, pass it through
+`sanitizePartialTezosOperations` to copy the supported fields and drop the
+source locations.
+
 `sanitizePartialTezosOperations(operations)` creates a fresh array and nested
 objects. It copies array elements by index and ignores extra array properties
 and overridden iterators. A missing index or an accessor on a field being copied
