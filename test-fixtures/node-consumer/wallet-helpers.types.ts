@@ -9,6 +9,7 @@ import {
   isPartialTezosOperation,
   inspectSignPayload,
   sanitizePartialTezosOperations,
+  type ValidatedWalletPartialTezosOperation,
   type SignPayloadInspection
 } from '@ecadlabs/beacon-utils/wallet'
 export const preview: SignPayloadInspection = inspectSignPayload(packMessageText('hello'))
@@ -88,4 +89,13 @@ export const narrowOperation = (value: WalletPartialTezosOperation | string) => 
   // @ts-expect-error Rejected base operations remain possible in the false branch.
   value.toUpperCase()
   return value
+}
+
+export const checkSpread = (value: unknown): void => {
+  if (isPartialTezosOperation(value)) {
+    const copy = { ...value, metadata: 'untrusted' }
+    // @ts-expect-error A fresh object must pass the guard before it carries validation evidence.
+    const validated: ValidatedWalletPartialTezosOperation = copy
+    void validated
+  }
 }
