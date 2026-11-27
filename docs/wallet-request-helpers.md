@@ -39,7 +39,9 @@ A failed guard does not exclude the wire type, because structurally assignable
 operations can still have rejected extra properties. Optional fields must be absent
 or contain their declared value. The guard rejects a present `undefined` even in
 nested objects, so callers can use `exactOptionalPropertyTypes`.
-Operation records must use own data properties. Arrays must have the ordinary
+Operation records must use own enumerable data properties so JSON encoding keeps
+the validated fields. Sanitization copies own data fields into fresh enumerable
+properties, including fields that were non-enumerable on the input. Arrays must have the ordinary
 array prototype, dense indexed data properties and no extra keys.
 
 `sanitizePartialTezosOperations(operations)` creates a fresh array and nested

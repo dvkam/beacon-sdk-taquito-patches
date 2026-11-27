@@ -27,6 +27,58 @@ describe('wallet manager operation helpers', () => {
     expect(isPartialTezosOperation({ kind: 'delegation', delegate: 'tz1delegate' })).toBe(true)
   })
 
+  it.each(['kind', 'amount', 'destination'])(
+    'rejects a non-enumerable transaction %s while sanitation preserves its wire value',
+    (field) => {
+      const operation = { kind: 'transaction', amount: '0', destination: 'tz1destination' }
+      Object.defineProperty(operation, field, { enumerable: false })
+      expect(isPartialTezosOperation(operation)).toBe(false)
+      const [sanitized] = sanitizePartialTezosOperations([operation])
+      expect(isPartialTezosOperation(sanitized)).toBe(true)
+      expect(JSON.parse(JSON.stringify(sanitized))).toEqual({
+        kind: 'transaction',
+        amount: '0',
+        destination: 'tz1destination'
+      })
+    }
+  )
+
+  it.each(['int', 'prim'])(
+    'rejects a non-enumerable Micheline %s while sanitation preserves it',
+    (field) => {
+      const value = field === 'int' ? { int: '1' } : { prim: 'Unit' }
+      Object.defineProperty(value, field, { enumerable: false })
+      const operation = { kind: 'register_global_constant', value }
+      expect(isPartialTezosOperation(operation)).toBe(false)
+      const [sanitized] = sanitizePartialTezosOperations([operation])
+      expect(isPartialTezosOperation(sanitized)).toBe(true)
+      expect(JSON.parse(JSON.stringify(sanitized))).toEqual({
+        kind: 'register_global_constant',
+        value: field === 'int' ? { int: '1' } : { prim: 'Unit' }
+      })
+    }
+  )
+
+  it('rejects non-enumerable optional record fields without dropping them during sanitation', () => {
+    const operation = { kind: 'delegation', delegate: 'tz1delegate' }
+    Object.defineProperty(operation, 'delegate', { enumerable: false })
+    expect(isPartialTezosOperation(operation)).toBe(false)
+    expect(JSON.parse(JSON.stringify(sanitizePartialTezosOperations([operation])))).toEqual([
+      { kind: 'delegation', delegate: 'tz1delegate' }
+    ])
+  })
+
+  it('accepts non-enumerable array indices because JSON retains indexed values', () => {
+    const message = ['aa']
+    Object.defineProperty(message, 0, { enumerable: false })
+    const operation = { kind: 'smart_rollup_add_messages', message }
+    expect(isPartialTezosOperation(operation)).toBe(true)
+    expect(JSON.parse(JSON.stringify(operation))).toEqual({
+      kind: 'smart_rollup_add_messages',
+      message: ['aa']
+    })
+  })
+
   it('requires ordinary dense arrays with only indexed data properties', () => {
     const messages = (message: unknown) => ({ kind: 'smart_rollup_add_messages', message })
     const shadowed = Object.assign(['aa'], { map: null })
