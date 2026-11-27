@@ -84,6 +84,14 @@ it('skips both codec calls for a PUSH instruction at any depth', () => {
 })
 
 it('treats the PUSH opcode inside scalar data as ordinary bytes', () => {
+  for (const payload of ['05010000000143', '050a0000000143']) {
+    expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({
+      valid: true,
+      validation: 'canonical_micheline'
+    })
+  }
+  expect(unpackDataBytes).not.toHaveBeenCalled()
+  expect(packDataBytes).not.toHaveBeenCalled()
   const payload = '05020000000c0100000001430a0000000143'
   expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({
     valid: true,

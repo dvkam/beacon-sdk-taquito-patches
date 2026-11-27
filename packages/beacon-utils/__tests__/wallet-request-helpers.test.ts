@@ -336,7 +336,12 @@ describe('signing payload inspection', () => {
   it.each(['', 'hello', 'é', '🌍', '\uFEFFa'])(
     'packs scalar text identically to the codec for %j',
     (text) => {
-      expect(packMessageText(text)).toBe(packDataBytes({ string: text }).bytes)
+      const payload = packMessageText(text)
+      expect(payload).toBe(packDataBytes({ string: text }).bytes)
+      expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({
+        valid: true,
+        decodedText: text
+      })
     }
   )
 
@@ -438,7 +443,17 @@ describe('signing payload inspection', () => {
       valid: true,
       kind: 'micheline'
     })
-    for (const payload of ['05', '05010000000261', '050100000001ff', '05000700', '05008000']) {
+    for (const payload of [
+      '05',
+      '05010000000261',
+      '050100000001ff',
+      '0501000000016100',
+      '050100000002c0af',
+      '050100000003eda080',
+      '050100000004f4908080',
+      '05000700',
+      '05008000'
+    ]) {
       expect(inspectSignPayload(payload, SigningType.MICHELINE)).toMatchObject({ valid: false })
     }
   })
